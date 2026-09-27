@@ -1,11 +1,13 @@
 import http from "node:http";
 import { chromium } from "playwright";
 import { applyToJob, type ApplyInput } from "./application/apply-job.js";
+import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
 import { withApplySession, withHeadlessBrowser } from "./browser/session.js";
 import { removeOldScreenshots } from "./browser/screenshot.js";
 import { cvFileStatus, env } from "./config/env.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
 import { choosePersonaFromText } from "./cv/persona-from-text.js";
+import { todayCostSummary, withJobCost } from "./llm/cost-ledger.js";
 import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
 
@@ -22,6 +24,14 @@ const server = http.createServer(async (req, res) => {
       send(res, 401, { error: "unauthorized" });
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/quota")) {
+      send(res, 200, quotaSnapshot());
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/costs")) {
+      send(res, 200, todayCostSummary());
+      return;
+    }
     if (req.method === "POST" && req.url === "/apply") {
       if (busy) {
         send(res, 409, { status: "failed", submitted: false, confirmationDetected: false, notes: "Another application is already running." });
@@ -30,7 +40,35 @@ const server = http.createServer(async (req, res) => {
       busy = true;
       try {
         const input = parseApply(await readBody(req));
-        const outcome = await withApplySession((context) => applyToJob(context, input));
+        if (!quotaIsOpen()) {
+          const quota = quotaSnapshot();
+          send(res, 200, {
+            status: "quota_reached",
+            jobUrl: input.job.url,
+            submitted: false,
+            confirmationDetected: false,
+            llmCostUsd: 0,
+            quota,
+            notes: [
+              "result=quota_reached",
+              `daily_quota=${quota.counted}/${quota.limit}`,
+              "The daily limit is already used. This job was not opened.",
+            ].join("\n"),
+          });
+          return;
+        }
+        const tracked = await withJobCost(input.job.url, () => withApplySession((context) => applyToJob(context, input)));
+        rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
+        const quota = quotaSnapshot();
+        const outcome = tracked.result;
+        outcome.llmCostUsd = tracked.usd;
+        outcome.quota = quota;
+        outcome.notes = [
+          outcome.notes,
+          `llm_cost_usd=${tracked.usd}`,
+          `llm_calls=${tracked.calls}`,
+          `daily_quota=${quota.counted}/${quota.limit}`,
+        ].filter(Boolean).join("\n");
         send(res, 200, outcome);
       } finally {
         busy = false;
@@ -96,6 +134,9 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     browserOk,
     browserError,
     llmConfigured,
+    dailyApplyLimit: quotaSnapshot().limit,
+    dailyApplyCounted: quotaSnapshot().counted,
+    llmCostUsdToday: todayCostSummary().usd,
     browserPersistentProfile: env.browserPersistentProfile,
     browserApplyHeadless: env.browserApplyHeadless,
     browserUserDataDir: env.browserUserDataDir,

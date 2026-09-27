@@ -93,6 +93,9 @@ function mapKnown(label: string, type: string, ctx: FieldContext): FieldDecision
     return fill(candidate.github);
   }
   if (/portfolio|personal (site|website)|website|url/i.test(label) && !/linkedin|github/i.test(label)) {
+    if (!ctx.portfolioUrl) {
+      return { action: "blank" };
+    }
     return fill(ctx.portfolioUrl);
   }
   if (/city|town|עיר/i.test(label) && !/capacity/i.test(label)) {

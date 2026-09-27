@@ -1,8 +1,15 @@
 import { env } from "../config/env.js";
+import { recordModelCost } from "./cost-ledger.js";
 import { log } from "../logging/logger.js";
+import type { TokenUsage } from "./prices.js";
 
 type ChatResponse = {
   choices?: Array<{ message?: { content?: string } }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
   error?: { message?: string };
 };
 
@@ -13,20 +20,25 @@ export class LlmError extends Error {
   }
 }
 
-export async function completeJson(system: string, user: string, model = env.llmModel): Promise<unknown> {
+export async function completeJson(
+  system: string,
+  user: string,
+  model = env.llmModel,
+  purpose = "llm",
+): Promise<unknown> {
   try {
-    return await callModel(model, system, user);
+    return await callModel(model, system, user, purpose);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (model !== "gpt-5.6-luna" && /model|not found|does not exist/i.test(message)) {
       log("LLM_MODEL_FALLBACK", { from: model, to: "gpt-5.6-luna" });
-      return callModel("gpt-5.6-luna", system, user);
+      return callModel("gpt-5.6-luna", system, user, purpose);
     }
     throw error;
   }
 }
 
-async function callModel(model: string, system: string, user: string): Promise<unknown> {
+async function callModel(model: string, system: string, user: string, purpose: string): Promise<unknown> {
   const response = await fetch(`${env.llmBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -57,10 +69,20 @@ async function callModel(model: string, system: string, user: string): Promise<u
   if (!content) {
     throw new LlmError("LLM returned an empty message");
   }
+  const usage = tokenUsage(parsed);
+  const cost = recordModelCost({ model, purpose, usage });
+  log("LLM_COST", { model, purpose, usd: cost.usd, promptTokens: usage.promptTokens, completionTokens: usage.completionTokens });
   return parseJsonContent(content);
 }
 
 function parseJsonContent(content: string): unknown {
   const trimmed = content.trim().replace(/^```json\s*/i, "").replace(/```$/, "");
   return JSON.parse(trimmed) as unknown;
+}
+
+function tokenUsage(parsed: ChatResponse): TokenUsage {
+  const promptTokens = parsed.usage?.prompt_tokens ?? 0;
+  const cachedTokens = parsed.usage?.prompt_tokens_details?.cached_tokens ?? 0;
+  const completionTokens = parsed.usage?.completion_tokens ?? 0;
+  return { promptTokens, cachedTokens, completionTokens };
 }

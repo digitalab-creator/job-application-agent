@@ -8,7 +8,7 @@ export const roles: RoleRecord[] = [
   {
     id: "caseedge",
     company: "CaseEdge / Digitalab",
-    start: "Sep 2025",
+    start: "2025",
     end: "Present",
     titleVariants: [
       "Independent Applied AI Engineer & Product Builder",
@@ -21,6 +21,21 @@ export const roles: RoleRecord[] = [
     },
   },
   {
+    id: "boroda",
+    company: "Boroda Kaplan",
+    start: "2022",
+    end: "2024",
+    titleVariants: [
+      "AI & Backend Engineer / Solutions Architect and PPC Team Lead",
+      "PPC Team Lead & Marketing Technology Lead",
+    ],
+    defaultTitle: {
+      technical: "AI & Backend Engineer / Solutions Architect and PPC Team Lead",
+      marketing: "PPC Team Lead & Marketing Technology Lead",
+      hybrid: "PPC Team Lead & Marketing Technology Lead",
+    },
+  },
+  {
     id: "klogic",
     company: "K Logic",
     start: "2025",
@@ -30,21 +45,6 @@ export const roles: RoleRecord[] = [
       technical: "Media Innovation Specialist",
       marketing: "Media Innovation Specialist",
       hybrid: "Media Innovation Specialist",
-    },
-  },
-  {
-    id: "boroda",
-    company: "Boroda Kaplan",
-    start: "2022",
-    end: "2025",
-    titleVariants: [
-      "AI & Backend Engineer / Solutions Architect and PPC Team Lead",
-      "PPC Team Lead & Marketing Technology Lead",
-    ],
-    defaultTitle: {
-      technical: "AI & Backend Engineer / Solutions Architect and PPC Team Lead",
-      marketing: "PPC Team Lead & Marketing Technology Lead",
-      hybrid: "PPC Team Lead & Marketing Technology Lead",
     },
   },
   {
@@ -166,6 +166,14 @@ export const facts: Fact[] = [
     verified: true,
   },
   {
+    id: "caseedge-entity-matching",
+    roleId: "caseedge",
+    text: "Improved entity-matching accuracy from approximately 70% to 95% and reduced AI operating costs by 60–80% through caching and model selection.",
+    tags: ["ai", "ml", "optimization"],
+    personas: ["technical", "hybrid"],
+    verified: true,
+  },
+  {
     id: "klogic-pipelines",
     roleId: "klogic",
     text: "Built backend services, automation pipelines and AI-assisted workflows for paid-media analysis and optimization.",
@@ -210,14 +218,6 @@ export const facts: Fact[] = [
     roleId: "boroda",
     text: "Architected and built ROI Me / Budget Watch, an AI advertising ecosystem with 20+ microservices for analysis, monitoring and automated actions.",
     tags: ["ai", "backend", "microservices"],
-    personas: ["technical", "hybrid"],
-    verified: true,
-  },
-  {
-    id: "boroda-matching",
-    roleId: "boroda",
-    text: "Improved entity-matching accuracy from approximately 70% to 95% and reduced AI operating costs by 60–80% through caching and model selection.",
-    tags: ["ai", "ml", "optimization"],
     personas: ["technical", "hybrid"],
     verified: true,
   },

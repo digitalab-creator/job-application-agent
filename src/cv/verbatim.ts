@@ -1,6 +1,6 @@
 import type { CvDocument, Persona } from "../models/types.js";
 import { factById, roleById } from "../profile/facts.js";
-import { personaDefaults } from "./persona.js";
+import { personaDefaults, portfolioFor } from "./persona.js";
 
 /** CV made only from approved fact text. No model wording, so it cannot invent a claim. */
 export function buildVerbatim(persona: Persona): CvDocument {
@@ -11,6 +11,8 @@ export function buildVerbatim(persona: Persona): CvDocument {
     summaryFactIds: [defaults.summaryFactId],
     selectedSkills: [...defaults.skills],
     educationFactIds: [...defaults.educationFactIds],
+    includePortfolio: true,
+    portfolioKey: portfolioFor(persona),
     experience: Object.entries(defaults.roleFactIds).map(([roleId, factIds]) => {
       const role = roleById(roleId);
       if (!role) {

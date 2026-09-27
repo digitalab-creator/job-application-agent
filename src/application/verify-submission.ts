@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { thankYouMatch } from "./thank-you.js";
 
 export async function detectCaptcha(page: Page): Promise<boolean> {
   const widgets = await page.locator('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha').count();
@@ -18,23 +19,26 @@ export async function detectLoginWall(page: Page): Promise<boolean> {
   return /sign in|log in|create an account|create your account/i.test(text);
 }
 
-export async function detectConfirmation(page: Page): Promise<boolean> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => undefined);
-    if (await detectConfirmationOnce(page)) {
-      return true;
+export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const fraction = attempt / 9;
+    await page.evaluate((y) => window.scrollTo(0, document.body.scrollHeight * y), fraction).catch(() => undefined);
+    const phrase = await confirmationPhrase(page);
+    if (phrase) {
+      return { ok: true, phrase };
     }
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1200);
   }
-  return false;
+  return { ok: false, phrase: "" };
 }
 
-async function detectConfirmationOnce(page: Page): Promise<boolean> {
-  const visible = await page.locator("body").innerText().catch(() => "");
-  const html = await page.content().catch(() => "");
-  const text = `${visible}\n${html}`;
-  const url = page.url();
-  const saidThanks = /thank you|thanks for applying|your application has been submitted|application (has been |was )?(received|submitted)|successfully submitted|we (have )?received your application|your application has been sent/i.test(text);
-  const urlSays = /thank|confirmation|application-submitted|success/i.test(url);
-  return saidThanks || urlSays;
+async function confirmationPhrase(page: Page): Promise<string | null> {
+  const chunks: string[] = [page.url()];
+  chunks.push(await page.locator("body").innerText().catch(() => ""));
+  for (const frame of page.frames()) {
+    chunks.push(await frame.locator("body").innerText().catch(() => ""));
+  }
+  const heading = await page.locator("h1, h2, [role='alert'], [class*='thank'], [class*='success']").allInnerTexts().catch(() => []);
+  chunks.push(...heading);
+  return thankYouMatch(chunks.join("\n"), page.url());
 }

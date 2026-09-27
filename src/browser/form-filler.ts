@@ -183,21 +183,27 @@ function digitsOnly(value: string): string {
   return match?.[0] ?? value;
 }
 
-export async function uploadResume(scope: FormScope, cvPath: string): Promise<boolean> {
-  const input = scope.locator('input[type="file"]').first();
-  if (await input.count() === 0) {
-    return false;
+export async function uploadResume(page: Page, cvPath: string): Promise<boolean> {
+  const scopes: FormScope[] = [page, ...page.frames()];
+  for (const scope of scopes) {
+    const inputs = scope.locator('input[type="file"]');
+    const count = await inputs.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index);
+      try {
+        await input.setInputFiles(cvPath);
+      } catch (error) {
+        log("CV_UPLOAD_RETRY", { message: error instanceof Error ? error.message : "setInputFiles_failed" });
+        continue;
+      }
+      const attached = await input.evaluate((element) => (element as HTMLInputElement).files?.[0]?.name ?? "").catch(() => "");
+      if (attached.toLowerCase().endsWith(".pdf")) {
+        log("CV_UPLOADED", { file: attached });
+        return true;
+      }
+    }
   }
-  await input.setInputFiles(cvPath);
-  const attached = await input.evaluate((element) => {
-    const file = (element as HTMLInputElement).files?.[0];
-    return file?.name ?? "";
-  });
-  const ok = attached.toLowerCase().endsWith(".pdf");
-  if (ok) {
-    log("CV_UPLOADED", { file: attached });
-  }
-  return ok;
+  return false;
 }
 
 export async function richestFormScope(page: Page): Promise<FormScope> {
