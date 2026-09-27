@@ -1,0 +1,37 @@
+import type { CvDocument, Persona } from "../models/types.js";
+import { factById, roleById } from "../profile/facts.js";
+import { personaDefaults } from "./persona.js";
+
+/** CV made only from approved fact text. No model wording, so it cannot invent a claim. */
+export function buildVerbatim(persona: Persona): CvDocument {
+  const defaults = personaDefaults[persona];
+  return {
+    headlineId: defaults.headlineId,
+    summary: textOf(defaults.summaryFactId),
+    summaryFactIds: [defaults.summaryFactId],
+    selectedSkills: [...defaults.skills],
+    educationFactIds: [...defaults.educationFactIds],
+    experience: Object.entries(defaults.roleFactIds).map(([roleId, factIds]) => {
+      const role = roleById(roleId);
+      if (!role) {
+        throw new Error(`Unknown role in persona defaults: ${roleId}`);
+      }
+      return {
+        roleId,
+        title: role.defaultTitle[persona],
+        bullets: factIds.map((id) => ({
+          factIds: [id],
+          text: textOf(id),
+        })),
+      };
+    }),
+  };
+}
+
+function textOf(id: string): string {
+  const fact = factById(id);
+  if (!fact) {
+    throw new Error(`Missing fact ${id}`);
+  }
+  return fact.text;
+}

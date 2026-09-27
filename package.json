@@ -1,0 +1,19 @@
+{
+  "name": "job-application-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "node --test dist/cv/validate.test.js dist/application/classify-page.test.js dist/application/field-map.test.js"
+  },
+  "dependencies": {
+    "playwright": "1.55.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3"
+  }
+}

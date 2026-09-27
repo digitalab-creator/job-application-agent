@@ -1,0 +1,25 @@
+services:
+  job-application-agent:
+    build: .
+    container_name: job-application-agent
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3099:3000"
+    env_file:
+      - .env
+    shm_size: "1gb"
+    mem_limit: 3g
+    volumes:
+      - ./data/cv:/app/data/cv:ro
+      - ./data/ledger:/app/data/ledger
+      - ./generated-cv:/app/generated-cv
+      - ./screenshots:/app/screenshots
+      - ./audit:/app/audit
+      - ./data/browser-profile:/app/data/browser-profile
+    networks:
+      - n8n_net
+
+networks:
+  n8n_net:
+    external: true
+    name: n8n_n8n_net
