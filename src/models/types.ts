@@ -31,6 +31,8 @@ export type CvRole = {
   bullets: CvBullet[];
 };
 
+export type PortfolioKey = "build" | "marketing" | "automation";
+
 export type CvDocument = {
   headlineId: "tech-full" | "marketing-full";
   summary: string;
@@ -38,13 +40,16 @@ export type CvDocument = {
   selectedSkills: string[];
   experience: CvRole[];
   educationFactIds: string[];
+  /** When false, omit portfolio from the PDF header and leave portfolio form fields blank. */
+  includePortfolio: boolean;
+  portfolioKey?: PortfolioKey;
 };
 
 export type CvSource = "generated" | "static_fallback";
 
 export type CvWording = "llm" | "verbatim";
 
-export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed";
+export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed" | "quota_reached";
 
 export type AnswerRecord = {
   question: string;
@@ -70,4 +75,6 @@ export type ApplicationResult = {
   notes: string;
   screenshots?: string[];
   answers?: AnswerRecord[];
+  llmCostUsd?: number;
+  quota?: { day: string; limit: number; counted: number; remaining: number };
 };

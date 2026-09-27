@@ -82,6 +82,13 @@ export function validateCv(doc: CvDocument, persona: Persona): ValidationResult 
     errors.push("Headline is not in the approved list.");
   }
 
+  if (doc.includePortfolio && !doc.portfolioKey) {
+    errors.push("portfolioKey is required when includePortfolio is true.");
+  }
+  if (!doc.includePortfolio && doc.portfolioKey) {
+    errors.push("portfolioKey must be omitted when includePortfolio is false.");
+  }
+
   checkProse(doc.summary, doc.summaryFactIds, persona, "summary", "summary", errors, factIds);
   if (!isExactFact(doc.summary, doc.summaryFactIds) && wordCount(doc.summary) > 120) {
     errors.push("Summary is longer than 120 words.");

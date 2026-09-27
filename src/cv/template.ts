@@ -1,10 +1,11 @@
 import { candidate } from "../config/candidate.js";
 import { HEADLINES, factById, roleById } from "../profile/facts.js";
 import type { CvDocument, Persona } from "../models/types.js";
-import { portfolioFor } from "./persona.js";
+import { formatRoleDateRange } from "./dates.js";
+import { portfolioUrlForDoc } from "./portfolio.js";
 
 export function renderCvHtml(doc: CvDocument, persona: Persona): string {
-  const portfolio = candidate.portfolio[portfolioFor(persona)];
+  const portfolioUrl = portfolioUrlForDoc(doc, persona);
   const roles = doc.experience.map((role) => {
     const record = roleById(role.roleId);
     if (!record) {
@@ -13,7 +14,7 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
     const bullets = role.bullets.map((bullet) => `<li>${escapeHtml(bullet.text)}</li>`).join("");
     return `<section>
       <h2>${escapeHtml(record.company)}</h2>
-      <p class="meta">${escapeHtml(role.title)} · ${escapeHtml(record.start)}–${escapeHtml(record.end)}</p>
+      <p class="meta">${escapeHtml(role.title)} · ${escapeHtml(formatRoleDateRange(record.start, record.end))}</p>
       <ul>${bullets}</ul>
     </section>`;
   }).join("");
@@ -39,7 +40,7 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
   <h1>${escapeHtml(candidate.fullName)}</h1>
   <p class="headline">${escapeHtml(HEADLINES[doc.headlineId])}</p>
   <p class="contact">${escapeHtml(candidate.location.city)}, ${escapeHtml(candidate.location.country)} · ${escapeHtml(candidate.phone.display)} · ${escapeHtml(candidate.email)}</p>
-  <p class="contact">LinkedIn: ${escapeHtml(candidate.linkedin)} · GitHub: ${escapeHtml(candidate.github)} · Portfolio: ${escapeHtml(portfolio)}</p>
+  <p class="contact">${contactLine(portfolioUrl)}</p>
   <h3>Summary</h3>
   <p>${escapeHtml(doc.summary)}</p>
   <h3>Skills</h3>
@@ -48,6 +49,14 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
   ${roles}
   ${education ? `<h3>Education</h3><ul>${education}</ul>` : ""}
 </body></html>`;
+}
+
+function contactLine(portfolioUrl: string): string {
+  const base = `LinkedIn: ${escapeHtml(candidate.linkedin)} · GitHub: ${escapeHtml(candidate.github)}`;
+  if (!portfolioUrl) {
+    return base;
+  }
+  return `${base} · Portfolio: ${escapeHtml(portfolioUrl)}`;
 }
 
 function escapeHtml(value: string): string {

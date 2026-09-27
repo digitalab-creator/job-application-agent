@@ -26,7 +26,7 @@ export async function answerFreeText(input: {
     persona: input.persona,
     jobDescription: input.jobText.slice(0, 4000),
     facts: allowed.map((fact) => ({ id: fact.id, text: fact.text })),
-  }));
+  }), undefined, "answer");
   const parsed = schema.safeParse(raw);
   if (!parsed.success || parsed.data.answer.trim().length < 20 || parsed.data.factIds.length === 0) {
     return null;

@@ -68,9 +68,9 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     summaryFactId: "summary-technical",
     skills: TECHNICAL_SKILLS,
     roleFactIds: {
-      caseedge: ["caseedge-production", "caseedge-stack", "caseedge-forecasting"],
+      caseedge: ["caseedge-production", "caseedge-stack", "caseedge-entity-matching", "caseedge-forecasting"],
+      boroda: ["boroda-platform", "boroda-adoption"],
       klogic: ["klogic-pipelines", "klogic-cellcom-tech"],
-      boroda: ["boroda-platform", "boroda-matching", "boroda-adoption"],
       fullpower: ["fullpower-build", "fullpower-combined"],
       independent: ["independent-agency", "independent-adtech"],
     },
@@ -82,8 +82,8 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     skills: MARKETING_SKILLS,
     roleFactIds: {
       caseedge: ["caseedge-advisory", "caseedge-campaigns", "caseedge-launched"],
-      klogic: ["klogic-cellcom-mkt", "klogic-workflows", "klogic-enterprise"],
       boroda: ["boroda-accounts", "boroda-watch-mkt", "boroda-cpa", "boroda-mentor"],
+      klogic: ["klogic-cellcom-mkt", "klogic-workflows", "klogic-enterprise"],
       fullpower: ["fullpower-paid", "fullpower-tracking", "fullpower-visibility"],
       independent: ["independent-acquisition", "independent-markets", "independent-specialized"],
     },
@@ -106,8 +106,8 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     ],
     roleFactIds: {
       caseedge: ["caseedge-production", "caseedge-stack", "caseedge-advisory"],
-      klogic: ["klogic-pipelines", "klogic-cellcom-mkt"],
       boroda: ["boroda-platform", "boroda-accounts"],
+      klogic: ["klogic-pipelines", "klogic-cellcom-mkt"],
       fullpower: ["fullpower-build", "fullpower-tracking"],
       independent: ["independent-acquisition", "independent-adtech"],
     },
@@ -135,7 +135,9 @@ export function choosePersona(role: string, category = ""): Persona | "needs_mod
   return "needs_model";
 }
 
-export function portfolioFor(persona: Persona): "build" | "marketing" | "automation" {
+export type PortfolioKey = "build" | "marketing" | "automation";
+
+export function portfolioFor(persona: Persona): PortfolioKey {
   if (persona === "marketing") {
     return "marketing";
   }

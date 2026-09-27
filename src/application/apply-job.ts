@@ -1,18 +1,18 @@
 import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
-import { candidate } from "../config/candidate.js";
 import { classifyJobPage } from "../application/classify-page.js";
 import { fillFields, readFields, richestFormScope, uploadResume } from "../browser/form-filler.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { saveScreenshot } from "../browser/screenshot.js";
 import { buildCvDocument, CvGenerationError, writeCvPdf } from "../cv/generate.js";
 import { choosePersonaFromText } from "../cv/persona-from-text.js";
-import { portfolioFor } from "../cv/persona.js";
+import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
 import { alreadySubmitted, rememberSubmission } from "./ledger.js";
+import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { detectCaptcha, detectConfirmation, detectLoginWall } from "./verify-submission.js";
 
@@ -53,13 +53,32 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   try {
     await openJob(page, input.job.url);
     log("JOB_OPENED", { url: page.url(), company: input.job.company, role: input.job.role });
+    const listingNote = await enterBestOpening(page, input.job.role, input.job.company);
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
+    if (listingNote?.blocked) {
+      const skipped = listingNote.outcome === "not_relevant";
+      return result(input, {
+        status: skipped ? "not_relevant" : "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "no_matching_opening",
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          skipped ? "result=not_relevant" : "result=review",
+          skipped ? "reason=no_good_match" : "blocker=no_matching_opening",
+          listingNote.line,
+          skipped ? "Nothing was submitted." : "",
+        ].filter(Boolean)),
+        screenshots,
+      });
+    }
     const bodyText = await page.locator("body").innerText();
+    const activeRole = listingNote?.title ?? input.job.role;
     const pageStatus = classifyJobPage({
       url: page.url(),
       title: await page.title(),
       text: bodyText,
-      role: input.job.role,
+      role: activeRole,
     });
     if (pageStatus === "CLOSED" || pageStatus === "NOT_FOUND") {
       log("JOB_CLOSED", { pageStatus });
@@ -79,7 +98,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         confirmationDetected: false,
         blocker: pageStatus.toLowerCase(),
         canonicalJobUrl: page.url(),
-        notes: lines(["result=review", `blocker=${pageStatus.toLowerCase()}`, "Live page was not a specific open job."]),
+        notes: lines(["result=review", `blocker=${pageStatus.toLowerCase()}`, listingNote?.line ?? "Live page was not a specific open job."]),
         screenshots,
       });
     }
@@ -96,11 +115,11 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
 
-    const persona = choosePersonaFromText(input.job.role, input.job.category ?? "", bodyText);
-    const salaryMonthly = chooseSalary(input.job.role, persona);
+    const persona = choosePersonaFromText(activeRole, input.job.category ?? "", bodyText);
+    const salaryMonthly = chooseSalary(activeRole, persona);
     let cv;
     try {
-      cv = await prepareCv(input, persona, bodyText, day, jobSlug);
+      cv = await prepareCv({ ...input, job: { ...input.job, role: activeRole } }, persona, bodyText, day, jobSlug);
     } catch (error) {
       const reason = error instanceof CvGenerationError ? error.message : "cv_generation_failed";
       log("CV_REJECTED", { reason, fatal: true });
@@ -176,11 +195,11 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       ctx: {
         persona,
         salaryMonthly,
-        portfolioUrl: candidate.portfolio[portfolioFor(persona)],
+        portfolioUrl: cv.portfolioUrl,
         euRole: /europe|eu\b|poland/i.test(bodyText),
       },
     });
-    const uploaded = await uploadResume(scope, cv.cvPath);
+    const uploaded = await uploadResume(page, cv.cvPath);
     if (!uploaded) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       return result(input, {
@@ -191,7 +210,8 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         persona,
         ...cv.publicFields,
         answers: filled.answers,
-        notes: lines(["result=review", "blocker=cv_upload_failed", "The PDF was not attached, so the form was not submitted."]),
+        notes: lines(["result=review", "blocker=cv_upload_failed", listingNote?.line ?? "", "The PDF was not attached, so the form was not submitted."].filter(Boolean)),
+        canonicalJobUrl: page.url(),
         screenshots,
       });
     }
@@ -253,8 +273,8 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     const confirmed = await detectConfirmation(page);
-    screenshots.push(await saveScreenshot(page, shotDir, confirmed ? "confirmation.png" : "blocker.png"));
-    if (!confirmed) {
+    screenshots.push(await saveScreenshot(page, shotDir, confirmed.ok ? "confirmation.png" : "blocker.png"));
+    if (!confirmed.ok) {
       return result(input, {
         status: "review",
         submitted: true,
@@ -296,7 +316,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         "ats=comeet",
         `salary_answer=${salaryMonthly}`,
         "confirmation=true",
-      ]),
+        `confirmation_text=${confirmed.phrase}`,
+        listingNote?.line ?? "",
+      ].filter(Boolean)),
       screenshots,
     });
   } finally {
@@ -315,6 +337,7 @@ async function prepareCv(
   cvSource: CvSource;
   wording: "llm";
   publicFields: Pick<ApplicationResult, "cvUsed" | "cvSource" | "cvWording" | "cvPath" | "factIds" | "ats">;
+  portfolioUrl: string;
 }> {
   const outputPath = `${env.generatedCvDir}/${day}/${jobSlug}-redacted-candidate.pdf`;
   const built = await buildCvDocument({
@@ -333,6 +356,7 @@ async function prepareCv(
     cvPath: outputPath,
     cvSource: "generated",
     wording: "llm",
+    portfolioUrl: portfolioUrlForDoc(built.doc, persona),
     publicFields: {
       cvUsed,
       cvSource: "generated",
@@ -388,6 +412,52 @@ function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): Ap
 
 function lines(parts: string[]): string {
   return parts.join("\n");
+}
+
+async function enterBestOpening(
+  page: Page,
+  role: string,
+  company: string,
+): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" } | null> {
+  if (await pageHasResumeField(page)) {
+    return null;
+  }
+  const openings = await listOpenings(page);
+  if (openings.length < 2) {
+    return null;
+  }
+  let chosen: Awaited<ReturnType<typeof chooseOpening>>;
+  try {
+    chosen = await chooseOpening({ targetRole: role, company, openings });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "listing_choice_failed";
+    log("LISTING_NO_MATCH", { company, targetRole: role, reason: message });
+    return { title: role, blocked: true, outcome: "review", line: `Could not judge the job list: ${message}` };
+  }
+  if (!chosen) {
+    return {
+      title: role,
+      blocked: true,
+      outcome: "not_relevant",
+      line: "The link opened a list of jobs. None was a good match, so no application was sent.",
+    };
+  }
+  await openChosen(page, chosen.job);
+  return {
+    title: chosen.job.title,
+    line: `listing_match=${chosen.job.title}\nlisting_reason=${chosen.reason}`,
+  };
+}
+
+async function pageHasResumeField(page: Page): Promise<boolean> {
+  const scopes = [page, ...page.frames()];
+  for (const scope of scopes) {
+    const count = await scope.locator('input[type="file"]').count().catch(() => 0);
+    if (count > 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function todayJerusalem(): string {
