@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+generated-cv/
+screenshots/
+audit/
+data/ledger/
+data/browser-profile/
+*.log
