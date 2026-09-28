@@ -206,5 +206,5 @@ function isDispreferredLocation(title: string, snippet: string): boolean {
   if (/\b(israel|tel aviv|tel-?aviv|raanana|netanya|hybrid|remote israel)\b/i.test(text)) {
     return false;
   }
-  return /\b(austin|mountain view|san francisco|iceland|warsaw|wrocław|poland|remote us|united states)\b/i.test(text);
+  return /\b(austin|mountain view|san francisco|nashville|iceland|warsaw|wrocław|krakow|poland|remote us|united states)\b/i.test(text);
 }
