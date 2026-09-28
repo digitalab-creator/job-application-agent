@@ -35,6 +35,19 @@ test("verbatim hybrid CV passes the truth gates", () => {
   assert.equal(result.ok, true, result.errors.join("\n"));
 });
 
+test("entity-matching text under Boroda is rejected", () => {
+  const doc = buildVerbatim("technical");
+  const boroda = doc.experience.find((item) => item.roleId === "boroda");
+  assert.ok(boroda);
+  boroda.bullets[0] = {
+    factIds: ["boroda-platform"],
+    text: "Improved entity-matching accuracy from approximately 70% to 95%.",
+  };
+  const result = validateCv(doc, "technical");
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.includes("caseedge") || error.includes("entity-matching")));
+});
+
 test("a bullet with no fact id is rejected", () => {
   const doc = buildVerbatim("technical");
   const role = doc.experience[0];

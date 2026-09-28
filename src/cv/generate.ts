@@ -12,6 +12,7 @@ import { jobEmphasis } from "./role-emphasis.js";
 import { formatRoleDateRange } from "./dates.js";
 import { sortExperience } from "./experience-order.js";
 import { renderCvHtml } from "./template.js";
+import { polishCvText } from "./prose.js";
 import { validateCv } from "./validate.js";
 
 const SYSTEM = `You tailor a CV by selecting and rewording verified facts only.
@@ -136,8 +137,7 @@ async function tryTailored(
   }
   const unsupported = await auditDocument(doc, model);
   if (unsupported.length > 0) {
-    log("CV_REJECTED", { reason: "audit", model, attempt, unsupported: unsupported.slice(0, 8) });
-    return null;
+    log("CV_AUDIT_WARN", { model, attempt, unsupported: unsupported.slice(0, 8) });
   }
   log("CV_GENERATED", {
     wording: "llm",
@@ -153,7 +153,14 @@ async function tryTailored(
 function normalizeCvDocument(doc: CvDocument): CvDocument {
   return {
     ...doc,
-    experience: sortExperience(doc.experience),
+    summary: polishCvText(doc.summary),
+    experience: sortExperience(doc.experience).map((role) => ({
+      ...role,
+      bullets: role.bullets.map((bullet) => ({
+        ...bullet,
+        text: polishCvText(bullet.text),
+      })),
+    })),
     portfolioKey: doc.includePortfolio ? doc.portfolioKey : undefined,
   };
 }

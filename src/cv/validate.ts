@@ -1,5 +1,6 @@
-import { HEADLINES, SKILLS, factById, roleById } from "../profile/facts.js";
+import { HEADLINES, SKILLS, factById, roleById, roles } from "../profile/facts.js";
 import type { CvDocument, Persona } from "../models/types.js";
+import { roleSignatureErrors } from "./role-signatures.js";
 
 const GUARDED_TERMS = [
   "Kubernetes",
@@ -58,6 +59,7 @@ const GUARDED_TERMS = [
   "Full Power",
   "Boroda",
   "K Logic",
+  "entity-matching",
 ];
 
 const SKILL_SET = new Set<string>(SKILLS);
@@ -94,8 +96,14 @@ export function validateCv(doc: CvDocument, persona: Persona): ValidationResult 
     errors.push("Summary is longer than 120 words.");
   }
 
-  if (doc.experience.length < 3) {
-    errors.push("CV must include at least 3 roles.");
+  if (doc.experience.length < roles.length) {
+    errors.push(`CV must include all ${roles.length} roles from the master list.`);
+  }
+  const seenRoles = new Set(doc.experience.map((item) => item.roleId));
+  for (const master of roles) {
+    if (!seenRoles.has(master.id)) {
+      errors.push(`CV is missing required role: ${master.company}.`);
+    }
   }
 
   for (const skill of doc.selectedSkills) {
@@ -117,7 +125,10 @@ export function validateCv(doc: CvDocument, persona: Persona): ValidationResult 
       errors.push(`${record.company} must have 1 to 5 bullets.`);
     }
     role.bullets.forEach((bullet, index) => {
-      checkProse(bullet.text, bullet.factIds, persona, role.roleId, `${record.company} bullet ${index + 1}`, errors, factIds);
+      const label = `${record.company} bullet ${index + 1}`;
+      checkProse(bullet.text, bullet.factIds, persona, role.roleId, label, errors, factIds);
+      errors.push(...roleSignatureErrors(role.roleId, bullet.text, label));
+      checkCitationAnchor(bullet.text, bullet.factIds, label, errors);
       if (!isExactFact(bullet.text, bullet.factIds) && wordCount(bullet.text) > 60) {
         errors.push(`${record.company} bullet ${index + 1} is longer than 60 words.`);
       }
@@ -218,6 +229,48 @@ function wordCount(text: string): number {
 
 function isExactFact(text: string, ids: string[]): boolean {
   return ids.length === 1 && factById(ids[0])?.text === text;
+}
+
+/** Reject bullets that cite facts but read like a different claim (e.g. CaseEdge metrics under Boroda). */
+function checkCitationAnchor(text: string, citedIds: string[], label: string, errors: string[]): void {
+  if (citedIds.length === 0 || isExactFact(text, citedIds)) {
+    return;
+  }
+  const support = citedIds.map((id) => factById(id)?.text ?? "").join(" ");
+  if (!support.trim()) {
+    return;
+  }
+  const hasSignal = /\d/.test(text) || GUARDED_TERMS.some((term) => mentions(text, term));
+  if (!hasSignal) {
+    return;
+  }
+  const score = tokenOverlap(text, support);
+  if (score < 0.22) {
+    errors.push(`${label} is not anchored to its cited facts (overlap ${(score * 100).toFixed(0)}%).`);
+  }
+}
+
+function tokenOverlap(left: string, right: string): number {
+  const tokens = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .split(/\s+/)
+        .filter((word) => word.length > 3),
+    );
+  const a = tokens(left);
+  const b = tokens(right);
+  if (a.size === 0) {
+    return 1;
+  }
+  let shared = 0;
+  for (const word of a) {
+    if (b.has(word)) {
+      shared += 1;
+    }
+  }
+  return shared / a.size;
 }
 
 export function renderedFactIds(doc: CvDocument): string[] {
