@@ -3,12 +3,14 @@ import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import type { RawBoardJob } from "./scan-boards.js";
 import { sheetCategoryFromDiscovery } from "./category-map.js";
+import { isDiscoveryLocationEligible } from "./location-eligibility.js";
 
 const SYSTEM = `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
 Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"AI|Growth|Hybrid|Other","whyItFits":"one sentence","relevant":true}]}
 category: AI = engineering/product AI roles; Growth = marketing, PPC, growth, performance; Hybrid = mixed; Other = adjacent but still plausible.
 Target mix over time: roughly 65% AI and 35% Growth — prefer labeling true growth/performance roles as Growth, not AI.
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
+relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
 Do not invent candidate facts. Base only on title and snippet.`;
 
 const schema = z.object({
@@ -60,15 +62,18 @@ export async function scoreDiscoveryJobs(
     if (!row.relevant || row.matchScore < 55) {
       continue;
     }
-    const job = openings[row.index];
-    if (!job) {
+    const opening = openings[row.index];
+    if (!opening) {
+      continue;
+    }
+    if (!isDiscoveryLocationEligible(opening.title, opening.snippet, opening.href)) {
       continue;
     }
     out.push({
-      uniqueKey: uniqueKeyForUrl(job.href),
-      role: job.title,
+      uniqueKey: uniqueKeyForUrl(opening.href),
+      role: opening.title,
       company,
-      url: job.href,
+      url: opening.href,
       matchScore: Math.round(row.matchScore),
       category: sheetCategoryFromDiscovery(row.category),
       whyItFits: row.whyItFits,

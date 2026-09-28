@@ -128,6 +128,7 @@ export async function runDiscovery(input: {
       `llm_cost_usd=${tracked.usd}`,
       `monthly_budget_ils=${budgetSnapshot().spentIls}/${budgetSnapshot().limitIls}`,
       mixReport,
+      "location_gate=israel_or_remote_from_israel",
     ].join("\n"),
   };
 }
