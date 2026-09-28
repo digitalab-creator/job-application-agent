@@ -2,10 +2,13 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import type { RawBoardJob } from "./scan-boards.js";
+import { sheetCategoryFromDiscovery } from "./category-map.js";
 
-const SYSTEM = `You score job openings for Example Operator (AI, growth, full-stack, performance marketing).
+const SYSTEM = `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
 Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"AI|Growth|Hybrid|Other","whyItFits":"one sentence","relevant":true}]}
-matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, non-tech with no growth angle).
+category: AI = engineering/product AI roles; Growth = marketing, PPC, growth, performance; Hybrid = mixed; Other = adjacent but still plausible.
+Target mix over time: roughly 65% AI and 35% Growth — prefer labeling true growth/performance roles as Growth, not AI.
+matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 Do not invent candidate facts. Base only on title and snippet.`;
 
 const schema = z.object({
@@ -63,9 +66,9 @@ export async function scoreDiscoveryJobs(
       company,
       url: job.href,
       matchScore: Math.round(row.matchScore),
-      category: row.category,
+      category: sheetCategoryFromDiscovery(row.category),
       whyItFits: row.whyItFits,
-      source: "comeet_board",
+      source: "n8n_discover",
     });
   }
   return out;
