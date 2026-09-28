@@ -1,3 +1,4 @@
+import { isDiscoveryLocationEligible } from "./location-eligibility.js";
 import type { ScoredDiscoveryJob } from "./score-jobs.js";
 
 export type QueueSide = "tech" | "marketing" | "other";
@@ -114,11 +115,11 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
 }
 
 export function passesDiscoveryQuality(job: ScoredDiscoveryJob, policy: RebalancePolicy): boolean {
-  if (job.matchScore < policy.baseMinScore) {
+  if (!isDiscoveryLocationEligible(job.role, job.whyItFits, job.url)) {
     return false;
   }
-  if (isDispreferredLocation(job.role, job.whyItFits)) {
-    return job.matchScore >= policy.exceptionalTechMin;
+  if (job.matchScore < policy.baseMinScore) {
+    return false;
   }
   const side = categorySide(job.category);
   if (side === "marketing" || side === "other") {
@@ -198,13 +199,4 @@ export function formatMixReport(input: {
 function effectiveMarketingScore(job: ScoredDiscoveryJob): number {
   const boost = MARKETING_PRIORITY.get(job.category) ?? 0;
   return job.matchScore + boost;
-}
-
-/** Obvious non-IL postings on Comeet — do not relax score floor for ratio. */
-function isDispreferredLocation(title: string, snippet: string): boolean {
-  const text = `${title} ${snippet}`;
-  if (/\b(israel|tel aviv|tel-?aviv|raanana|netanya|hybrid|remote israel)\b/i.test(text)) {
-    return false;
-  }
-  return /\b(austin|mountain view|san francisco|nashville|iceland|warsaw|wrocław|krakow|poland|remote us|united states)\b/i.test(text);
 }
