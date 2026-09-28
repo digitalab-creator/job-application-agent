@@ -49,7 +49,7 @@ export type CvSource = "generated" | "static_fallback";
 
 export type CvWording = "llm" | "verbatim";
 
-export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed" | "quota_reached";
+export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed" | "quota_reached" | "budget_reached";
 
 export type AnswerRecord = {
   question: string;
@@ -77,4 +77,11 @@ export type ApplicationResult = {
   answers?: AnswerRecord[];
   llmCostUsd?: number;
   quota?: { day: string; limit: number; counted: number; remaining: number };
+  budget?: {
+    month: string;
+    limitIls: number;
+    spentIls: number;
+    remainingIls: number;
+    open: boolean;
+  };
 };

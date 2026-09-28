@@ -17,7 +17,7 @@ type QuotaRow = {
 
 /** A removed or missing job must not use a daily slot. Every other finished attempt does. */
 export function countsTowardDailyLimit(status: string): boolean {
-  return status !== "closed" && status !== "quota_reached";
+  return status !== "closed" && status !== "quota_reached" && status !== "budget_reached";
 }
 
 export function dailyApplyLimit(): number {
