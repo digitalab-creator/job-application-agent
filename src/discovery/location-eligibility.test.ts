@@ -38,3 +38,17 @@ test("Israel in Comeet URL query is eligible", () => {
 test("title without location markers stays eligible", () => {
   assert.equal(isDiscoveryLocationEligible("Platform Engineer", "Comeet posting"), true);
 });
+
+test("foreign city in the title stays ineligible even if the description mentions Tel Aviv", () => {
+  assert.equal(
+    isDiscoveryLocationEligible(
+      "Data Science Team Lead Warsaw Full-time",
+      "We also have an office in Tel Aviv",
+    ),
+    false,
+  );
+  assert.equal(
+    isDiscoveryLocationEligible("Content Marketing Strategist Mountain View, CA Full-time", ""),
+    false,
+  );
+});

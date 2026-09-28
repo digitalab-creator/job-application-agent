@@ -49,7 +49,7 @@ export type CvSource = "generated" | "static_fallback";
 
 export type CvWording = "llm" | "verbatim";
 
-export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed" | "quota_reached" | "budget_reached";
+export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed" | "quota_reached" | "budget_reached" | "already_submitted" | "location_ineligible";
 
 export type AnswerRecord = {
   question: string;
