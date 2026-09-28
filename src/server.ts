@@ -7,7 +7,9 @@ import { removeOldScreenshots } from "./browser/screenshot.js";
 import { cvFileStatus, env } from "./config/env.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
 import { choosePersonaFromText } from "./cv/persona-from-text.js";
-import { todayCostSummary, withJobCost } from "./llm/cost-ledger.js";
+import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "./budget/monthly-budget.js";
+import { runDiscovery } from "./discovery/run-discovery.js";
+import { recordExternalSpend, todayCostSummary, withJobCost } from "./llm/cost-ledger.js";
 import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
 
@@ -28,8 +30,55 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, quotaSnapshot());
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/budget")) {
+      recordPlatformAllocationIfNeeded();
+      send(res, 200, budgetSnapshot());
+      return;
+    }
     if (req.method === "GET" && req.url?.startsWith("/costs")) {
       send(res, 200, todayCostSummary());
+      return;
+    }
+    if (req.method === "POST" && req.url === "/costs/record") {
+      recordPlatformAllocationIfNeeded();
+      const body = await readBody(req) as {
+        source?: string;
+        usd?: number;
+        ils?: number;
+        label?: string;
+        note?: string;
+      };
+      const source = body.source === "discovery" || body.source === "external" || body.source === "platform"
+        ? body.source
+        : "external";
+      const rate = budgetSnapshot().usdIlsRate;
+      const usd = typeof body.usd === "number" && Number.isFinite(body.usd) ? body.usd : 0;
+      const ils = typeof body.ils === "number" && Number.isFinite(body.ils)
+        ? body.ils
+        : usd * rate;
+      if (ils <= 0) {
+        send(res, 400, { error: "Provide a positive ils or usd amount." });
+        return;
+      }
+      recordExternalSpend({
+        month: budgetSnapshot().month,
+        source,
+        label: body.label?.trim() || "n8n_manual",
+        ils,
+        usd,
+        note: body.note?.trim() || "",
+      });
+      send(res, 200, budgetSnapshot());
+      return;
+    }
+    if (req.method === "POST" && req.url === "/discover/scan") {
+      recordPlatformAllocationIfNeeded();
+      const body = await readBody(req) as { existingUrls?: string[] };
+      const existingUrls = Array.isArray(body.existingUrls)
+        ? body.existingUrls.filter((url) => typeof url === "string")
+        : [];
+      const result = await runDiscovery({ existingUrls });
+      send(res, 200, result);
       return;
     }
     if (req.method === "POST" && req.url === "/apply") {
@@ -40,6 +89,24 @@ const server = http.createServer(async (req, res) => {
       busy = true;
       try {
         const input = parseApply(await readBody(req));
+        recordPlatformAllocationIfNeeded();
+        if (!budgetIsOpen()) {
+          const budget = budgetSnapshot();
+          send(res, 200, {
+            status: "budget_reached",
+            jobUrl: input.job.url,
+            submitted: false,
+            confirmationDetected: false,
+            llmCostUsd: 0,
+            budget: compactBudget(budget),
+            notes: [
+              "result=budget_reached",
+              `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
+              "The shared monthly budget is exhausted. This job was not opened.",
+            ].join("\n"),
+          });
+          return;
+        }
         if (!quotaIsOpen()) {
           const quota = quotaSnapshot();
           send(res, 200, {
@@ -60,14 +127,17 @@ const server = http.createServer(async (req, res) => {
         const tracked = await withJobCost(input.job.url, () => withApplySession((context) => applyToJob(context, input)));
         rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
         const quota = quotaSnapshot();
+        const budget = budgetSnapshot();
         const outcome = tracked.result;
         outcome.llmCostUsd = tracked.usd;
         outcome.quota = quota;
+        outcome.budget = compactBudget(budget);
         outcome.notes = [
           outcome.notes,
           `llm_cost_usd=${tracked.usd}`,
           `llm_calls=${tracked.calls}`,
           `daily_quota=${quota.counted}/${quota.limit}`,
+          `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
         ].filter(Boolean).join("\n");
         send(res, 200, outcome);
       } finally {
@@ -127,6 +197,8 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     browserError = error instanceof Error ? error.message : "browser_failed";
   }
   const llmConfigured = env.llmApiKey.length > 10;
+  recordPlatformAllocationIfNeeded();
+  const budget = budgetSnapshot();
   return {
     ok: files.technical && files.marketing && browserOk && llmConfigured,
     technicalCv: files.technical,
@@ -137,6 +209,9 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     dailyApplyLimit: quotaSnapshot().limit,
     dailyApplyCounted: quotaSnapshot().counted,
     llmCostUsdToday: todayCostSummary().usd,
+    monthlyBudgetLimitIls: budget.limitIls,
+    monthlyBudgetSpentIls: budget.spentIls,
+    monthlyBudgetRemainingIls: budget.remainingIls,
     browserPersistentProfile: env.browserPersistentProfile,
     browserApplyHeadless: env.browserApplyHeadless,
     browserUserDataDir: env.browserUserDataDir,
@@ -190,6 +265,16 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
     });
     req.on("error", reject);
   });
+}
+
+function compactBudget(budget: ReturnType<typeof budgetSnapshot>): ApplicationResult["budget"] {
+  return {
+    month: budget.month,
+    limitIls: budget.limitIls,
+    spentIls: budget.spentIls,
+    remainingIls: budget.remainingIls,
+    open: budget.open,
+  };
 }
 
 function send(res: http.ServerResponse, status: number, payload: unknown): void {

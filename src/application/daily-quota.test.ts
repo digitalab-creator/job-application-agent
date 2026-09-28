@@ -8,6 +8,7 @@ import { countsTowardDailyLimit, quotaSnapshot, rememberQuotaUse } from "./daily
 test("a missing job does not use a daily slot", () => {
   assert.equal(countsTowardDailyLimit("closed"), false);
   assert.equal(countsTowardDailyLimit("quota_reached"), false);
+  assert.equal(countsTowardDailyLimit("budget_reached"), false);
   assert.equal(countsTowardDailyLimit("applied"), true);
   assert.equal(countsTowardDailyLimit("review"), true);
   assert.equal(countsTowardDailyLimit("not_relevant"), true);

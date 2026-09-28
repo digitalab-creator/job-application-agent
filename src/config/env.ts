@@ -35,6 +35,8 @@ export const env = {
   browserUserDataDir: optional("BROWSER_USER_DATA_DIR", "/app/data/browser-profile"),
   browserSlowMoMs: Number(optional("BROWSER_SLOW_MO_MS", "0")),
   browserTimezone: optional("BROWSER_TIMEZONE", "Asia/Jerusalem"),
+  discoveryMaxJobsPerBoard: Math.max(1, Math.floor(Number(optional("DISCOVERY_MAX_JOBS_PER_BOARD", "12")))),
+  discoveryMaxJobsPerRun: Math.max(1, Math.floor(Number(optional("DISCOVERY_MAX_JOBS_PER_RUN", "20")))),
 };
 
 export function cvFileStatus(): { technical: boolean; marketing: boolean } {
