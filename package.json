@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "node --test dist/cv/*.test.js dist/application/*.test.js dist/llm/*.test.js dist/budget/*.test.js"
+    "test": "node --test dist/cv/*.test.js dist/application/*.test.js dist/discovery/*.test.js dist/llm/*.test.js dist/budget/*.test.js"
   },
   "dependencies": {
     "playwright": "1.55.1",

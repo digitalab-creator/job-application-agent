@@ -73,11 +73,23 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && req.url === "/discover/scan") {
       recordPlatformAllocationIfNeeded();
-      const body = await readBody(req) as { existingUrls?: string[] };
+      const body = await readBody(req) as {
+        existingUrls?: string[];
+        newQueueStats?: { tech?: number; marketing?: number; total?: number; techPct?: number };
+      };
       const existingUrls = Array.isArray(body.existingUrls)
         ? body.existingUrls.filter((url) => typeof url === "string")
         : [];
-      const result = await runDiscovery({ existingUrls });
+      const stats = body.newQueueStats;
+      const newQueueStats = stats && typeof stats.techPct === "number"
+        ? {
+            tech: Number(stats.tech) || 0,
+            marketing: Number(stats.marketing) || 0,
+            total: Number(stats.total) || 0,
+            techPct: stats.techPct,
+          }
+        : undefined;
+      const result = await runDiscovery({ existingUrls, newQueueStats });
       send(res, 200, result);
       return;
     }

@@ -35,6 +35,7 @@ export type ScoredDiscoveryJob = {
 export async function scoreDiscoveryJobs(
   boardUrl: string,
   openings: RawBoardJob[],
+  scoringBias: "marketing" | "balanced" = "balanced",
 ): Promise<ScoredDiscoveryJob[]> {
   if (openings.length === 0) {
     return [];
@@ -46,7 +47,10 @@ export async function scoreDiscoveryJobs(
     snippet: job.snippet,
     url: job.href,
   }));
-  const raw = await completeJson(SYSTEM, JSON.stringify({ company, openings: payload }), env.llmModel, "discovery");
+  const biasLine = scoringBias === "marketing"
+    ? "Queue is tech-heavy: label true growth/performance/PPC roles as Growth (not AI). Be strict on pure engineering roles."
+    : "Balance AI and Growth labels honestly.";
+  const raw = await completeJson(SYSTEM, JSON.stringify({ company, scoringBias: biasLine, openings: payload }), env.llmModel, "discovery");
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     return [];
