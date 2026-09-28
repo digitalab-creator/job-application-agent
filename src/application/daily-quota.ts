@@ -21,9 +21,9 @@ export function countsTowardDailyLimit(status: string): boolean {
 }
 
 export function dailyApplyLimit(): number {
-  const parsed = Number(process.env.DAILY_APPLY_LIMIT ?? "10");
+  const parsed = Number(process.env.DAILY_APPLY_LIMIT ?? "20");
   if (!Number.isFinite(parsed) || parsed < 1) {
-    return 10;
+    return 20;
   }
   return Math.floor(parsed);
 }
