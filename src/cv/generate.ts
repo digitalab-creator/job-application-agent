@@ -13,6 +13,7 @@ import { formatRoleDateRange } from "./dates.js";
 import { sortExperience } from "./experience-order.js";
 import { renderCvHtml } from "./template.js";
 import { polishCvText } from "./prose.js";
+import { repairCvDraft } from "./repair-draft.js";
 import { validateCv } from "./validate.js";
 
 const SYSTEM = `You tailor a CV by selecting and rewording verified facts only.
@@ -22,6 +23,8 @@ Every bullet must include factIds that support that wording. Each bullet factIds
 Match the job emphasis: for backend/AI roles, do not lead with PPC campaign management.
 Decide includePortfolio: true when a portfolio link helps (product, full-stack, growth, martech, creative); false for enterprise consulting, big-four, pure backend/infra, security, or roles that expect GitHub over a marketing site.
 When includePortfolio is true, set portfolioKey to build (engineering/product), marketing (PPC/performance), or automation (martech/workflows).
+When includePortfolio is false, omit portfolioKey. Never send null.
+Every experience item must include roleId copied from roles[].id, in the same order as roles[].
 Return JSON only with keys: headlineId, summary, summaryFactIds, selectedSkills, educationFactIds, experience, includePortfolio, portfolioKey.`;
 
 const cvSchema = z.object({
@@ -39,7 +42,7 @@ const cvSchema = z.object({
     })).min(1).max(5),
   })).min(3),
   includePortfolio: z.boolean(),
-  portfolioKey: z.enum(["build", "marketing", "automation"]).optional(),
+  portfolioKey: z.enum(["build", "marketing", "automation"]).nullish(),
 });
 
 export class CvGenerationError extends Error {
@@ -90,7 +93,7 @@ async function tryTailored(
   const emphasis = jobEmphasis(input.role, input.jobText, input.persona);
   const allowedFacts = facts.filter((fact) => fact.personas.includes(input.persona) || fact.personas.includes("both"));
   const repair = attempt > 1
-    ? "Previous JSON failed validation. Fix fact_ids, titles, and schema. Keep job emphasis."
+    ? "Previous JSON failed validation. Every experience item needs roleId from roles[].id. portfolioKey must be build, marketing, automation, or omitted — never null. Keep job emphasis."
     : "";
   const raw = await completeJson(SYSTEM, JSON.stringify({
     persona: input.persona,
@@ -124,12 +127,15 @@ async function tryTailored(
       repair,
     ],
   }), model, "cv");
-  const parsed = cvSchema.safeParse(raw);
+  const parsed = cvSchema.safeParse(repairCvDraft(raw));
   if (!parsed.success) {
     log("CV_REJECTED", { reason: "schema", model, attempt, issues: parsed.error.issues.slice(0, 4) });
     return null;
   }
-  const doc = normalizeCvDocument(parsed.data);
+  const doc = normalizeCvDocument({
+    ...parsed.data,
+    portfolioKey: parsed.data.portfolioKey ?? undefined,
+  });
   const validation = validateCv(doc, input.persona);
   if (!validation.ok) {
     log("CV_REJECTED", { reason: "gates", model, attempt, errors: validation.errors.slice(0, 8) });
@@ -161,7 +167,7 @@ function normalizeCvDocument(doc: CvDocument): CvDocument {
         text: polishCvText(bullet.text),
       })),
     })),
-    portfolioKey: doc.includePortfolio ? doc.portfolioKey : undefined,
+    portfolioKey: doc.includePortfolio && doc.portfolioKey ? doc.portfolioKey : undefined,
   };
 }
 

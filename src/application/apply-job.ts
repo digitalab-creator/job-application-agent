@@ -3,6 +3,7 @@ import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
 import { classifyJobPage } from "../application/classify-page.js";
 import { fillFields, readFields, richestFormScope, uploadResume } from "../browser/form-filler.js";
+import { submitApplication } from "../browser/submit-application.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { saveScreenshot } from "../browser/screenshot.js";
 import { buildCvDocument, CvGenerationError, writeCvPdf } from "../cv/generate.js";
@@ -14,6 +15,7 @@ import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
 import { alreadySubmitted, rememberSubmission } from "./ledger.js";
 import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
+import { isDiscoveryLocationEligible } from "../discovery/location-eligibility.js";
 import { detectCaptcha, detectConfirmation, detectLoginWall } from "./verify-submission.js";
 
 export type ApplyInput = {
@@ -38,7 +40,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   const screenshots: string[] = [];
   if (input.submit && !input.ignoreLedger && alreadySubmitted(input.job.url)) {
     return result(input, {
-      status: "review",
+      status: "already_submitted",
       submitted: false,
       confirmationDetected: false,
       blocker: "already_submitted",
@@ -56,6 +58,16 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     const listingNote = await enterBestOpening(page, input.job.role, input.job.company);
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
     if (listingNote?.blocked) {
+      if (listingNote.outcome === "location_ineligible") {
+        return result(input, {
+          status: "location_ineligible",
+          submitted: false,
+          confirmationDetected: false,
+          canonicalJobUrl: page.url(),
+          notes: lines(["result=not_relevant", "reason=location_ineligible", listingNote.line, "Nothing was submitted."]),
+          screenshots,
+        });
+      }
       const skipped = listingNote.outcome === "not_relevant";
       return result(input, {
         status: skipped ? "not_relevant" : "review",
@@ -88,6 +100,21 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         confirmationDetected: false,
         canonicalJobUrl: page.url(),
         notes: lines(["result=closed", "reason=job_removed", "Live check: job no longer available."]),
+        screenshots,
+      });
+    }
+    if (!isDiscoveryLocationEligible(activeRole, "", page.url())) {
+      log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url() });
+      return result(input, {
+        status: "location_ineligible",
+        submitted: false,
+        confirmationDetected: false,
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=not_relevant",
+          "reason=location_ineligible",
+          "This role is not in Israel and does not say remote from Israel. Nothing was submitted.",
+        ]),
         screenshots,
       });
     }
@@ -244,8 +271,28 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
 
     await humanPause(page, 800, 1600);
-    await clickSubmit(page, scope);
-    log("SUBMIT_CLICKED", { url: page.url() });
+    const submitAttempt = await submitApplication(page, scope);
+    log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
+    if (!submitAttempt.clicked) {
+      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "form_validation",
+        persona,
+        ...cv.publicFields,
+        answers: filled.answers,
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=review",
+          "blocker=form_validation",
+          `invalid=${submitAttempt.invalid.join(",") || "unknown"}`,
+          "The form was still invalid, so Submit was not sent.",
+        ]),
+        screenshots,
+      });
+    }
     await page.waitForLoadState("domcontentloaded").catch(() => undefined);
     await page.waitForTimeout(5000);
     if (await detectCaptcha(page)) {
@@ -284,7 +331,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         ...cv.publicFields,
         answers: filled.answers,
         canonicalJobUrl: page.url(),
-        notes: lines(["result=review", "blocker=confirmation_not_detected", "Submit was clicked but no confirmation was detected. Do not retry automatically."]),
+        notes: lines(["result=review", "blocker=confirmation_not_detected", "Submit was sent but no confirmation was detected. Do not retry automatically."]),
         screenshots,
       });
     }
@@ -396,16 +443,6 @@ async function revealApplyForm(page: Page): Promise<void> {
   }
 }
 
-async function clickSubmit(page: Page, scope: Awaited<ReturnType<typeof richestFormScope>>): Promise<void> {
-  const named = /submit|send application/i;
-  const inForm = scope.getByRole("button", { name: named }).first();
-  if (await inForm.count()) {
-    await inForm.click();
-    return;
-  }
-  await page.getByRole("button", { name: named }).first().click();
-}
-
 function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): ApplicationResult {
   return { jobUrl: input.job.url, ...extra };
 }
@@ -418,13 +455,22 @@ async function enterBestOpening(
   page: Page,
   role: string,
   company: string,
-): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" } | null> {
+): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" | "location_ineligible" } | null> {
   if (await pageHasResumeField(page)) {
     return null;
   }
   const openings = await listOpenings(page);
   if (openings.length < 2) {
     return null;
+  }
+  const eligible = openings.filter((job) => isDiscoveryLocationEligible(job.title, job.snippet, job.href));
+  if (eligible.length === 0) {
+    return {
+      title: role,
+      blocked: true,
+      outcome: "location_ineligible",
+      line: "Every opening on this list is outside Israel.",
+    };
   }
   let chosen: Awaited<ReturnType<typeof chooseOpening>>;
   try {

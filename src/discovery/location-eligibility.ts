@@ -69,9 +69,18 @@ const FOREIGN_LOCATION = [
 ];
 
 export function isDiscoveryLocationEligible(title: string, snippet: string, url = ""): boolean {
-  const text = `${title} ${snippet}`.replace(/\s+/g, " ").trim();
+  const titleText = title.replace(/\s+/g, " ").trim();
   const urlText = decodeURIComponent(url);
 
+  if (REMOTE_FROM_ISRAEL.some((re) => re.test(titleText) || re.test(urlText))) {
+    return true;
+  }
+  // Comeet puts the workplace in the job title. A Warsaw title stays ineligible even if the description mentions Israel.
+  if (FOREIGN_LOCATION.some((re) => re.test(titleText)) && !ISRAEL_SITE.some((re) => re.test(titleText))) {
+    return false;
+  }
+
+  const text = `${titleText} ${snippet}`.replace(/\s+/g, " ").trim();
   if (REMOTE_FROM_ISRAEL.some((re) => re.test(text) || re.test(urlText))) {
     return true;
   }

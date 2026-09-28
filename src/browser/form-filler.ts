@@ -1,6 +1,7 @@
 import type { Frame, Page } from "playwright";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, type FieldContext } from "../application/field-map.js";
+import { candidate } from "../config/candidate.js";
 import { log } from "../logging/logger.js";
 import type { AnswerRecord, Persona } from "../models/types.js";
 
@@ -176,6 +177,24 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
     return;
   }
   await locator.fill(value);
+  if (field.type === "tel") {
+    await locator.evaluate((element, international) => {
+      const input = element as HTMLInputElement;
+      const pageWindow = window as unknown as {
+        intlTelInputGlobals?: {
+          getInstance?: (node: HTMLInputElement) => { setCountry: (code: string) => void; setNumber: (number: string) => void } | null;
+        };
+        angular?: { element: (node: Element) => { triggerHandler: (name: string) => void } };
+      };
+      const tel = pageWindow.intlTelInputGlobals?.getInstance?.(input);
+      tel?.setCountry("il");
+      tel?.setNumber(international);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      pageWindow.angular?.element(input).triggerHandler("input");
+      pageWindow.angular?.element(input).triggerHandler("change");
+    }, candidate.phone.international);
+  }
 }
 
 function digitsOnly(value: string): string {

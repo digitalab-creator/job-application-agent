@@ -12,6 +12,8 @@ test("a missing job does not use a daily slot", () => {
   assert.equal(countsTowardDailyLimit("applied"), true);
   assert.equal(countsTowardDailyLimit("review"), true);
   assert.equal(countsTowardDailyLimit("not_relevant"), true);
+  assert.equal(countsTowardDailyLimit("already_submitted"), false);
+  assert.equal(countsTowardDailyLimit("location_ineligible"), false);
 });
 
 test("quota counts real attempts and ignores closed rows", () => {

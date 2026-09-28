@@ -2,6 +2,7 @@ import http from "node:http";
 import { chromium } from "playwright";
 import { applyToJob, type ApplyInput } from "./application/apply-job.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
+import { claimApplyRun, releaseApplyRun } from "./application/run-lock.js";
 import { withApplySession, withHeadlessBrowser } from "./browser/session.js";
 import { removeOldScreenshots } from "./browser/screenshot.js";
 import { cvFileStatus, env } from "./config/env.js";
@@ -91,6 +92,15 @@ const server = http.createServer(async (req, res) => {
         : undefined;
       const result = await runDiscovery({ existingUrls, newQueueStats });
       send(res, 200, result);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/runs/claim") {
+      const claim = claimApplyRun();
+      send(res, claim.ok ? 200 : 409, claim);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/runs/release") {
+      send(res, 200, releaseApplyRun());
       return;
     }
     if (req.method === "POST" && req.url === "/apply") {

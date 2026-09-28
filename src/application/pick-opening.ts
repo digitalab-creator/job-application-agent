@@ -3,6 +3,7 @@ import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import { log } from "../logging/logger.js";
 import { factById } from "../profile/facts.js";
+import { isDiscoveryLocationEligible } from "../discovery/location-eligibility.js";
 import { acceptOpeningChoice } from "./opening-choice.js";
 import { normalizeOpenings, type ListedJob } from "./openings.js";
 
@@ -41,18 +42,23 @@ export async function chooseOpening(input: {
   if (input.openings.length === 0) {
     return null;
   }
+  const openings = input.openings.filter((job) => isDiscoveryLocationEligible(job.title, job.snippet, job.href));
+  if (openings.length === 0) {
+    log("LISTING_NO_MATCH", { company: input.company, targetRole: input.targetRole, reason: "location_ineligible" });
+    return null;
+  }
   const raw = await completeJson(SYSTEM, JSON.stringify({
     targetRole: input.targetRole,
     company: input.company,
     candidate: candidateBrief(),
-    openings: input.openings.map((job, index) => ({
+    openings: openings.map((job, index) => ({
       index,
       title: job.title,
       href: job.href,
       snippet: job.snippet,
     })),
   }), env.llmModel, "listing");
-  const choice = acceptOpeningChoice(raw, input.openings);
+  const choice = acceptOpeningChoice(raw, openings);
   if (!choice) {
     const reason = typeof raw === "object" && raw && "reason" in raw ? String((raw as { reason: unknown }).reason) : "not_a_good_match";
     log("LISTING_NO_MATCH", { company: input.company, targetRole: input.targetRole, reason });

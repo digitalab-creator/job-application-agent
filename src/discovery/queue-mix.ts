@@ -33,6 +33,11 @@ const BASE_MIN_SCORE = 55;
 const TECH_HEAVY_MIN_TECH = 85;
 const EXCEPTIONAL_TECH = 90;
 
+/** Daily apply workflow (n8n Pick Jobs) — fixed mix at DAILY_APPLY_LIMIT=20. */
+export const DAILY_APPLY_BATCH_LIMIT = 20;
+export const DAILY_APPLY_TECH_TARGET = 13;
+export const DAILY_APPLY_MARKETING_TARGET = 7;
+
 export type NewQueueStats = {
   tech: number;
   marketing: number;
@@ -132,6 +137,52 @@ export function passesDiscoveryQuality(job: ScoredDiscoveryJob, policy: Rebalanc
     return true;
   }
   return job.matchScore >= policy.minTechMatchScore;
+}
+
+export function selectApplyDailyBatch<T extends { category?: string }>(
+  eligibleRows: T[],
+  scoreOf: (row: T) => number,
+): { selected: T[]; pickedTech: number; pickedMarketing: number } {
+  const tech = eligibleRows.filter((row) => categorySide(String(row.category ?? "")) === "tech");
+  const marketing = eligibleRows.filter((row) => categorySide(String(row.category ?? "")) === "marketing");
+  const other = eligibleRows.filter((row) => categorySide(String(row.category ?? "")) === "other");
+  const byScore = (a: T, b: T) => scoreOf(b) - scoreOf(a);
+  tech.sort(byScore);
+  marketing.sort(byScore);
+  other.sort(byScore);
+
+  const pickedMarketingRows = marketing.slice(0, DAILY_APPLY_MARKETING_TARGET);
+  const pickedTechRows = tech.slice(0, DAILY_APPLY_TECH_TARGET);
+  const selected: T[] = [...pickedMarketingRows, ...pickedTechRows];
+  const seen = new Set(selected);
+
+  const backfill = [...tech.slice(DAILY_APPLY_TECH_TARGET), ...marketing.slice(DAILY_APPLY_MARKETING_TARGET), ...other].sort(
+    byScore,
+  );
+  for (const row of backfill) {
+    if (selected.length >= DAILY_APPLY_BATCH_LIMIT) {
+      break;
+    }
+    if (seen.has(row)) {
+      continue;
+    }
+    seen.add(row);
+    selected.push(row);
+  }
+
+  selected.sort(byScore);
+  const trimmed = selected.slice(0, DAILY_APPLY_BATCH_LIMIT);
+  let pickedTechCount = 0;
+  let pickedMarketingCount = 0;
+  for (const row of trimmed) {
+    const side = categorySide(String(row.category ?? ""));
+    if (side === "tech") {
+      pickedTechCount += 1;
+    } else if (side === "marketing") {
+      pickedMarketingCount += 1;
+    }
+  }
+  return { selected: trimmed, pickedTech: pickedTechCount, pickedMarketing: pickedMarketingCount };
 }
 
 export function selectDiscoveryBatch(
