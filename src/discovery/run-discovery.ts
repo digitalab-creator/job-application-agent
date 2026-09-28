@@ -2,6 +2,13 @@ import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "
 import { env } from "../config/env.js";
 import { withJobCost } from "../llm/cost-ledger.js";
 import { log } from "../logging/logger.js";
+import {
+  computeNewQueueStats,
+  formatMixReport,
+  rebalancePolicy,
+  selectDiscoveryBatch,
+  type NewQueueStats,
+} from "./queue-mix.js";
 import { fetchBoardJobs } from "./scan-boards.js";
 import { scoreDiscoveryJobs, uniqueKeyForUrl } from "./score-jobs.js";
 
@@ -22,9 +29,13 @@ export type DiscoveryResult = {
   llmCostUsd: number;
   budget: ReturnType<typeof budgetSnapshot>;
   notes: string;
+  mixReport?: string;
 };
 
-export async function runDiscovery(input: { existingUrls: string[] }): Promise<DiscoveryResult> {
+export async function runDiscovery(input: {
+  existingUrls: string[];
+  newQueueStats?: NewQueueStats;
+}): Promise<DiscoveryResult> {
   recordPlatformAllocationIfNeeded();
   const budget = budgetSnapshot();
   if (!budgetIsOpen()) {
@@ -48,6 +59,10 @@ export async function runDiscovery(input: { existingUrls: string[] }): Promise<D
       notes: "Set JOB_DISCOVERY_BOARD_URLS to Comeet board URLs (comma-separated).",
     };
   }
+  const queueStats = input.newQueueStats ?? { tech: 0, marketing: 0, total: 0, techPct: 65 };
+  const policy = rebalancePolicy(queueStats);
+  log("DISCOVERY_MIX_POLICY", { mode: policy.mode, techPct: policy.techPct, targetMktBatch: policy.targetMarketingShareOfBatch });
+
   const existing = new Set(
     input.existingUrls
       .map((url) => uniqueKeyForUrl(url))
@@ -55,7 +70,7 @@ export async function runDiscovery(input: { existingUrls: string[] }): Promise<D
   );
   const foundDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
   const tracked = await withJobCost("discovery://scan", async () => {
-    const jobs: DiscoveryResult["jobs"] = [];
+    const candidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>> = [];
     let scanned = 0;
     for (const boardUrl of boards) {
       if (!budgetIsOpen()) {
@@ -70,38 +85,49 @@ export async function runDiscovery(input: { existingUrls: string[] }): Promise<D
           continue;
         }
         const capped = fresh.slice(0, env.discoveryMaxJobsPerBoard);
-        const scored = await scoreDiscoveryJobs(boardUrl, capped);
+        const scored = await scoreDiscoveryJobs(boardUrl, capped, policy.scoringBias);
         for (const job of scored) {
-          if (existing.has(job.uniqueKey)) {
-            continue;
-          }
-          existing.add(job.uniqueKey);
-          jobs.push({ ...job, foundDate });
-          if (jobs.length >= env.discoveryMaxJobsPerRun) {
-            break;
+          if (!existing.has(job.uniqueKey)) {
+            candidates.push(job);
           }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         log("DISCOVERY_BOARD_FAILED", { boardUrl, message });
       }
-      if (jobs.length >= env.discoveryMaxJobsPerRun) {
-        break;
-      }
     }
-    return { jobs, scanned };
+    const { selected, addedTech, addedMarketing } = selectDiscoveryBatch(
+      candidates,
+      policy,
+      env.discoveryMaxJobsPerRun,
+    );
+    for (const job of selected) {
+      existing.add(job.uniqueKey);
+    }
+    const jobs = selected.map((job) => ({ ...job, foundDate }));
+    return { jobs, scanned, addedTech, addedMarketing };
   }, "discovery");
+
+  const mixReport = formatMixReport({
+    queue: queueStats,
+    policy,
+    addedTech: tracked.result.addedTech,
+    addedMarketing: tracked.result.addedMarketing,
+  });
+
   return {
     status: "ok",
     jobs: tracked.result.jobs,
     scannedBoards: tracked.result.scanned,
     llmCostUsd: tracked.usd,
     budget: budgetSnapshot(),
+    mixReport,
     notes: [
       `discovery_boards=${tracked.result.scanned}`,
       `discovery_added=${tracked.result.jobs.length}`,
       `llm_cost_usd=${tracked.usd}`,
       `monthly_budget_ils=${budgetSnapshot().spentIls}/${budgetSnapshot().limitIls}`,
+      mixReport,
     ].join("\n"),
   };
 }
