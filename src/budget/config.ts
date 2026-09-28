@@ -1,7 +1,7 @@
 export function monthlyFixedCostIls(): number {
-  const parsed = Number(process.env.MONTHLY_FIXED_COST_ILS ?? "150");
+  const parsed = Number(process.env.MONTHLY_FIXED_COST_ILS ?? "0");
   if (!Number.isFinite(parsed) || parsed < 0) {
-    return 150;
+    return 0;
   }
   return Math.round(parsed * 100) / 100;
 }

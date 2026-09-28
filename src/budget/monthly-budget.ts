@@ -30,12 +30,16 @@ export function budgetSnapshot(): BudgetSnapshot {
   const calls = readCostCalls().filter((call) => call.month === month);
   const bySource: Record<string, { usd: number; ils: number }> = {};
   let llmSpendUsd = 0;
+  const fixedEnabled = monthlyFixedCostIls() > 0;
   let platformIls = 0;
   let manualSpendIls = 0;
   for (const call of calls) {
     const source = call.source ?? "apply";
     const row = bySource[source] ?? { usd: 0, ils: 0 };
     if (call.source === "platform") {
+      if (!fixedEnabled) {
+        continue;
+      }
       platformIls = roundIls(platformIls + (call.ils ?? 0));
       row.ils = roundIls(row.ils + (call.ils ?? 0));
     } else if (call.source === "external") {
@@ -49,7 +53,9 @@ export function budgetSnapshot(): BudgetSnapshot {
     }
     bySource[source] = row;
   }
-  const fixedCostIls = platformIls > 0 ? platformIls : Math.min(monthlyFixedCostIls(), limitIls);
+  const fixedCostIls = fixedEnabled
+    ? (platformIls > 0 ? platformIls : Math.min(monthlyFixedCostIls(), limitIls))
+    : 0;
   const llmSpendIls = usdToIls(llmSpendUsd, rate);
   const spentIls = roundIls(fixedCostIls + llmSpendIls + manualSpendIls);
   const remainingIls = roundIls(Math.max(0, limitIls - spentIls));
