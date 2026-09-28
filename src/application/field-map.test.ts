@@ -50,6 +50,69 @@ test("location-based questions use verified city and country", () => {
   }
 });
 
+test("Hunt PPC years, budget, platforms, and about-yourself are answered from the profile", () => {
+  const years = decideField({
+    label: "Years of hands-on PPC experience*",
+    required: true,
+    type: "select",
+    options: ["Please select", "Less than 2 years", "2-5 years", "5+ years"],
+    ctx,
+  });
+  assert.equal(years.action, "fill");
+  if (years.action === "fill") {
+    assert.equal(years.value, "5+ years");
+  }
+
+  const budget = decideField({
+    label: "Media budget range you have managed simultaneously*",
+    required: true,
+    type: "select",
+    options: ["Please select", "₪100,000 - ₪300,000", "₪300,000 - ₪600,000", "₪600,000+"],
+    ctx,
+  });
+  assert.equal(budget.action, "fill");
+  if (budget.action === "fill") {
+    assert.equal(budget.value, "₪600,000+");
+  }
+
+  const platforms = decideField({
+    label: "Which platforms have you worked with hands-on?*",
+    required: true,
+    type: "checkbox-group",
+    options: ["Google", "Meta", "TikTok", "Taboola", "Outbrain", "Bing", "Yandex", "LinkedIn", "Other"],
+    ctx,
+  });
+  assert.equal(platforms.action, "check-options");
+  if (platforms.action === "check-options") {
+    assert.ok(platforms.values.includes("Google"));
+    assert.ok(platforms.values.includes("Bing"));
+    assert.equal(platforms.values.includes("TikTok"), false);
+    assert.ok(platforms.values.includes("Other"));
+  }
+
+  const about = decideField({
+    label: "Tell us about yourself:",
+    required: false,
+    type: "textarea",
+    options: [],
+    ctx: { ...ctx, persona: "marketing", otherPlatformsText: "X, ChatGPT Ads, Snapchat, Traffic Junky, Mantis" },
+  });
+  assert.equal(about.action, "llm");
+
+  const other = decideField({
+    label: "Other - please specify",
+    required: false,
+    type: "text",
+    options: [],
+    ctx: { ...ctx, otherPlatformsText: "X, ChatGPT Ads, Snapchat, Traffic Junky, Mantis" },
+  });
+  assert.equal(other.action, "fill");
+  if (other.action === "fill") {
+    assert.match(other.value, /ChatGPT Ads/);
+    assert.match(other.value, /Mantis/);
+  }
+});
+
 test("expected salary for this senior role stays at the top of the band", () => {
   const decision = decideField({
     label: "Expected salary",

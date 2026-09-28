@@ -168,6 +168,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
     log("CV_SELECTED", { persona, wording: cv.wording, source: cv.cvSource, path: cv.cvPath });
 
+    await dismissOverlays(page);
     await revealApplyForm(page);
     if (await detectCaptcha(page)) {
       log("CAPTCHA_REQUIRED", { company: input.job.company });
@@ -218,13 +219,15 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       scope,
       fields,
       persona,
-      jobText: bodyText,
       ctx: {
         persona,
         salaryMonthly,
         portfolioUrl: cv.portfolioUrl,
         euRole: /europe|eu\b|poland/i.test(bodyText),
+        company: input.job.company,
+        role: activeRole,
       },
+      jobText: jobBrief(bodyText),
     });
     const uploaded = await uploadResume(page, cv.cvPath);
     if (!uploaded) {
@@ -270,6 +273,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
 
+    await dismissOverlays(page);
     await humanPause(page, 800, 1600);
     const submitAttempt = await submitApplication(page, scope);
     log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
@@ -360,7 +364,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         "result=applied",
         `cv=${cv.publicFields.cvUsed}`,
         `cv_source=${cv.cvSource}`,
-        "ats=comeet",
+        `ats=${atsLabel(input.job.url)}`,
         `salary_answer=${salaryMonthly}`,
         "confirmation=true",
         `confirmation_text=${confirmed.phrase}`,
@@ -410,7 +414,7 @@ async function prepareCv(
       cvWording: "llm",
       cvPath: outputPath,
       factIds: validation.factIds,
-      ats: "comeet",
+      ats: atsLabel(input.job.url),
     },
   };
 }
@@ -426,6 +430,7 @@ async function openJob(page: Page, url: string): Promise<void> {
     try {
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
+      await dismissOverlays(page);
       return;
     } catch (error) {
       lastError = error;
@@ -435,7 +440,41 @@ async function openJob(page: Page, url: string): Promise<void> {
   throw lastError instanceof Error ? lastError : new Error("navigation_failed");
 }
 
+function jobBrief(text: string): string {
+  const start = text.search(/responsibilit|requirements|תיאור המשרה|about the role/i);
+  const slice = start >= 0 ? text.slice(Math.max(0, start - 200)) : text;
+  return slice.slice(0, 6000);
+}
+
+function atsLabel(url: string): string {
+  if (/comeet\.com/i.test(url)) {
+    return "comeet";
+  }
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "career-site";
+  }
+}
+
+async function dismissOverlays(page: Page): Promise<void> {
+  const cookie = page.getByText(/^הבנתי$|^accept all$|^i understand$/i).first();
+  if (await cookie.count()) {
+    await cookie.click({ timeout: 2000 }).catch(() => undefined);
+  }
+  const close = page.locator("flashy-popup").locator(".fls-close");
+  if (await close.count()) {
+    await close.click({ timeout: 2000, force: true }).catch(() => undefined);
+  }
+  await page.evaluate(() => {
+    document.querySelectorAll("flashy-popup").forEach((node) => node.remove());
+  }).catch(() => undefined);
+}
+
 async function revealApplyForm(page: Page): Promise<void> {
+  if (await pageHasResumeField(page) || await page.locator('input[type="email"]').count()) {
+    return;
+  }
   const apply = page.getByRole("button", { name: /apply/i }).or(page.getByRole("link", { name: /apply/i })).first();
   if (await apply.count()) {
     await apply.click().catch(() => undefined);

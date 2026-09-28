@@ -1,0 +1,26 @@
+# Kit profile for job-application-agent. Commands live in .cursor/extensions/.
+project:
+  root: /opt/apps/job-application-agent
+planning:
+  bug_patterns_dir: docs/bug-patterns
+repo:
+  github: digitalab-creator/job-application-agent
+workflows:
+  ship:
+    mode: watch_ci
+    integration_branch: dev
+    production_branch: master
+    candidate_strategy: frozen_remote_branch
+    local_wip_policy: block
+    selective_release: false
+    integrate_skill: commit-dev-until-green
+    max_attempts: 5
+    required_workflow: Deploy
+    live_url: http://127.0.0.1:3099/health
+    runner:
+      command: gh workflow run Deploy --repo digitalab-creator/job-application-agent --ref dev -f sha="$FROZEN_SHA" -f confirm="DEPLOY $FROZEN_SHA TO PRODUCTION" -f mode=deploy
+    preflight:
+      - bash scripts/gha/verify-ci-green-for-sha.sh "$FROZEN_SHA"
+  commit_dev:
+    required_workflow: CI
+    max_attempts: 5

@@ -10,6 +10,12 @@ const THANK_YOU_RULES: RegExp[] = [
   /we (have |'ve )?received your application/i,
   /your application (has been |was )?sent/i,
   /you have successfully applied/i,
+  /we got your cv/i,
+  /your cv will be reviewed/i,
+  /grateful for your time and interest/i,
+  /your submission was successful/i,
+  /the form was sent successfully/i,
+  /we (have |'ve )?received your (message|submission)/i,
   /תודה[^\n]{0,80}(נשלחה|התקבלה|הוגשה|הגשת)/,
   /המועמדות (שלך )?התקבלה/,
 ];

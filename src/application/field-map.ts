@@ -1,9 +1,11 @@
 import { candidate, SALARY_MAX, SALARY_MIN } from "../config/candidate.js";
 import type { Persona } from "../models/types.js";
+import { isPlatformQuestion, matchPlatforms, pickBudgetOption, pickYearsOption } from "./media-answers.js";
 
 export type FieldDecision =
   | { action: "fill"; value: string; source: string }
   | { action: "check"; source: string }
+  | { action: "check-options"; values: string[]; source: string }
   | { action: "blank" }
   | { action: "block"; reason: string }
   | { action: "upload" }
@@ -14,6 +16,9 @@ export type FieldContext = {
   salaryMonthly: number;
   portfolioUrl: string;
   euRole: boolean;
+  company?: string;
+  role?: string;
+  otherPlatformsText?: string;
 };
 
 const DEMOGRAPHIC = /gender|race|ethnicity|religion|disability|veteran|sexual orientation|pronoun/i;
@@ -40,6 +45,19 @@ export function decideField(input: {
   }
   if (input.type === "file" || /resume|cv|curriculum/i.test(label)) {
     return { action: "upload" };
+  }
+  const bucket = chooseBucket(label, input.options);
+  if (bucket) {
+    return bucket;
+  }
+  if (input.type === "checkbox-group" && isPlatformQuestion(label, input.options)) {
+    const plan = matchPlatforms(input.options, candidate.media.platforms);
+    if (plan.check.length === 0) {
+      return input.required
+        ? { action: "block", reason: `Required platform question has no matching option: "${label}"` }
+        : { action: "blank" };
+    }
+    return { action: "check-options", values: plan.check, source: "candidate_profile" };
   }
   const mapped = mapKnown(label, input.type, input.ctx);
   if (mapped) {
@@ -125,9 +143,16 @@ function mapKnown(label: string, type: string, ctx: FieldContext): FieldDecision
     }
     return yesNo(true, type);
   }
+  if (/other/i.test(label) && /specif|which other platform/i.test(label)) {
+    const extra = ctx.otherPlatformsText?.trim() ?? "";
+    if (!extra) {
+      return { action: "blank" };
+    }
+    return fill(extra);
+  }
   if (/years of (experience|software|professional)|שנות ניסיון/i.test(label)) {
-    if (ctx.persona === "marketing") {
-      return fill("10+ years");
+    if (/ppc|paid|performance|hands-on|media/i.test(label) || ctx.persona === "marketing") {
+      return fill(`${candidate.media.ppcYears} years`);
     }
     return fill("5+ years");
   }
@@ -165,9 +190,35 @@ function yesNo(yes: boolean, type: string): FieldDecision {
   return fill(yes ? "Yes" : "No");
 }
 
+function chooseBucket(label: string, options: string[]): FieldDecision | null {
+  if (options.length === 0) {
+    return null;
+  }
+  if (/year/i.test(label) && /experience|ppc|ניסיון|paid|hands-on/i.test(label)) {
+    const years = /ppc|paid|performance|hands-on|media/i.test(label) ? candidate.media.ppcYears : 5;
+    const choice = pickYearsOption(options, years);
+    if (!choice) {
+      return { action: "block", reason: `No experience option fits ${years} years: "${label}"` };
+    }
+    return { action: "fill", value: choice, source: "candidate_profile" };
+  }
+  if (/budget|spend|תקציב/i.test(label)) {
+    const choice = pickBudgetOption(options, candidate.media.maxMonthlyBudgetIls);
+    if (!choice) {
+      return { action: "block", reason: `No budget option fits the managed monthly budget: "${label}"` };
+    }
+    return { action: "fill", value: choice, source: "candidate_profile" };
+  }
+  return null;
+}
+
 function isFreeText(label: string, type: string): boolean {
   if (type !== "textarea" && type !== "contenteditable") {
     return false;
   }
   return /why|describe|tell us|cover letter|about|experience with|campaign|built|motivation/i.test(label);
+}
+
+export function isNarrativeQuestion(label: string): boolean {
+  return /tell us about|about yourself|cover letter|why (do you|are you|this (role|position|company))/i.test(label);
 }

@@ -7,3 +7,4 @@ audit/
 data/ledger/
 data/browser-profile/
 *.log
+tmp/deploy/

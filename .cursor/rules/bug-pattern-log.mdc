@@ -1,0 +1,12 @@
+---
+description: Log verified bug fixes with reusable lessons to docs/bug-patterns (kit skill bug-pattern-log).
+alwaysApply: true
+---
+
+# Bug pattern log
+
+Directory SSOT: `docs/bug-patterns/` (`planning.bug_patterns_dir` in `.cursor/project.yaml`).
+
+After a verified fix with a reusable invariant or boundary lesson, append one record line to the active batch file. Follow kit skill **`bug-pattern-log`**. Archive only via **`/archive-full-bug-pattern`**.
+
+Split-boundary follow-ups go to `docs/bug-patterns/SPLIT_CANDIDATES.md` (skill **`file-split-candidates`**), not inline refactors in the bug-fix turn.
