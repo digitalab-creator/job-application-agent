@@ -35,6 +35,21 @@ test("a required degree question is blocked", () => {
   assert.equal(decision.action, "block");
 });
 
+test("location-based questions use verified city and country", () => {
+  const decision = decideField({
+    label: "Where are you currently based?",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "Petah Tikva, Israel");
+    assert.equal(decision.source, "candidate_profile");
+  }
+});
+
 test("expected salary for this senior role stays at the top of the band", () => {
   const decision = decideField({
     label: "Expected salary",
