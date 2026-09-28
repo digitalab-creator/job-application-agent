@@ -1,4 +1,7 @@
+import { listOpenings } from "../application/pick-opening.js";
 import { normalizeOpenings } from "../application/openings.js";
+import { withHeadlessBrowser } from "../browser/session.js";
+import { log } from "../logging/logger.js";
 
 export type RawBoardJob = {
   title: string;
@@ -18,7 +21,37 @@ export async function fetchBoardJobs(boardUrl: string): Promise<RawBoardJob[]> {
     throw new Error(`Board fetch failed HTTP ${response.status} for ${boardUrl}`);
   }
   const html = await response.text();
-  return extractJobLinks(html, boardUrl);
+  if (/comeet\.com/i.test(boardUrl)) {
+    return fetchBoardJobsWithBrowser(boardUrl);
+  }
+  const staticJobs = extractJobLinks(html, boardUrl);
+  if (staticJobs.length >= 3) {
+    return staticJobs;
+  }
+  return fetchBoardJobsWithBrowser(boardUrl);
+}
+
+/** Comeet and similar boards render job lists in the browser; plain fetch often sees an empty shell. */
+export async function fetchBoardJobsWithBrowser(boardUrl: string): Promise<RawBoardJob[]> {
+  return withHeadlessBrowser(async (browser) => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(boardUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+      await page.waitForFunction(() => (document.querySelectorAll("a[href*='/jobs/']").length ?? 0) > 2, undefined, {
+        timeout: 25_000,
+      }).catch(() => undefined);
+      await page.waitForTimeout(1500);
+      const jobs = await listOpenings(page);
+      log("DISCOVERY_BOARD_PARSED", { boardUrl, jobs: jobs.length, mode: "playwright" });
+      return jobs.map((job) => ({
+        title: job.title,
+        href: job.href,
+        snippet: job.snippet,
+      }));
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  });
 }
 
 export function extractJobLinks(html: string, boardUrl: string): RawBoardJob[] {

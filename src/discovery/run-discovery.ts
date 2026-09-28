@@ -64,6 +64,7 @@ export async function runDiscovery(input: { existingUrls: string[] }): Promise<D
       scanned += 1;
       try {
         const openings = await fetchBoardJobs(boardUrl);
+        log("DISCOVERY_BOARD_OPENINGS", { boardUrl, count: openings.length });
         const fresh = openings.filter((job) => !existing.has(uniqueKeyForUrl(job.href)));
         if (fresh.length === 0) {
           continue;
