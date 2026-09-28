@@ -104,6 +104,9 @@ function mapKnown(label: string, type: string, ctx: FieldContext): FieldDecision
   if (/country/i.test(label) && !/authorized|sponsor|eligible/i.test(label)) {
     return fill(candidate.location.country);
   }
+  if (/where are you (currently )?based|currently based|where do you live|current location|מיקום|איפה אתה גר/i.test(label)) {
+    return fill(`${candidate.location.city}, ${candidate.location.country}`);
+  }
   if (/notice period|start date|availability|הודעה מוקדמת/i.test(label)) {
     return fill(candidate.noticePeriod);
   }
