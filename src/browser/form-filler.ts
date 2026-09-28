@@ -1,6 +1,7 @@
 import type { Frame, Page } from "playwright";
 import { answerFreeText } from "../application/answer-question.js";
-import { decideField, type FieldContext } from "../application/field-map.js";
+import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
+import { isPlatformQuestion, matchPlatforms } from "../application/media-answers.js";
 import { candidate } from "../config/candidate.js";
 import { log } from "../logging/logger.js";
 import type { AnswerRecord, Persona } from "../models/types.js";
@@ -16,6 +17,7 @@ export type DetectedField = {
   required: boolean;
   options: string[];
   optionIndexes?: number[];
+  groupLabel?: string;
 };
 
 export async function readFields(scope: FormScope): Promise<DetectedField[]> {
@@ -38,6 +40,8 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
       const options = el.tagName === "SELECT"
         ? Array.from((el as unknown as HTMLSelectElement).options).map((option) => (option.textContent || "").trim()).filter(Boolean)
         : [];
+      const group = el.closest(".elementor-field-group, fieldset");
+      const groupLabel = (group?.querySelector(".elementor-field-label, legend")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240);
       fields.push({
         index,
         tag: el.tagName.toLowerCase(),
@@ -46,11 +50,12 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
         name: el.name || "",
         required: el.required || el.getAttribute("aria-required") === "true",
         options,
+        groupLabel,
       });
     });
     return fields;
   });
-  return groupRadios(raw);
+  return groupCheckboxes(groupRadios(raw));
 }
 
 function groupRadios(fields: DetectedField[]): DetectedField[] {
@@ -84,6 +89,43 @@ function groupRadios(fields: DetectedField[]): DetectedField[] {
   return grouped;
 }
 
+function groupCheckboxes(fields: DetectedField[]): DetectedField[] {
+  const byName = new Map<string, DetectedField[]>();
+  for (const field of fields) {
+    if (field.type !== "checkbox" || !field.name) {
+      continue;
+    }
+    const list = byName.get(field.name) ?? [];
+    list.push(field);
+    byName.set(field.name, list);
+  }
+  const emitted = new Set<string>();
+  const grouped: DetectedField[] = [];
+  for (const field of fields) {
+    const group = field.type === "checkbox" && field.name ? byName.get(field.name) : undefined;
+    if (!group || group.length < 2) {
+      grouped.push(field);
+      continue;
+    }
+    if (emitted.has(field.name)) {
+      continue;
+    }
+    emitted.add(field.name);
+    const label = group.map((item) => item.groupLabel).find((value) => value && value.length > 0) || field.name;
+    grouped.push({
+      index: group[0]?.index ?? field.index,
+      tag: "input",
+      type: "checkbox-group",
+      label,
+      name: field.name,
+      required: /\*/.test(label) || group.some((item) => item.required),
+      options: group.map((item) => item.label),
+      optionIndexes: group.map((item) => item.index),
+    });
+  }
+  return grouped;
+}
+
 export async function fillFields(input: {
   scope: FormScope;
   fields: DetectedField[];
@@ -93,6 +135,9 @@ export async function fillFields(input: {
 }): Promise<{ blockers: string[]; answers: AnswerRecord[] }> {
   const blockers: string[] = [];
   const answers: AnswerRecord[] = [];
+  const platformField = input.fields.find((field) => field.type === "checkbox-group" && isPlatformQuestion(field.label, field.options));
+  const platformPlan = platformField ? matchPlatforms(platformField.options, candidate.media.platforms) : null;
+  const ctx: FieldContext = { ...input.ctx, otherPlatformsText: platformPlan?.otherText ?? "" };
   for (const field of input.fields) {
     if (field.type === "file" || field.type === "search" || /recaptcha/i.test(field.name) || /recaptcha/i.test(field.label)) {
       continue;
@@ -102,7 +147,7 @@ export async function fillFields(input: {
       required: field.required,
       type: field.tag === "textarea" ? "textarea" : field.type,
       options: field.options,
-      ctx: input.ctx,
+      ctx,
     });
     if (decision.action === "blank" || decision.action === "upload") {
       continue;
@@ -113,17 +158,20 @@ export async function fillFields(input: {
       continue;
     }
     if (decision.action === "llm") {
-      if (!field.required) {
+      if (!field.required && !isNarrativeQuestion(field.label)) {
         continue;
       }
       const answered = await answerFreeText({
         question: field.label,
         persona: input.persona,
         jobText: input.jobText,
+        company: ctx.company ?? "",
+        role: ctx.role ?? "",
       });
       if (!answered) {
-        const reason = `Required application question cannot be answered safely: "${field.label}"`;
+        const reason = `Could not write a grounded answer for "${field.label}"`;
         blockers.push(reason);
+        log("REVIEW_REQUIRED", { question: field.label, reason });
         continue;
       }
       await writeField(input.scope, field, answered.value);
@@ -131,12 +179,27 @@ export async function fillFields(input: {
       log("FIELD_FILLED", { label: field.label, source: "llm_from_supported_facts" });
       continue;
     }
+    if (decision.action === "check-options") {
+      try {
+        await checkOptions(input.scope, field, decision.values);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "checkbox_fill_failed";
+        blockers.push(`Could not check required options for "${field.label}": ${message}`);
+        log("VALIDATION_FAILED", { label: field.label, message });
+        continue;
+      }
+      answers.push({ question: field.label, answer: decision.values.join(", "), source: decision.source });
+      log("FIELD_FILLED", { label: field.label, source: decision.source });
+      continue;
+    }
     if (decision.action === "check") {
       await input.scope.locator(`[data-agent-field="${field.index}"]`).setChecked(true);
       answers.push({ question: field.label, answer: "checked", source: decision.source });
       continue;
     }
-    const value = field.type === "number" ? digitsOnly(decision.value) : decision.value;
+    const value = field.type === "number" && /salary|budget|compensation|שכר/i.test(field.label)
+      ? digitsOnly(decision.value)
+      : decision.value;
     try {
       await writeField(input.scope, field, value);
     } catch (error) {
@@ -176,7 +239,23 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
     await locator.selectOption({ label: match });
     return;
   }
-  await locator.fill(value);
+  try {
+    await locator.fill(value);
+  } catch (error) {
+    const wrote = await locator.evaluate((element, next) => {
+      const input = element as HTMLInputElement | HTMLTextAreaElement;
+      if (!("value" in input)) {
+        return false;
+      }
+      input.value = next;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return input.value === next;
+    }, value).catch(() => false);
+    if (!wrote) {
+      throw error;
+    }
+  }
   if (field.type === "tel") {
     await locator.evaluate((element, international) => {
       const input = element as HTMLInputElement;
@@ -194,6 +273,26 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
       pageWindow.angular?.element(input).triggerHandler("input");
       pageWindow.angular?.element(input).triggerHandler("change");
     }, candidate.phone.international);
+  }
+}
+
+async function checkOptions(scope: FormScope, field: DetectedField, values: string[]): Promise<void> {
+  const indexes = field.optionIndexes ?? [];
+  for (const value of values) {
+    const matchAt = field.options.findIndex((option) => option.trim().toLowerCase() === value.trim().toLowerCase());
+    const optionIndex = indexes[matchAt];
+    if (matchAt < 0 || optionIndex === undefined) {
+      throw new Error(`No checkbox option matching ${value}`);
+    }
+    const locator = scope.locator(`[data-agent-field="${optionIndex}"]`);
+    await locator.setChecked(true, { force: true }).catch(async () => {
+      await locator.evaluate((element) => {
+        const input = element as HTMLInputElement;
+        input.checked = true;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
   }
 }
 

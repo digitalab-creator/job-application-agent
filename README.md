@@ -1,5 +1,7 @@
 # Job application worker
 
+Discovery and apply run through **n8n** and this service (Google Sheet queue). The older **job-finder** Apps Script repo is legacy and not used in production.
+
 This service opens a real job page, builds a CV from verified facts, fills the form, and submits only when you ask it to.
 
 The two original PDFs in `data/cv/` are reference only. The file that gets uploaded is generated per job under `generated-cv/` and must pass LLM tailoring plus truth gates. If generation fails, the worker stops with `cv_generation_failed` and does not upload a generic resume.

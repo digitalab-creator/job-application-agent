@@ -43,6 +43,27 @@ export const candidate = {
     { language: "Hebrew", level: "Native" },
     { language: "English", level: "Full professional proficiency" },
   ],
+  /**
+   * Confirmed by the candidate for application forms.
+   * Dropdowns and platform checkboxes read this object. Do not copy the numbers elsewhere.
+   */
+  media: {
+    ppcYears: 12,
+    maxMonthlyBudgetIls: 1_500_000,
+    platforms: [
+      "Google",
+      "Meta",
+      "Taboola",
+      "Outbrain",
+      "X",
+      "ChatGPT Ads",
+      "LinkedIn",
+      "Snapchat",
+      "Traffic Junky",
+      "Mantis",
+      "Microsoft Ads",
+    ],
+  },
 } as const;
 
 export const SALARY_MIN = candidate.salaryExpectation.minimum;

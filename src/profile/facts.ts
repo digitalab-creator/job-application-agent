@@ -1,8 +1,14 @@
+import { candidate } from "../config/candidate.js";
 import type { Fact, RoleRecord } from "../models/types.js";
 
+const budgetMillions = candidate.media.maxMonthlyBudgetIls / 1_000_000;
+const budgetLabel = Number.isInteger(budgetMillions) ? String(budgetMillions) : String(budgetMillions);
+const mediaHandsOnText = `About ${candidate.media.ppcYears} years of hands-on PPC experience. Managed media budgets of up to ILS ${budgetLabel} million (${candidate.media.maxMonthlyBudgetIls}) per month. Hands-on platforms: ${candidate.media.platforms.join(", ")}.`;
+
 /**
- * Every string here is copied from one of the two baseline CVs.
- * Do not add a tool, metric, employer, or date that is not on those PDFs.
+ * CV lines are copied from the two baseline CVs.
+ * media-hands-on is the exception: the candidate confirmed those years, budget, and platforms for forms.
+ * Do not add any other tool, metric, employer, or date that is not on those PDFs.
  */
 export const roles: RoleRecord[] = [
   {
@@ -114,6 +120,14 @@ export const facts: Fact[] = [
     roleId: null,
     text: "10+ years of experience managing paid acquisition across Google, Meta, TikTok and Microsoft",
     tags: ["years", "ppc"],
+    personas: ["marketing", "hybrid", "both"],
+    verified: true,
+  },
+  {
+    id: "media-hands-on",
+    roleId: null,
+    text: mediaHandsOnText,
+    tags: ["years", "ppc", "platforms"],
     personas: ["marketing", "hybrid", "both"],
     verified: true,
   },

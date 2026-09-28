@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { SUBMIT_LABEL_PATTERN } from "../application/submit-label.js";
 import type { FormScope } from "./form-filler.js";
 
 export type SubmitAttempt = {
@@ -9,11 +10,13 @@ export type SubmitAttempt = {
 /**
  * Comeet's apply form lives in an iframe. The button is AngularJS `ng-click="apply()"`,
  * so a DOM click can leave the form on screen with no thank-you page.
+ * Other sites, including Elementor career forms, use a normal Apply button.
  */
 export async function submitApplication(page: Page, scope: FormScope): Promise<SubmitAttempt> {
   const frame = page.frames().find((item) => item.url().includes("/apply?"));
   const target: FormScope = frame ?? scope;
-  return target.evaluate(() => {
+  const prepared = await target.evaluate((pattern) => {
+    const rule = new RegExp(pattern, "i");
     const angular = (window as unknown as {
       angular?: {
         element: (el: Element) => {
@@ -23,24 +26,47 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
       };
     }).angular;
 
-    document.querySelectorAll("input, textarea, select").forEach((element) => {
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-      element.dispatchEvent(new Event("blur", { bubbles: true }));
-      angular?.element(element).triggerHandler("input");
-      angular?.element(element).triggerHandler("change");
-    });
+    if (angular) {
+      document.querySelectorAll("input, textarea, select").forEach((element) => {
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        element.dispatchEvent(new Event("blur", { bubbles: true }));
+        angular.element(element).triggerHandler("input");
+        angular.element(element).triggerHandler("change");
+      });
+    }
 
-    const invalid = Array.from(document.querySelectorAll("input.ng-invalid[required], textarea.ng-invalid[required], select.ng-invalid[required], input.ng-invalid-required"))
-      .map((element) => (element as HTMLInputElement).name || element.getAttribute("aria-label") || "field")
+    const invalid = Array.from(document.querySelectorAll("input, textarea, select"))
+      .filter((element) => {
+        const field = element as HTMLInputElement;
+        if (field.disabled || field.type === "hidden" || field.type === "file" || field.type === "checkbox" || field.type === "radio") {
+          return false;
+        }
+        if (field.value.trim().length > 0) {
+          field.setCustomValidity("");
+        }
+        const angularInvalid = Boolean(angular) && field.classList.contains("ng-invalid") && (field.required || field.classList.contains("ng-invalid-required"));
+        return (field.required && field.value.trim().length === 0) || (field.required && !field.checkValidity()) || angularInvalid;
+      })
+      .map((element) => {
+        const field = element as HTMLInputElement;
+        const name = field.name || field.getAttribute("aria-label") || "field";
+        return `${name} (${field.validationMessage || "empty"})`;
+      })
       .filter((name) => name.length > 0);
 
-    const button = Array.from(document.querySelectorAll("button")).find((element) => /submit application/i.test(element.textContent || ""));
+    const button = Array.from(document.querySelectorAll("button, input[type='submit']")).find((element) => {
+      const label = (element.textContent || (element as HTMLInputElement).value || "").replace(/\s+/g, " ").trim();
+      return rule.test(label);
+    });
     if (!button) {
-      return { clicked: false, invalid: invalid.length > 0 ? invalid : ["submit_button_missing"] };
+      return { clicked: false, invalid: invalid.length > 0 ? invalid : ["submit_button_missing"], useDomClick: false };
+    }
+    if ((button as HTMLButtonElement).disabled) {
+      return { clicked: false, invalid: ["submit_disabled"], useDomClick: false };
     }
     if (invalid.length > 0) {
-      return { clicked: false, invalid };
+      return { clicked: false, invalid, useDomClick: false };
     }
     if (angular) {
       const ngScope = angular.element(button).scope();
@@ -48,10 +74,20 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
         ngScope.$apply(() => {
           ngScope.apply?.();
         });
-        return { clicked: true, invalid: [] };
+        return { clicked: true, invalid: [], useDomClick: false };
       }
     }
-    button.click();
-    return { clicked: true, invalid: [] };
-  });
+    return { clicked: false, invalid: [], useDomClick: true };
+  }, SUBMIT_LABEL_PATTERN);
+
+  if (prepared.clicked || !prepared.useDomClick) {
+    return { clicked: prepared.clicked, invalid: prepared.invalid };
+  }
+  const button = target.getByRole("button", { name: new RegExp(SUBMIT_LABEL_PATTERN, "i") }).first();
+  try {
+    await button.click({ timeout: 8000 });
+  } catch {
+    return { clicked: false, invalid: ["submit_button_missing"] };
+  }
+  return { clicked: true, invalid: [] };
 }

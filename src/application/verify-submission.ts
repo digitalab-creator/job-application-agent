@@ -38,7 +38,7 @@ async function confirmationPhrase(page: Page): Promise<string | null> {
   for (const frame of page.frames()) {
     chunks.push(await frame.locator("body").innerText().catch(() => ""));
   }
-  const heading = await page.locator("h1, h2, [role='alert'], [class*='thank'], [class*='success']").allInnerTexts().catch(() => []);
+  const heading = await page.locator("h1, h2, [role='alert'], [class*='thank'], [class*='success'], .elementor-message-success").allInnerTexts().catch(() => []);
   chunks.push(...heading);
   return thankYouMatch(chunks.join("\n"), page.url());
 }

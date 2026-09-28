@@ -1,0 +1,176 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Frozen commit SHA to publish
+        required: true
+        type: string
+      confirm:
+        description: Must equal DEPLOY <sha> TO PRODUCTION
+        required: true
+        type: string
+      mode:
+        description: deploy or rollback
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - rollback
+      previous_sha:
+        description: Prior production SHA required for rollback
+        required: false
+        type: string
+
+concurrency:
+  group: job-application-agent-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Consent and SHA guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate consent and freeze SHA
+        id: resolve
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_CONFIRM: ${{ inputs.confirm }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_PREV: ${{ inputs.previous_sha }}
+        run: |
+          set -euo pipefail
+          SHA="$(printf '%s' "$INPUT_SHA" | tr -d '[:space:]')"
+          echo "target_sha=$SHA" >> "$GITHUB_OUTPUT"
+          expected="DEPLOY ${SHA} TO PRODUCTION"
+          if [ "$INPUT_CONFIRM" != "$expected" ]; then
+            echo "Consent mismatch. Expected exact: $expected"
+            exit 1
+          fi
+          if ! git cat-file -e "${SHA}^{commit}"; then
+            echo "SHA is not a commit in this repository"
+            exit 1
+          fi
+          if [ "$INPUT_MODE" = "rollback" ]; then
+            PREV="$(printf '%s' "$INPUT_PREV" | tr -d '[:space:]')"
+            if [ -z "$PREV" ] || ! git cat-file -e "${PREV}^{commit}"; then
+              echo "rollback requires a valid previous_sha"
+              exit 1
+            fi
+          fi
+          echo "Guard OK for $INPUT_MODE @ $SHA"
+
+  production:
+    name: Production promote
+    needs: guard
+    runs-on: [self-hosted, digitalab-prod]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout frozen SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.target_sha }}
+          fetch-depth: 0
+
+      - name: Apply release
+        env:
+          MODE: ${{ inputs.mode }}
+          TARGET_SHA: ${{ needs.guard.outputs.target_sha }}
+          PREVIOUS_SHA: ${{ inputs.previous_sha }}
+        run: |
+          set -euo pipefail
+          LIVE="/opt/apps/job-application-agent"
+          cd "$LIVE"
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            echo "Live tree has tracked changes. Refusing to overwrite."
+            exit 1
+          fi
+          if [ "$MODE" = "rollback" ]; then
+            APPLIED="$(printf '%s' "$PREVIOUS_SHA" | tr -d '[:space:]')"
+          else
+            APPLIED="$(printf '%s' "$TARGET_SHA" | tr -d '[:space:]')"
+          fi
+          if [ -z "$APPLIED" ]; then
+            echo "No SHA to apply"
+            exit 1
+          fi
+          OUTGOING="$(git rev-parse HEAD)"
+          if [ -f tmp/deploy/latest-release.json ]; then
+            RECORDED="$(python3 -c "import json; print(json.load(open('tmp/deploy/latest-release.json')).get('sha',''))" 2>/dev/null || true)"
+            if [ -n "$RECORDED" ]; then
+              OUTGOING="$RECORDED"
+            fi
+          fi
+          git fetch --no-tags "$GITHUB_WORKSPACE" "$APPLIED"
+          if git rev-parse --verify -q "master" >/dev/null && [ "$(git rev-parse master)" = "$APPLIED" ]; then
+            git switch master
+          elif git rev-parse --verify -q "dev" >/dev/null && [ "$(git rev-parse dev)" = "$APPLIED" ]; then
+            git switch dev
+          else
+            git checkout --detach "$APPLIED"
+          fi
+          echo "APPLIED_SHA=$APPLIED" >> "$GITHUB_ENV"
+          echo "OUTGOING_SHA=$OUTGOING" >> "$GITHUB_ENV"
+          echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          changed="$(git diff --name-only "$OUTGOING" "$APPLIED" || true)"
+          echo "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '(^|/)Dockerfile$|(^|/)package\.json$|^docker-compose\.yml$|^package-lock\.json$'; then
+            echo "Image or compose changed. Rebuilding job-application-agent."
+            docker compose up -d --build job-application-agent
+          else
+            echo "Source-only SHA. Rebuilding to refresh dist inside the image."
+            docker compose up -d --build job-application-agent
+          fi
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 http://127.0.0.1:3099/health || true)"
+            echo "health attempt $i HTTP $code"
+            case "$code" in
+              200) ok=1; break ;;
+            esac
+            sleep 5
+          done
+          if [ "$ok" != "1" ]; then
+            echo "Health check failed for http://127.0.0.1:3099/health"
+            exit 1
+          fi
+
+      - name: Record release metadata
+        working-directory: /opt/apps/job-application-agent
+        env:
+          MODE: ${{ inputs.mode }}
+          APPLIED_SHA: ${{ env.APPLIED_SHA }}
+          TARGET_SHA: ${{ needs.guard.outputs.target_sha }}
+          OUTGOING_SHA: ${{ env.OUTGOING_SHA }}
+          DEPLOY_STARTED_AT: ${{ env.DEPLOY_STARTED_AT }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp/deploy
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("tmp/deploy/latest-release.json")
+          data = {
+              "mode": os.environ["MODE"],
+              "sha": os.environ["APPLIED_SHA"],
+              "requested_sha": os.environ["TARGET_SHA"],
+              "previous_sha": os.environ.get("OUTGOING_SHA", ""),
+              "released_at": os.environ.get("DEPLOY_STARTED_AT", ""),
+          }
+          path.write_text(json.dumps(data, indent=2) + "\n")
+          print(json.dumps({k: data[k] for k in ("mode", "sha", "previous_sha")}, indent=2))
+          PY
