@@ -3,6 +3,7 @@ import { HEADLINES, factById, roleById } from "../profile/facts.js";
 import type { CvDocument, Persona } from "../models/types.js";
 import { formatRoleDateRange } from "./dates.js";
 import { portfolioUrlForDoc } from "./portfolio.js";
+import { polishCvText } from "./prose.js";
 
 export function renderCvHtml(doc: CvDocument, persona: Persona): string {
   const portfolioUrl = portfolioUrlForDoc(doc, persona);
@@ -11,7 +12,7 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
     if (!record) {
       return "";
     }
-    const bullets = role.bullets.map((bullet) => `<li>${escapeHtml(bullet.text)}</li>`).join("");
+    const bullets = role.bullets.map((bullet) => `<li>${escapeHtml(polishCvText(bullet.text))}</li>`).join("");
     return `<section>
       <h2>${escapeHtml(record.company)}</h2>
       <p class="meta">${escapeHtml(role.title)} · ${escapeHtml(formatRoleDateRange(record.start, record.end))}</p>
@@ -32,7 +33,8 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
   h3 { font-size: 11pt; margin: 14px 0 2px; }
   p, ul { margin: 0 0 6px; }
   ul { padding-left: 18px; }
-  li { margin: 0 0 3px; }
+  li { margin: 0 0 3px; hyphens: none; -webkit-hyphens: none; }
+  .summary, .skills { hyphens: none; -webkit-hyphens: none; overflow-wrap: break-word; }
   .headline { font-weight: 700; }
   .contact, .meta { font-size: 10pt; }
 </style></head>
@@ -42,9 +44,9 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
   <p class="contact">${escapeHtml(candidate.location.city)}, ${escapeHtml(candidate.location.country)} · ${escapeHtml(candidate.phone.display)} · ${escapeHtml(candidate.email)}</p>
   <p class="contact">${contactLine(portfolioUrl)}</p>
   <h3>Summary</h3>
-  <p>${escapeHtml(doc.summary)}</p>
+  <p class="summary">${escapeHtml(polishCvText(doc.summary))}</p>
   <h3>Skills</h3>
-  <p>${escapeHtml(doc.selectedSkills.join(" · "))}</p>
+  <p class="skills">${escapeHtml(polishCvText(doc.selectedSkills.join(" · ")))}</p>
   <h3>Experience</h3>
   ${roles}
   ${education ? `<h3>Education</h3><ul>${education}</ul>` : ""}
