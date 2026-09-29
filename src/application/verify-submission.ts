@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { detectGreenhouseConfirmation } from "./greenhouse.js";
 import { thankYouMatch } from "./thank-you.js";
 
 export async function detectCaptcha(page: Page): Promise<boolean> {
@@ -8,6 +9,16 @@ export async function detectCaptcha(page: Page): Promise<boolean> {
   }
   const text = await page.locator("body").innerText().catch(() => "");
   return /verify you are human|i'?m not a robot|complete the captcha|answer validation task/i.test(text);
+}
+
+export async function detectEmailVerification(page: Page): Promise<boolean> {
+  const chunks: string[] = [];
+  chunks.push(await page.locator("body").innerText().catch(() => ""));
+  for (const frame of page.frames()) {
+    chunks.push(await frame.locator("body").innerText().catch(() => ""));
+  }
+  const text = chunks.join("\n");
+  return /verification code was sent|enter the \d+-character code|confirm you'?re a human|security code/i.test(text);
 }
 
 export async function detectLoginWall(page: Page): Promise<boolean> {
@@ -20,8 +31,12 @@ export async function detectLoginWall(page: Page): Promise<boolean> {
 }
 
 export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const fraction = attempt / 9;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const greenhouse = await detectGreenhouseConfirmation(page);
+    if (greenhouse.ok) {
+      return greenhouse;
+    }
+    const fraction = attempt / 11;
     await page.evaluate((y) => window.scrollTo(0, document.body.scrollHeight * y), fraction).catch(() => undefined);
     const phrase = await confirmationPhrase(page);
     if (phrase) {

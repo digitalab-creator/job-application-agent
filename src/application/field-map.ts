@@ -33,6 +33,9 @@ export function decideField(input: {
 }): FieldDecision {
   const label = input.label.trim();
   const options = input.options;
+  if (!label) {
+    return { action: "blank" };
+  }
   if (DEMOGRAPHIC.test(label)) {
     const decline = options.find((option) => /prefer not|decline|don'?t wish|do not wish/i.test(option));
     if (decline) {
@@ -65,6 +68,17 @@ export function decideField(input: {
   }
   if (input.type === "checkbox" && /privacy|terms|consent|agree|acknowledge/i.test(label) && !/marketing|newsletter/i.test(label)) {
     return { action: "check", source: "candidate_profile" };
+  }
+  if (input.type === "select" && /privacy|terms|consent|agree|store and process my data/i.test(label)) {
+    const agree = options.find((option) => /^yes$/i.test(option.trim()))
+      ?? options.find((option) => /^i agree/i.test(option.trim()))
+      ?? options.find((option) => /agree/i.test(option) && !/do not|disagree/i.test(option));
+    if (agree) {
+      return { action: "fill", value: agree, source: "candidate_profile" };
+    }
+  }
+  if ((input.type === "text" || input.type === "search") && /store and process my data|privacy policy|terms and conditions/i.test(label)) {
+    return fill("Yes");
   }
   if (DEGREE.test(label)) {
     return input.required

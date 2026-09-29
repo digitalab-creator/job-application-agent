@@ -37,6 +37,9 @@ export const env = {
   browserTimezone: optional("BROWSER_TIMEZONE", "Asia/Jerusalem"),
   discoveryMaxJobsPerBoard: Math.max(1, Math.floor(Number(optional("DISCOVERY_MAX_JOBS_PER_BOARD", "12")))),
   discoveryMaxJobsPerRun: Math.max(1, Math.floor(Number(optional("DISCOVERY_MAX_JOBS_PER_RUN", "20")))),
+  greenhouseOtpWebhookUrl: optional("GREENHOUSE_OTP_WEBHOOK_URL", "http://n8n:5678/webhook/greenhouse-apply-otp"),
+  greenhouseOtpTimeoutMs: Math.max(15_000, Number(optional("GREENHOUSE_OTP_TIMEOUT_MS", "120000"))),
+  greenhouseOtpPollIntervalMs: Math.max(2_000, Number(optional("GREENHOUSE_OTP_POLL_INTERVAL_MS", "5000"))),
 };
 
 export function cvFileStatus(): { technical: boolean; marketing: boolean } {

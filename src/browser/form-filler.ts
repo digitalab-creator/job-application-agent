@@ -1,4 +1,5 @@
 import type { Frame, Page } from "playwright";
+import { greenhouseJobAppFrame } from "../application/greenhouse.js";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
 import { isPlatformQuestion, matchPlatforms } from "../application/media-answers.js";
@@ -14,6 +15,7 @@ export type DetectedField = {
   type: string;
   label: string;
   name: string;
+  id: string;
   required: boolean;
   options: string[];
   optionIndexes?: number[];
@@ -37,6 +39,7 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
       const aria = el.getAttribute("aria-label") ?? "";
       const raw = aria || labelFor || el.placeholder || el.name || wrapped;
       const label = (raw || "").replace(/\s+/g, " ").trim().slice(0, 240);
+      const labelRequired = label.includes("*");
       const options = el.tagName === "SELECT"
         ? Array.from((el as unknown as HTMLSelectElement).options).map((option) => (option.textContent || "").trim()).filter(Boolean)
         : [];
@@ -48,14 +51,19 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
         type,
         label,
         name: el.name || "",
-        required: el.required || el.getAttribute("aria-required") === "true",
+        id: el.id || "",
+        required: el.required || el.getAttribute("aria-required") === "true" || labelRequired,
         options,
         groupLabel,
       });
     });
     return fields;
   });
-  return groupCheckboxes(groupRadios(raw));
+  const labeled = raw.map((field) => ({
+    ...field,
+    label: field.label || field.groupLabel || field.name,
+  }));
+  return groupCheckboxes(groupRadios(labeled));
 }
 
 function groupRadios(fields: DetectedField[]): DetectedField[] {
@@ -81,6 +89,7 @@ function groupRadios(fields: DetectedField[]): DetectedField[] {
       type: "radio",
       label: name,
       name,
+      id: first.id,
       required: group.some((field) => field.required),
       options: group.map((field) => field.label),
       optionIndexes: group.map((field) => field.index),
@@ -118,6 +127,7 @@ function groupCheckboxes(fields: DetectedField[]): DetectedField[] {
       type: "checkbox-group",
       label,
       name: field.name,
+      id: group[0]?.id ?? field.id,
       required: /\*/.test(label) || group.some((item) => item.required),
       options: group.map((item) => item.label),
       optionIndexes: group.map((item) => item.index),
@@ -135,11 +145,18 @@ export async function fillFields(input: {
 }): Promise<{ blockers: string[]; answers: AnswerRecord[] }> {
   const blockers: string[] = [];
   const answers: AnswerRecord[] = [];
+  let phoneFilled = false;
   const platformField = input.fields.find((field) => field.type === "checkbox-group" && isPlatformQuestion(field.label, field.options));
   const platformPlan = platformField ? matchPlatforms(platformField.options, candidate.media.platforms) : null;
   const ctx: FieldContext = { ...input.ctx, otherPlatformsText: platformPlan?.otherText ?? "" };
   for (const field of input.fields) {
-    if (field.type === "file" || field.type === "search" || /recaptcha/i.test(field.name) || /recaptcha/i.test(field.label)) {
+    if (/phone/i.test(field.label) && phoneFilled) {
+      continue;
+    }
+    if (field.type === "file" || /recaptcha/i.test(field.name) || /recaptcha/i.test(field.label)) {
+      continue;
+    }
+    if (field.type === "search" && !/country/i.test(`${field.label} ${field.groupLabel}`)) {
       continue;
     }
     const decision = decideField({
@@ -212,6 +229,9 @@ export async function fillFields(input: {
     }
     answers.push({ question: field.label, answer: value, source: decision.source });
     log("FIELD_FILLED", { label: field.label, source: decision.source });
+    if (/phone/i.test(field.label)) {
+      phoneFilled = true;
+    }
   }
   return { blockers, answers };
 }
@@ -229,6 +249,41 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
     return;
   }
   const locator = scope.locator(`[data-agent-field="${field.index}"]`);
+  if (field.id === "country" || /country/i.test(field.label)) {
+    const country = field.id === "country" ? scope.locator("#country") : locator;
+    await country.click({ timeout: 5000 }).catch(() => undefined);
+    await country.fill(value);
+    const option = scope.getByRole("option", { name: new RegExp(value, "i") }).first();
+    if (await option.count().catch(() => 0)) {
+      await option.click({ timeout: 3000 }).catch(() => undefined);
+    } else {
+      await country.press("Enter").catch(() => undefined);
+    }
+    await scope.waitForTimeout(600).catch(() => undefined);
+    return;
+  }
+  if (/phone/i.test(field.label) || field.id === "phone" || field.type === "tel") {
+    const phone = scope.locator("#phone");
+    if (await phone.count().catch(() => 0)) {
+      await phone.click({ timeout: 5000 }).catch(() => undefined);
+      await phone.fill(nationalPhoneDigits(value));
+      await phone.press("Tab").catch(() => undefined);
+      return;
+    }
+  }
+  if (field.id.startsWith("question_") && /store and process my data/i.test(field.label)) {
+    const consent = scope.locator(`#${field.id}`);
+    const option = scope.locator('div[role="option"]').filter({ hasText: new RegExp(`^${value}$`, "i") }).first();
+    await consent.click({ timeout: 5000, force: true }).catch(() => undefined);
+    await consent.fill(value);
+    if (await option.count().catch(() => 0)) {
+      await option.click({ timeout: 5000 }).catch(() => undefined);
+    } else {
+      await consent.press("ArrowDown").catch(() => undefined);
+      await consent.press("Enter").catch(() => undefined);
+    }
+    return;
+  }
   if (field.tag === "select") {
     const labels = field.options;
     const match = labels.find((option) => option.toLowerCase() === value.toLowerCase())
@@ -301,7 +356,35 @@ function digitsOnly(value: string): string {
   return match?.[0] ?? value;
 }
 
+/** Greenhouse keeps the country code in its own control, so the phone box wants the national number. */
+function nationalPhoneDigits(value: string): string {
+  let digits = value.replace(/\D/g, "");
+  if (digits.startsWith("972")) {
+    digits = digits.slice(3);
+  }
+  if (digits.startsWith("0")) {
+    digits = digits.slice(1);
+  }
+  return digits;
+}
+
+export async function waitForResumeUploadTarget(page: Page, timeoutMs = 20_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const scopes: FormScope[] = [page, ...page.frames()];
+    for (const scope of scopes) {
+      const count = await scope.locator('input[type="file"]').count().catch(() => 0);
+      if (count > 0) {
+        return true;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  return false;
+}
+
 export async function uploadResume(page: Page, cvPath: string): Promise<boolean> {
+  await waitForResumeUploadTarget(page).catch(() => undefined);
   const fileName = cvPath.split("/").pop() || "cv.pdf";
   const scopes: FormScope[] = [page, ...page.frames()];
   const ranked: Array<{ scope: FormScope; index: number; rank: number }> = [];
@@ -312,7 +395,7 @@ export async function uploadResume(page: Page, cvPath: string): Promise<boolean>
       const hint = await inputs.nth(index).evaluate((element) => {
         const input = element as HTMLInputElement;
         return `${input.name} ${input.id} ${input.accept} ${input.getAttribute("aria-label") || ""}`.toLowerCase();
-      }).catch(() => "");
+      }, { timeout: 2_000 }).catch(() => "");
       const rank = /resume|cv|curriculum/.test(hint) ? 2 : /cover|portfolio/.test(hint) ? 0 : 1;
       ranked.push({ scope, index, rank });
     }
@@ -346,4 +429,17 @@ export async function richestFormScope(page: Page): Promise<FormScope> {
     }
   }
   return best;
+}
+
+/** Prefer Greenhouse embed over parent-page cookie banners and newsletter fields. */
+export async function applyFormScope(page: Page): Promise<FormScope> {
+  const greenhouse = greenhouseJobAppFrame(page);
+  if (greenhouse) {
+    const resumeInputs = await greenhouse.locator('input[type="file"]').count().catch(() => 0);
+    const emailInputs = await greenhouse.locator('input[type="email"]').count().catch(() => 0);
+    if (resumeInputs > 0 || emailInputs > 0) {
+      return greenhouse;
+    }
+  }
+  return richestFormScope(page);
 }

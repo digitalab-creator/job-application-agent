@@ -35,6 +35,20 @@ test("a required degree question is blocked", () => {
   assert.equal(decision.action, "block");
 });
 
+test("Greenhouse privacy combobox picks Yes", () => {
+  const decision = decideField({
+    label: "I agree to allow Orca Security to store and process my data for the purpose of considering my eligibility regarding my current application for employment.*",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "Yes");
+  }
+});
+
 test("location-based questions use verified city and country", () => {
   const decision = decideField({
     label: "Where are you currently based?",
