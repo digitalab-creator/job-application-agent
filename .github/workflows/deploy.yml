@@ -1,5 +1,6 @@
 name: Deploy
 
+# workflow_dispatch must exist on the default branch (dev) for gh workflow run Deploy.
 on:
   workflow_dispatch:
     inputs:
