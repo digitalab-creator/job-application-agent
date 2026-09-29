@@ -1,4 +1,5 @@
 name: CI
+# Runs on every push to dev.
 
 on:
   push:
