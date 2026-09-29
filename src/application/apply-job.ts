@@ -118,16 +118,19 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    if (pageStatus !== "ACTIVE_JOB") {
+    if (pageStatus === "CAREERS_PAGE") {
       return result(input, {
         status: "review",
         submitted: false,
         confirmationDetected: false,
-        blocker: pageStatus.toLowerCase(),
+        blocker: "careers_page",
         canonicalJobUrl: page.url(),
-        notes: lines(["result=review", `blocker=${pageStatus.toLowerCase()}`, listingNote?.line ?? "Live page was not a specific open job."]),
+        notes: lines(["result=review", "blocker=careers_page", listingNote?.line ?? "Live page was a careers list, not one job."]),
         screenshots,
       });
+    }
+    if (pageStatus === "UNKNOWN") {
+      log("JOB_PAGE_UNCONFIRMED", { url: page.url(), company: input.job.company });
     }
 
     const salary = publishedSalaryTooLow(bodyText);
@@ -475,9 +478,23 @@ async function revealApplyForm(page: Page): Promise<void> {
   if (await pageHasResumeField(page) || await page.locator('input[type="email"]').count()) {
     return;
   }
-  const apply = page.getByRole("button", { name: /apply/i }).or(page.getByRole("link", { name: /apply/i })).first();
+  const applyLabel = /apply|הגש|מועמדות/i;
+  const apply = page.getByRole("button", { name: applyLabel }).or(page.getByRole("link", { name: applyLabel })).first();
   if (await apply.count()) {
     await apply.click().catch(() => undefined);
+    await page.locator('input[type="file"], input[type="email"]').first().waitFor({ timeout: 15_000 }).catch(() => undefined);
+    return;
+  }
+  const clicked = await page.evaluate(() => {
+    const rule = /apply|הגש|מועמדות/i;
+    const node = Array.from(document.querySelectorAll("a, button")).find((element) => rule.test((element.textContent || "").replace(/\s+/g, " ")));
+    if (!node) {
+      return false;
+    }
+    (node as HTMLElement).click();
+    return true;
+  }).catch(() => false);
+  if (clicked) {
     await page.locator('input[type="file"], input[type="email"]').first().waitFor({ timeout: 15_000 }).catch(() => undefined);
   }
 }

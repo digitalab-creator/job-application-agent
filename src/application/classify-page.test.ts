@@ -12,6 +12,16 @@ test("an active Comeet posting is active", () => {
   assert.equal(status, "ACTIVE_JOB");
 });
 
+test("a Hebrew apply page is an active job", () => {
+  const status = classifyJobPage({
+    url: "https://www.example.co.il/jobs/1",
+    title: "משרה",
+    text: "הגשת מועמדות למשרה בתל אביב. הצוות מחפש מועמד עם ניסיון בבניית מערכות, עבודה עם לקוחות, ומדידה. שלחו קו״ח דרך הטופס בעמוד זה.",
+    role: "Data Engineer",
+  });
+  assert.equal(status, "ACTIVE_JOB");
+});
+
 test("a removed posting is closed", () => {
   const status = classifyJobPage({
     url: "https://www.comeet.com/jobs/stampli/example",

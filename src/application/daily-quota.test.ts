@@ -5,13 +5,14 @@ import path from "node:path";
 import test from "node:test";
 import { countsTowardDailyLimit, quotaSnapshot, rememberQuotaUse } from "./daily-quota.js";
 
-test("a missing job does not use a daily slot", () => {
+test("only a confirmed application uses a daily slot", () => {
+  assert.equal(countsTowardDailyLimit("applied"), true);
   assert.equal(countsTowardDailyLimit("closed"), false);
   assert.equal(countsTowardDailyLimit("quota_reached"), false);
   assert.equal(countsTowardDailyLimit("budget_reached"), false);
-  assert.equal(countsTowardDailyLimit("applied"), true);
-  assert.equal(countsTowardDailyLimit("review"), true);
-  assert.equal(countsTowardDailyLimit("not_relevant"), true);
+  assert.equal(countsTowardDailyLimit("review"), false);
+  assert.equal(countsTowardDailyLimit("failed"), false);
+  assert.equal(countsTowardDailyLimit("not_relevant"), false);
   assert.equal(countsTowardDailyLimit("already_submitted"), false);
   assert.equal(countsTowardDailyLimit("location_ineligible"), false);
 });
