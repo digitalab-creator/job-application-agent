@@ -26,13 +26,24 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
       };
     }).angular;
 
+    const shouldSyncField = (field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement) => {
+      if (field.disabled || field.type === "hidden" || field.type === "file" || field.type === "checkbox" || field.type === "radio") {
+        return false;
+      }
+      return true;
+    };
+
     if (angular) {
       document.querySelectorAll("input, textarea, select").forEach((element) => {
-        element.dispatchEvent(new Event("input", { bubbles: true }));
-        element.dispatchEvent(new Event("change", { bubbles: true }));
-        element.dispatchEvent(new Event("blur", { bubbles: true }));
-        angular.element(element).triggerHandler("input");
-        angular.element(element).triggerHandler("change");
+        const field = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        if (!shouldSyncField(field)) {
+          return;
+        }
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+        field.dispatchEvent(new Event("blur", { bubbles: true }));
+        angular.element(field).triggerHandler("input");
+        angular.element(field).triggerHandler("change");
       });
     }
 
@@ -70,7 +81,7 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
     }
     if (angular) {
       const ngScope = angular.element(button).scope();
-      if (typeof ngScope.apply === "function") {
+      if (ngScope && typeof ngScope.apply === "function") {
         ngScope.$apply(() => {
           ngScope.apply?.();
         });

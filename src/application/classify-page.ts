@@ -20,7 +20,7 @@ export function classifyJobPage(input: {
   if (blob.trim().length < 80) {
     return "UNKNOWN";
   }
-  if (roleMentioned(input.role, blob) || /apply/i.test(blob)) {
+  if (roleMentioned(input.role, blob) || /apply|הגש(?:ת)? מועמדות|שלח(?:ו)? קו|לחץ להגשה/i.test(blob)) {
     return "ACTIVE_JOB";
   }
   if (CAREERS.test(blob)) {

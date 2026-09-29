@@ -302,24 +302,35 @@ function digitsOnly(value: string): string {
 }
 
 export async function uploadResume(page: Page, cvPath: string): Promise<boolean> {
+  const fileName = cvPath.split("/").pop() || "cv.pdf";
   const scopes: FormScope[] = [page, ...page.frames()];
+  const ranked: Array<{ scope: FormScope; index: number; rank: number }> = [];
   for (const scope of scopes) {
     const inputs = scope.locator('input[type="file"]');
     const count = await inputs.count().catch(() => 0);
     for (let index = 0; index < count; index += 1) {
-      const input = inputs.nth(index);
-      try {
-        await input.setInputFiles(cvPath);
-      } catch (error) {
-        log("CV_UPLOAD_RETRY", { message: error instanceof Error ? error.message : "setInputFiles_failed" });
-        continue;
-      }
-      const attached = await input.evaluate((element) => (element as HTMLInputElement).files?.[0]?.name ?? "").catch(() => "");
-      if (attached.toLowerCase().endsWith(".pdf")) {
-        log("CV_UPLOADED", { file: attached });
-        return true;
-      }
+      const hint = await inputs.nth(index).evaluate((element) => {
+        const input = element as HTMLInputElement;
+        return `${input.name} ${input.id} ${input.accept} ${input.getAttribute("aria-label") || ""}`.toLowerCase();
+      }).catch(() => "");
+      const rank = /resume|cv|curriculum/.test(hint) ? 2 : /cover|portfolio/.test(hint) ? 0 : 1;
+      ranked.push({ scope, index, rank });
     }
+  }
+  ranked.sort((left, right) => right.rank - left.rank);
+  for (const candidate of ranked) {
+    if (candidate.rank === 0) {
+      continue;
+    }
+    const input = candidate.scope.locator('input[type="file"]').nth(candidate.index);
+    try {
+      await input.setInputFiles(cvPath, { timeout: 5000 });
+    } catch (error) {
+      log("CV_UPLOAD_RETRY", { message: error instanceof Error ? error.message : "setInputFiles_failed" });
+      continue;
+    }
+    log("CV_UPLOADED", { file: fileName });
+    return true;
   }
   return false;
 }

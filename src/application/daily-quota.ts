@@ -15,13 +15,9 @@ type QuotaRow = {
   status: string;
 };
 
-/** A removed job, a duplicate, or a non-Israel role must not use a daily slot. */
+/** Only a confirmed send uses a daily slot. Review and skips stay available for a later fix. */
 export function countsTowardDailyLimit(status: string): boolean {
-  return status !== "closed"
-    && status !== "quota_reached"
-    && status !== "budget_reached"
-    && status !== "already_submitted"
-    && status !== "location_ineligible";
+  return status === "applied";
 }
 
 export function dailyApplyLimit(): number {
