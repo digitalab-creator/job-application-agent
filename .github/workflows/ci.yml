@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-test:
     name: Typecheck and unit tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, digitalab-prod]
     timeout-minutes: 20
     steps:
       - name: Checkout
