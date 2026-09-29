@@ -2,7 +2,11 @@ import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
 import { classifyJobPage } from "../application/classify-page.js";
-import { fillFields, readFields, richestFormScope, uploadResume } from "../browser/form-filler.js";
+import { applyFormScope, fillFields, readFields, uploadResume, waitForResumeUploadTarget, type FormScope } from "../browser/form-filler.js";
+import { candidate } from "../config/candidate.js";
+import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
+import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
+import { navigationRetryUrls } from "./job-navigation-url.js";
 import { submitApplication } from "../browser/submit-application.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { saveScreenshot } from "../browser/screenshot.js";
@@ -16,7 +20,7 @@ import { alreadySubmitted, rememberSubmission } from "./ledger.js";
 import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { isDiscoveryLocationEligible } from "../discovery/location-eligibility.js";
-import { detectCaptcha, detectConfirmation, detectLoginWall } from "./verify-submission.js";
+import { detectCaptcha, detectConfirmation, detectEmailVerification, detectLoginWall } from "./verify-submission.js";
 
 export type ApplyInput = {
   row?: number;
@@ -53,7 +57,26 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   page.setDefaultNavigationTimeout(env.navigationTimeoutMs);
   page.setDefaultTimeout(env.actionTimeoutMs);
   try {
-    await openJob(page, input.job.url);
+    try {
+      await openJob(page, input.job.url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "navigation_failed";
+      log("JOB_NAVIGATION_FAILED", { url: input.job.url, message });
+      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "navigation_failed",
+        notes: lines([
+          "result=review",
+          "blocker=navigation_failed",
+          message.split("\n", 1)[0],
+          "Could not open the job page in the browser.",
+        ]),
+        screenshots,
+      });
+    }
     log("JOB_OPENED", { url: page.url(), company: input.job.company, role: input.job.role });
     const listingNote = await enterBestOpening(page, input.job.role, input.job.company);
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
@@ -173,6 +196,10 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
 
     await dismissOverlays(page);
     await revealApplyForm(page);
+    await dismissOverlays(page);
+    await page.evaluate(() => {
+      document.querySelector("#application-form, .application--form, iframe[src*='greenhouse']")?.scrollIntoView({ block: "center" });
+    }).catch(() => undefined);
     if (await detectCaptcha(page)) {
       log("CAPTCHA_REQUIRED", { company: input.job.company });
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
@@ -201,7 +228,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
 
-    const scope = await richestFormScope(page);
+    const scope = await applyFormScope(page);
     const fields = await readFields(scope);
     log("FORM_DETECTED", { fields: fields.map((field) => field.label) });
     if (fields.length === 0) {
@@ -233,6 +260,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       jobText: jobBrief(bodyText),
     });
     const uploaded = await uploadResume(page, cv.cvPath);
+    const greenhouseFrame = greenhouseJobAppFrame(page);
+    if (greenhouseFrame) {
+      await dismissOverlays(page);
+      await finalizeGreenhouseApplyForm(greenhouseFrame).catch((error) => {
+        log("GREENHOUSE_FINALIZE_FAILED", { message: error instanceof Error ? error.message : "finalize_failed" });
+      });
+    }
     if (!uploaded) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       return result(input, {
@@ -301,7 +335,53 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(8000);
+    for (const frame of page.frames()) {
+      if (/greenhouse\.io/i.test(frame.url())) {
+        await frame.waitForURL(/application_id=|greenhouse\.io/, { timeout: 12_000 }).catch(() => undefined);
+        break;
+      }
+    }
+    const greenhouseAfter = greenhouseJobAppFrame(page) ? await inspectGreenhouseAfterSubmit(page) : null;
+    if (greenhouseAfter) {
+      log("GREENHOUSE_AFTER_SUBMIT", {
+        kind: greenhouseAfter.kind,
+        recaptcha: greenhouseAfter.recaptcha,
+        cheqInvalid: greenhouseAfter.cheqInvalid,
+        excerpt: greenhouseAfter.excerpt.slice(0, 240),
+      });
+      await scrollGreenhouseFormIntoView(page);
+    }
+    if (greenhouseAfter?.kind === "form_still_open" || greenhouseAfter?.kind === "validation") {
+      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      const validation = greenhouseAfter.kind === "validation";
+      const why = greenhouseAfter.recaptcha === "challenge"
+        ? "Greenhouse showed a visible reCAPTCHA challenge, so the application was not accepted."
+        : validation
+          ? "Greenhouse kept the form open and showed a validation error. The application was not accepted."
+          : "The Submit application button is still on the form. The click did not leave the application form.";
+      const blocker = greenhouseAfter.recaptcha === "challenge" ? "captcha" : validation ? "form_validation" : "submit_not_accepted";
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker,
+        persona,
+        ...cv.publicFields,
+        answers: filled.answers,
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=review",
+          `blocker=${blocker}`,
+          `greenhouse_kind=${greenhouseAfter.kind}`,
+          `recaptcha=${greenhouseAfter.recaptcha}`,
+          `cheq_invalid=${greenhouseAfter.cheqInvalid}`,
+          `greenhouse_excerpt=${greenhouseAfter.excerpt}`,
+          why,
+        ]),
+        screenshots,
+      });
+    }
     if (await detectCaptcha(page)) {
       log("CAPTCHA_REQUIRED", { company: input.job.company, stage: "after_submit" });
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
@@ -325,6 +405,16 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         notes: lines(["result=review", "blocker=captcha", "The site asked for a human validation task. The form is still open, so this was not submitted."]),
         screenshots,
       });
+    }
+    const otpResolved = await resolveGreenhouseEmailVerification(page, scope, input, {
+      persona,
+      cvPublicFields: cv.publicFields,
+      filledAnswers: filled.answers,
+      shotDir,
+      screenshots,
+    });
+    if (otpResolved) {
+      return otpResolved;
     }
     const confirmed = await detectConfirmation(page);
     screenshots.push(await saveScreenshot(page, shotDir, confirmed.ok ? "confirmation.png" : "blocker.png"));
@@ -429,15 +519,24 @@ async function humanPause(page: Page, minMs: number, maxMs: number): Promise<voi
 
 async function openJob(page: Page, url: string): Promise<void> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await page.goto(url, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
-      await dismissOverlays(page);
-      return;
-    } catch (error) {
-      lastError = error;
-      log("NAVIGATION_RETRY", { attempt, url });
+  const targets = navigationRetryUrls(url);
+  for (const target of targets) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      for (const waitUntil of ["domcontentloaded", "commit"] as const) {
+        try {
+          await page.goto(target, { waitUntil });
+          await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
+          await dismissOverlays(page);
+          return;
+        } catch (error) {
+          lastError = error;
+          const message = error instanceof Error ? error.message : "";
+          log("NAVIGATION_RETRY", { attempt, url: target, waitUntil, message: message.split("\n", 1)[0] });
+          if (!/ERR_TOO_MANY_REDIRECTS/i.test(message)) {
+            break;
+          }
+        }
+      }
     }
   }
   throw lastError instanceof Error ? lastError : new Error("navigation_failed");
@@ -461,6 +560,16 @@ function atsLabel(url: string): string {
 }
 
 async function dismissOverlays(page: Page): Promise<void> {
+  const oneTrust = page.locator("#onetrust-accept-btn-handler").first();
+  if (await oneTrust.count()) {
+    await oneTrust.click({ timeout: 4000, force: true }).catch(() => undefined);
+    await page.waitForTimeout(600);
+  }
+  const acceptAllCookies = page.getByRole("button", { name: /accept all cookies/i }).first();
+  if (await acceptAllCookies.count()) {
+    await acceptAllCookies.click({ timeout: 4000, force: true }).catch(() => undefined);
+    await page.waitForTimeout(600);
+  }
   const cookie = page.getByText(/^הבנתי$|^accept all$|^i understand$/i).first();
   if (await cookie.count()) {
     await cookie.click({ timeout: 2000 }).catch(() => undefined);
@@ -475,7 +584,7 @@ async function dismissOverlays(page: Page): Promise<void> {
 }
 
 async function revealApplyForm(page: Page): Promise<void> {
-  if (await pageHasResumeField(page) || await page.locator('input[type="email"]').count()) {
+  if (await pageHasResumeField(page)) {
     return;
   }
   const applyLabel = /apply|הגש|מועמדות/i;
@@ -497,6 +606,118 @@ async function revealApplyForm(page: Page): Promise<void> {
   if (clicked) {
     await page.locator('input[type="file"], input[type="email"]').first().waitFor({ timeout: 15_000 }).catch(() => undefined);
   }
+  await waitForResumeUploadTarget(page, 20_000).catch(() => undefined);
+}
+
+async function resolveGreenhouseEmailVerification(
+  page: Page,
+  scope: FormScope,
+  input: ApplyInput,
+  ctx: {
+    persona: Persona;
+    cvPublicFields: Omit<ApplicationResult, "jobUrl" | "status" | "submitted" | "confirmationDetected" | "notes">;
+    filledAnswers: ApplicationResult["answers"];
+    shotDir: string;
+    screenshots: string[];
+  },
+): Promise<ApplicationResult | null> {
+  const greenhouseAfter = greenhouseJobAppFrame(page) ? await inspectGreenhouseAfterSubmit(page) : null;
+  if (greenhouseAfter?.kind !== "email_verification" && !(await detectEmailVerification(page))) {
+    return null;
+  }
+  log("EMAIL_VERIFICATION_REQUIRED", { company: input.job.company, url: page.url() });
+  const notBefore = new Date(Date.now() - 45_000).toISOString();
+  const code = await pollGreenhouseOtp({
+    mailbox: candidate.email,
+    notBefore,
+    company: input.job.company,
+  });
+  if (!code) {
+    ctx.screenshots.push(await saveScreenshot(page, ctx.shotDir, "blocker.png"));
+    return result(input, {
+      status: "review",
+      submitted: true,
+      confirmationDetected: false,
+      blocker: "email_verification_required",
+      persona: ctx.persona,
+      ...ctx.cvPublicFields,
+      answers: ctx.filledAnswers,
+      canonicalJobUrl: page.url(),
+      notes: lines([
+        "result=review",
+        "blocker=email_verification_required",
+        "Greenhouse asked for an email verification code. n8n Gmail OTP webhook returned no code in time.",
+        "Check GREENHOUSE_OTP_WEBHOOK_URL and that the greenhouse-apply-otp workflow is active.",
+      ]),
+      screenshots: ctx.screenshots,
+    });
+  }
+  const entered = await enterGreenhouseSecurityCode(page, code);
+  if (!entered) {
+    ctx.screenshots.push(await saveScreenshot(page, ctx.shotDir, "blocker.png"));
+    return result(input, {
+      status: "review",
+      submitted: true,
+      confirmationDetected: false,
+      blocker: "email_verification_required",
+      persona: ctx.persona,
+      ...ctx.cvPublicFields,
+      answers: ctx.filledAnswers,
+      canonicalJobUrl: page.url(),
+      notes: lines([
+        "result=review",
+        "blocker=email_verification_required",
+        "OTP was fetched but the Security code field could not be filled.",
+      ]),
+      screenshots: ctx.screenshots,
+    });
+  }
+  await dismissOverlays(page);
+  await humanPause(page, 400, 900);
+  const resubmit = await submitApplication(page, scope);
+  log("GREENHOUSE_OTP_RESUBMIT", { clicked: resubmit.clicked, invalid: resubmit.invalid });
+  if (!resubmit.clicked) {
+    ctx.screenshots.push(await saveScreenshot(page, ctx.shotDir, "blocker.png"));
+    return result(input, {
+      status: "review",
+      submitted: true,
+      confirmationDetected: false,
+      blocker: "email_verification_required",
+      persona: ctx.persona,
+      ...ctx.cvPublicFields,
+      answers: ctx.filledAnswers,
+      canonicalJobUrl: page.url(),
+      notes: lines([
+        "result=review",
+        "blocker=email_verification_required",
+        `otp_resubmit=${resubmit.invalid.join(",") || "not_clicked"}`,
+        "The security code was typed, but Greenhouse did not enable Submit application.",
+      ]),
+      screenshots: ctx.screenshots,
+    });
+  }
+  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  await page.waitForTimeout(6000);
+  if (await detectEmailVerification(page)) {
+    ctx.screenshots.push(await saveScreenshot(page, ctx.shotDir, "blocker.png"));
+    return result(input, {
+      status: "review",
+      submitted: true,
+      confirmationDetected: false,
+      blocker: "email_verification_required",
+      persona: ctx.persona,
+      ...ctx.cvPublicFields,
+      answers: ctx.filledAnswers,
+      canonicalJobUrl: page.url(),
+      notes: lines([
+        "result=review",
+        "blocker=email_verification_required",
+        "OTP was entered but Greenhouse still shows the verification step.",
+      ]),
+      screenshots: ctx.screenshots,
+    });
+  }
+  return null;
 }
 
 function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): ApplicationResult {

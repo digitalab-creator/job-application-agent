@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { greenhouseJobAppFrame } from "../application/greenhouse.js";
 import { SUBMIT_LABEL_PATTERN } from "../application/submit-label.js";
 import type { FormScope } from "./form-filler.js";
 
@@ -13,7 +14,7 @@ export type SubmitAttempt = {
  * Other sites, including Elementor career forms, use a normal Apply button.
  */
 export async function submitApplication(page: Page, scope: FormScope): Promise<SubmitAttempt> {
-  const frame = page.frames().find((item) => item.url().includes("/apply?"));
+  const frame = greenhouseJobAppFrame(page) ?? page.frames().find((item) => item.url().includes("/apply?"));
   const target: FormScope = frame ?? scope;
   const prepared = await target.evaluate((pattern) => {
     const rule = new RegExp(pattern, "i");

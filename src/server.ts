@@ -146,22 +146,36 @@ const server = http.createServer(async (req, res) => {
           });
           return;
         }
-        const tracked = await withJobCost(input.job.url, () => withApplySession((context) => applyToJob(context, input)));
-        rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
-        const quota = quotaSnapshot();
-        const budget = budgetSnapshot();
-        const outcome = tracked.result;
-        outcome.llmCostUsd = tracked.usd;
-        outcome.quota = quota;
-        outcome.budget = compactBudget(budget);
-        outcome.notes = [
-          outcome.notes,
-          `llm_cost_usd=${tracked.usd}`,
-          `llm_calls=${tracked.calls}`,
-          `daily_quota=${quota.counted}/${quota.limit}`,
-          `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
-        ].filter(Boolean).join("\n");
-        send(res, 200, outcome);
+        try {
+          const tracked = await withJobCost(input.job.url, () => withApplySession((context) => applyToJob(context, input)));
+          rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
+          const quota = quotaSnapshot();
+          const budget = budgetSnapshot();
+          const outcome = tracked.result;
+          outcome.llmCostUsd = tracked.usd;
+          outcome.quota = quota;
+          outcome.budget = compactBudget(budget);
+          outcome.notes = [
+            outcome.notes,
+            `llm_cost_usd=${tracked.usd}`,
+            `llm_calls=${tracked.calls}`,
+            `daily_quota=${quota.counted}/${quota.limit}`,
+            `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
+          ].filter(Boolean).join("\n");
+          send(res, 200, outcome);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "request_failed";
+          log("REQUEST_FAILED", { message });
+          rememberQuotaUse({ url: input.job.url, status: "review" });
+          send(res, 200, {
+            status: "review",
+            jobUrl: input.job.url,
+            submitted: false,
+            confirmationDetected: false,
+            blocker: "navigation_failed",
+            notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
+          });
+        }
       } finally {
         busy = false;
       }

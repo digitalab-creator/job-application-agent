@@ -27,3 +27,7 @@ test("Hunt's hidden not-enough-experience note is not a confirmation", () => {
 test("hebrew receipt counts", () => {
   assert.ok(thankYouMatch("תודה, המועמדות שלך התקבלה"));
 });
+
+test("generic thanks for applying counts", () => {
+  assert.ok(thankYouMatch("Thanks for applying to Software Engineering Team Manager at Orca Security!"));
+});

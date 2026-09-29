@@ -1,0 +1,81 @@
+# fix-apply-review-row
+
+**Business outcome:** Turn one stuck **Review** sheet row into either a **working auto-apply** or a clear **won’t-fix** with evidence—without manual log spelunking.
+
+Root: `/opt/apps/job-application-agent`. Apply workflow: **Apply to jobs (daily)** `fcYSvcG7IiP8xAqr`.
+
+## 1. Triage (agent must run first)
+
+```bash
+python3 /opt/apps/job-application-agent/scripts/triage-review-row.py
+```
+
+Optional:
+
+```bash
+python3 /opt/apps/job-application-agent/scripts/triage-review-row.py --row 195
+python3 /opt/apps/job-application-agent/scripts/triage-review-row.py --url orca.security
+python3 /opt/apps/job-application-agent/scripts/triage-review-row.py --json
+```
+
+Paste for the user: **row, job link, blocker, sheet notes**, and **likely code area** from the script. Do **not** print tokens or full `.env`.
+
+## 2. Classify the failure
+
+| Blocker | Usually fixable in code? | Where to look |
+|--------|---------------------------|---------------|
+| `navigation_failed` | Yes | `job-navigation-url.ts`, `openJob()` in `apply-job.ts`, `server.ts` (no 500 on apply) |
+| `cv_upload_failed` | Yes | `form-filler.ts` (iframe wait, file inputs), `revealApplyForm()` |
+| `form_validation` / `VALIDATION_FAILED` logs | Yes | `form-filler.ts`, `field-map.ts`, `media-answers.ts` |
+| `missing_fact` / `REVIEW_REQUIRED` | Often yes | `field-map.ts`, `facts.ts`, `answer-question.ts` |
+| `form_not_detected` | Often yes | `revealApplyForm()`, `applyFormScope()`, `classify-page.ts` |
+| `careers_page` / `no_matching_opening` | Sometimes | `pick-opening.ts`, job URL on sheet |
+| `email_verification_required` | Yes (n8n Gmail OTP) | `greenhouse-otp-fetch.ts`, n8n `greenhouse-apply-otp`, `enterGreenhouseSecurityCode()` |
+| `submit_not_accepted` | Diagnose first | `greenhouse-post-submit.ts` — form still shows Submit application (often invisible reCAPTCHA) |
+| `captcha` | No (manual) | Report; optional headed browser note |
+| `login_required` | No (v1) | Report; mark not automatable unless product asks |
+| `cv_generation_failed` | Yes | `cv/generate.ts`, `cv/validate.ts` |
+| `already_submitted` | No | Ledger / duplicate URL |
+
+If logs show `REQUEST_FAILED` / redirect errors, treat as **navigation_failed** even when the sheet still says `New`.
+
+## 3. Fix loop (code changes only when classification says yes)
+
+1. **Reproduce** with dry-run (never `submit: true` unless the user explicitly asks):
+
+   ```bash
+   TOKEN=$(grep '^APPLY_API_TOKEN=' /opt/apps/job-application-agent/.env | cut -d= -f2-)
+   curl -s -X POST http://127.0.0.1:3099/apply \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"submit":false,"ignoreLedger":true,"job":{"company":"…","role":"…","url":"…"}}'
+   ```
+
+2. **Implement** the smallest fix in this repo (match existing patterns; add/adjust unit tests when logic is pure).
+
+3. **Verify locally:**
+
+   ```bash
+   cd /opt/apps/job-application-agent && docker compose build job-application-agent && docker compose up -d job-application-agent
+   ```
+
+   Re-run the same `curl` dry-run. Success = no `navigation_failed` / `cv_upload_failed` (or prior blocker cleared); notes mention CV attached or form filled.
+
+4. **Tell the user:** job link, what broke, what changed, dry-run result. Offer real submit only if they ask.
+
+5. **Do not** run `/ship`, n8n apply webhooks, or `submit: true` unless the user requests it.
+
+## 4. When not to code
+
+- One-off site outage, geo block, or captcha → explain; leave row on **Review**.
+- Bad sheet URL (listing page, LinkedIn authwall) → suggest sheet fix or `isAutomatableApplyUrl` skip; code only if the worker should detect and set a clearer blocker.
+
+## SSOT
+
+- Triage data: `scripts/triage-review-row.py`
+- This file: runbook only. Update the script when new blockers or n8n node names change.
+
+## Related
+
+- Pipeline overview: `daily-apply-report` command
+- Deploy after merge: `.cursor/extensions/ship.md`
