@@ -23,7 +23,36 @@ CONTAINER = "job-application-agent"
 TZ = ZoneInfo("Asia/Jerusalem")
 
 BLOCKER_RE = re.compile(r"^blocker=(\S+)", re.M)
-RESULT_RE = re.compile(r"^result=(\S+)", re.M)
+
+# Keep in sync with src/application/classify-page.ts (NOT_FOUND / CLOSED hero rules).
+NOT_FOUND_RE = re.compile(r"\b404\b|page not found|job not found", re.I)
+CLOSED_RE = re.compile(
+    r"no longer (available|accepting)|position (has been |is )?closed|"
+    r"this job has expired|no longer accepting applications|position has been filled|"
+    r"job (is )?not available|we're sorry, but there are currently no open positions",
+    re.I,
+)
+TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.DOTALL)
+TAG_RE = re.compile(r"<[^>]+>")
+
+NON_CODE_FIXABLE = frozenset({"captcha", "login_required", "already_submitted", "dry_run"})
+CODE_FIXABLE = frozenset({
+    "navigation_failed",
+    "cv_upload_failed",
+    "form_validation",
+    "missing_fact",
+    "form_not_detected",
+    "careers_page",
+    "no_matching_opening",
+    "email_verification_required",
+    "submit_not_accepted",
+    "cv_generation_failed",
+    "confirmation_not_detected",
+    "unknown",
+})
+LIVE_DEAD = frozenset({"NOT_FOUND", "CLOSED"})
+
+_PROBE_CACHE: dict[str, tuple[str | None, str]] = {}
 
 
 @dataclass
@@ -145,25 +174,70 @@ def collect_review_rows(runs: dict, execution_id: int) -> list[ReviewRow]:
     return sorted(by_key.values(), key=sort_key)
 
 
-def pick_row(rows: list[ReviewRow], row_number: int | None, job_url: str | None) -> ReviewRow | None:
-    if row_number is not None:
-        for row in rows:
-            if row.row_number == row_number:
-                return row
-        return None
-    if job_url:
-        needle = job_url.strip().lower()
-        for row in rows:
-            if needle in row.job_url.lower():
-                return row
-        return None
-    for row in rows:
-        if row.blocker:
-            return row
-    return rows[0] if rows else None
+def html_to_text(html: str, limit: int = 15_000) -> str:
+    text = TAG_RE.sub(" ", html)
+    return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
-def worker_log_events(job_url: str, hours: int = 72) -> list[dict]:
+def role_mentioned(role: str, text: str) -> bool:
+    words = [w for w in re.split(r"[^a-z0-9]+", role.lower()) if len(w) > 3]
+    if not words:
+        return False
+    haystack = text.lower()
+    hits = sum(1 for word in words if word in haystack)
+    return hits >= (len(words) + 1) // 2
+
+
+def quick_live_job_status(url: str, role: str, timeout: int = 22) -> tuple[str | None, str]:
+    """HTTP probe for dead links only. None = alive (includes careers/listing pages)."""
+    if not url.lower().startswith("http"):
+        return None, "not_http"
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; job-application-agent-triage/1.0)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = int(getattr(resp, "status", 200) or 200)
+            final_url = resp.geturl()
+            raw = resp.read(280_000).decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        status = err.code
+        final_url = err.geturl()
+        raw = err.read(160_000).decode("utf-8", "replace") if err.fp else ""
+        if status == 404:
+            return "NOT_FOUND", "http_404"
+    except (urllib.error.URLError, TimeoutError, ValueError) as err:
+        return None, f"probe_failed:{type(err).__name__}"
+
+    if status == 404:
+        return "NOT_FOUND", "http_404"
+
+    title_match = TITLE_RE.search(raw)
+    title = html_to_text(title_match.group(1), 500) if title_match else ""
+    text = html_to_text(raw)
+    hero = f"{title}\n{text[:1800]}"
+
+    if NOT_FOUND_RE.search(title) or (NOT_FOUND_RE.search(hero) and not role_mentioned(role, hero)):
+        return "NOT_FOUND", "hero_404"
+
+    blob = f"{title}\n{text}"
+    if CLOSED_RE.search(blob):
+        return "CLOSED", "posting_closed"
+
+    return None, final_url[:160]
+
+
+def cached_live_probe(row: ReviewRow, enabled: bool) -> tuple[str | None, str]:
+    if not enabled or not row.job_url.strip():
+        return None, "live_check_disabled"
+    key = row.job_url.strip()
+    if key not in _PROBE_CACHE:
+        _PROBE_CACHE[key] = quick_live_job_status(key, row.role)
+    return _PROBE_CACHE[key]
+
+
+def worker_log_events(job_url: str, company: str = "", hours: int = 72) -> list[dict]:
     try:
         raw = subprocess.check_output(
             ["docker", "logs", CONTAINER, f"--since={hours}h"],
@@ -178,18 +252,115 @@ def worker_log_events(job_url: str, hours: int = 72) -> list[dict]:
         host = job_url.split("/")[2].lower()
     except IndexError:
         host = job_url.lower()
+    company_key = company.strip().lower()
     events: list[dict] = []
     for line in raw.splitlines():
         line = line.strip()
         if not line.startswith("{"):
             continue
-        if host and host not in line.lower():
-            continue
+        line_lower = line.lower()
+        if host and host not in line_lower:
+            if '"event":"CAPTCHA_REQUIRED"' in line and company_key:
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ev_company = str(payload.get("company", "")).strip().lower()
+                if not (ev_company == company_key or company_key in ev_company or ev_company in company_key):
+                    continue
+            else:
+                continue
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
             continue
     return events[-40:]
+
+
+def infer_blocker_from_logs(row: ReviewRow, events: list[dict]) -> str | None:
+    company = row.company.strip().lower()
+    for ev in reversed(events):
+        event = ev.get("event", "")
+        if event == "CAPTCHA_REQUIRED":
+            ev_company = str(ev.get("company", "")).strip().lower()
+            if company and (ev_company == company or company in ev_company or ev_company in company):
+                return "captcha"
+        if event == "CV_UPLOADED":
+            return None
+        if event in {"VALIDATION_FAILED", "REVIEW_REQUIRED"}:
+            return "form_validation"
+    return None
+
+
+def effective_blocker(row: ReviewRow, events: list[dict]) -> str:
+    inferred = infer_blocker_from_logs(row, events)
+    if inferred:
+        return inferred
+    return row.blocker or "unknown"
+
+
+def is_code_fixable(blocker: str) -> bool:
+    key = (blocker or "unknown").strip()
+    if key in NON_CODE_FIXABLE:
+        return False
+    if key in CODE_FIXABLE:
+        return True
+    return key not in NON_CODE_FIXABLE
+
+
+def blocker_rank(blocker: str) -> int:
+    priority = {
+        "cv_upload_failed": 0,
+        "navigation_failed": 1,
+        "form_not_detected": 2,
+        "missing_fact": 3,
+        "form_validation": 4,
+        "submit_not_accepted": 5,
+        "email_verification_required": 6,
+        "cv_generation_failed": 7,
+        "confirmation_not_detected": 8,
+        "careers_page": 9,
+        "no_matching_opening": 10,
+        "unknown": 11,
+    }
+    return priority.get(blocker, 12)
+
+
+def pick_row(
+    rows: list[ReviewRow],
+    row_number: int | None,
+    job_url: str | None,
+    *,
+    code_fixable_only: bool,
+    live_check: bool,
+) -> ReviewRow | None:
+    if row_number is not None:
+        for row in rows:
+            if row.row_number == row_number:
+                return row
+        return None
+    if job_url:
+        needle = job_url.strip().lower()
+        for row in rows:
+            if needle in row.job_url.lower():
+                return row
+        return None
+
+    pre_candidates: list[tuple[ReviewRow, str]] = []
+    for row in rows:
+        events = worker_log_events(row.job_url, row.company)
+        blocker = effective_blocker(row, events)
+        if code_fixable_only and not is_code_fixable(blocker):
+            continue
+        pre_candidates.append((row, blocker))
+
+    pre_candidates.sort(key=lambda item: (blocker_rank(item[1]), -item[0].row_number))
+    for row, _blocker in pre_candidates:
+        live_status, _live_detail = cached_live_probe(row, live_check)
+        if code_fixable_only and live_status in LIVE_DEAD:
+            continue
+        return row
+    return None
 
 
 def suggest_fix(blocker: str) -> str:
@@ -202,16 +373,27 @@ def suggest_fix(blocker: str) -> str:
         "email_verification_required": "Greenhouse email OTP — finish in headed browser; check inbox for 8-character code.",
         "confirmation_not_detected": "verify-submission.ts + greenhouse.ts; may be OTP or thank-you copy.",
         "login_required": "No account flow in v1. Status Manual (manual_required).",
-        "careers_page": "pick-opening.ts or fix job URL to a single posting.",
+        "careers_page": "pick-opening.ts — worker should pick best listing match, not skip as dead URL.",
         "no_matching_opening": "pick-opening.ts / listing_match logic.",
         "form_validation": "form-filler.ts field types (phone, checkbox, select).",
         "cv_generation_failed": "src/cv/generate.ts + validate.ts truth gates.",
         "already_submitted": "Ledger hit; no code fix unless URL normalization wrong.",
+        "NOT_FOUND": "Dead sheet URL (404). Set sheet Status Closed; fix discover URL — not worker code.",
+        "CLOSED": "Posting removed on site. Set sheet Status Closed — not worker code.",
     }
     return hints.get(blocker, "Inspect worker logs and apply-job.ts blocker path; add test if repeatable.")
 
 
-def print_report(row: ReviewRow, events: list[dict], as_json: bool) -> None:
+def print_report(
+    row: ReviewRow,
+    events: list[dict],
+    as_json: bool,
+    *,
+    live_status: str | None,
+    live_detail: str,
+) -> None:
+    eff = effective_blocker(row, events)
+    log_blocker = infer_blocker_from_logs(row, events)
     interesting = [
         e for e in events
         if e.get("event") in {
@@ -237,7 +419,13 @@ def print_report(row: ReviewRow, events: list[dict], as_json: bool) -> None:
     )
     payload = {
         "selected": row.as_dict(),
-        "fix_hint": suggest_fix(row.blocker),
+        "effective_blocker": eff,
+        "sheet_blocker": row.blocker,
+        "log_blocker": log_blocker,
+        "code_fixable": is_code_fixable(eff),
+        "live_probe_status": live_status,
+        "live_probe_detail": live_detail,
+        "fix_hint": suggest_fix(eff if live_status not in LIVE_DEAD else live_status),
         "worker_events": interesting[-15:],
         "repro_dry_run_body": repro_body,
     }
@@ -250,13 +438,23 @@ def print_report(row: ReviewRow, events: list[dict], as_json: bool) -> None:
     print(f"- **Row:** {row.row_number}")
     print(f"- **Company / role:** {row.company} — {row.role}")
     print(f"- **Job URL:** {row.job_url}")
-    print(f"- **Blocker:** `{row.blocker or 'unknown'}` (from sheet notes, source={row.source})")
+    print(f"- **Code-fixable:** {'yes' if is_code_fixable(eff) and live_status not in LIVE_DEAD else 'no'}")
+    if live_status in LIVE_DEAD:
+        print(f"- **Live URL:** `{live_status}` ({live_detail}) — sheet should be **Closed**, not a code-fix target")
+    elif live_status is None and live_detail not in ("live_check_disabled",):
+        print(f"- **Live URL:** looks alive ({live_detail[:120]})")
+    print(f"- **Blocker:** `{eff or 'unknown'}`", end="")
+    if log_blocker and log_blocker != row.blocker:
+        print(f" (worker log; sheet notes still say `{row.blocker}`)", end="")
+    else:
+        print(f" (from sheet notes, source={row.source})", end="")
+    print()
     if row.execution_id:
         print(f"- **n8n apply execution:** `{row.execution_id}`")
     print("\n## Sheet notes")
     print(row.notes.strip() or "_(empty)_")
     print("\n## Likely code area")
-    print(suggest_fix(row.blocker))
+    print(suggest_fix(eff if live_status not in LIVE_DEAD else live_status))
     if interesting:
         print("\n## Worker log (filtered)")
         for ev in interesting[-10:]:
@@ -291,7 +489,26 @@ def main() -> int:
     parser.add_argument("--row", type=int, default=None, help="Sheet row_number to inspect")
     parser.add_argument("--url", type=str, default=None, help="Substring match on Job URL")
     parser.add_argument("--json", action="store_true", help="Machine-readable output")
+    parser.add_argument(
+        "--code-fixable-only",
+        action="store_true",
+        help="Pick the first Review row worth a code fix (default when no --row/--url)",
+    )
+    parser.add_argument(
+        "--include-non-fixable",
+        action="store_true",
+        help="Allow captcha/login/already_submitted rows when picking",
+    )
+    parser.add_argument(
+        "--no-live-check",
+        action="store_true",
+        help="Do not HTTP-probe Job URLs for 404/closed (faster, less accurate)",
+    )
     args = parser.parse_args()
+    code_fixable_only = args.code_fixable_only or (
+        args.row is None and args.url is None and not args.include_non_fixable
+    )
+    live_check = not args.no_live_check
 
     api = load_n8n_api_key()
     if not api:
@@ -306,12 +523,26 @@ def main() -> int:
     if not rows:
         print("triage-review-row: no Review rows in latest apply execution", file=sys.stderr)
         return 1
-    selected = pick_row(rows, args.row, args.url)
+    selected = pick_row(
+        rows,
+        args.row,
+        args.url,
+        code_fixable_only=code_fixable_only,
+        live_check=live_check,
+    )
     if not selected:
-        print("triage-review-row: no matching Review row for filters", file=sys.stderr)
+        if code_fixable_only:
+            print(
+                "triage-review-row: no code-fixable Review rows after filters "
+                "(skipped captcha/login, dead 404/closed URLs, already_submitted)",
+                file=sys.stderr,
+            )
+        else:
+            print("triage-review-row: no matching Review row for filters", file=sys.stderr)
         return 1
-    events = worker_log_events(selected.job_url)
-    print_report(selected, events, args.json)
+    live_status, live_detail = cached_live_probe(selected, live_check)
+    events = worker_log_events(selected.job_url, selected.company)
+    print_report(selected, events, args.json, live_status=live_status, live_detail=live_detail)
     return 0
 
 
