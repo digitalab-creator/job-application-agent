@@ -1,0 +1,17 @@
+---
+description: Skip job discovery when the Google Sheet queue is already deep enough for several apply days.
+globs:
+  - src/discovery/**
+  - scripts/daily-apply-report.py
+  - ../n8n/workflows/auto-export/wf-oreaKVjt7ifi0i6a.json
+---
+
+# Discover only when the queue is thin
+
+**Business rule:** Do not run **Discover jobs (daily)** when sheet `Status=New` count is still **greater than 3× `DAILY_APPLY_LIMIT`** (default 20 → skip when New > 60).
+
+**SSOT:** `shouldSkipDiscoveryForQueueDepth()` in `src/discovery/queue-mix.ts`, enforced in `runDiscovery()` before any board scan.
+
+**n8n:** `Collect URLs` must pass `newQueueStats.statusNew` (all `New` rows, any category) to `POST /discover/scan`.
+
+**Ops:** If discover ran while New was above threshold, fix apply blockers and re-run apply — do not add more rows.

@@ -1,12 +1,15 @@
+import { dailyApplyLimit } from "../application/daily-quota.js";
 import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
 import { env } from "../config/env.js";
 import { withJobCost } from "../llm/cost-ledger.js";
 import { log } from "../logging/logger.js";
 import {
   computeNewQueueStats,
+  DISCOVER_SKIP_NEW_MULTIPLIER,
   formatMixReport,
   rebalancePolicy,
   selectDiscoveryBatch,
+  shouldSkipDiscoveryForQueueDepth,
   type NewQueueStats,
 } from "./queue-mix.js";
 import { fetchBoardJobs } from "./scan-boards.js";
@@ -60,6 +63,28 @@ export async function runDiscovery(input: {
     };
   }
   const queueStats = input.newQueueStats ?? { tech: 0, marketing: 0, total: 0, techPct: 65 };
+  const applyLimit = dailyApplyLimit();
+  if (shouldSkipDiscoveryForQueueDepth(queueStats.statusNew, applyLimit)) {
+    const threshold = applyLimit * DISCOVER_SKIP_NEW_MULTIPLIER;
+    log("DISCOVERY_SKIPPED_QUEUE_DEPTH", {
+      statusNew: queueStats.statusNew,
+      dailyApplyLimit: applyLimit,
+      threshold,
+    });
+    return {
+      status: "skipped",
+      jobs: [],
+      scannedBoards: 0,
+      llmCostUsd: 0,
+      budget: budgetSnapshot(),
+      notes: [
+        `discovery_skipped=queue_depth`,
+        `status_new=${queueStats.statusNew}`,
+        `threshold=${threshold} (${DISCOVER_SKIP_NEW_MULTIPLIER}× daily apply limit ${applyLimit})`,
+        "Sheet still has enough New rows — run apply, not discover.",
+      ].join("\n"),
+    };
+  }
   const policy = rebalancePolicy(queueStats);
   log("DISCOVERY_MIX_POLICY", { mode: policy.mode, techPct: policy.techPct, targetMktBatch: policy.targetMarketingShareOfBatch });
 

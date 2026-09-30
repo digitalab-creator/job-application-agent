@@ -1,21 +1,36 @@
 import type { Page } from "playwright";
+import { captchaSignalFromFrameUrls, type CaptchaSignal } from "./captcha-signal.js";
 import { detectGreenhouseConfirmation } from "./greenhouse.js";
 import { looksLikeLoginWall } from "./login-wall.js";
 import { thankYouMatch } from "./thank-you.js";
 
-export async function detectCaptcha(page: Page): Promise<boolean> {
-  const widgets = await page.locator('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha').count();
-  if (widgets > 0) {
-    return true;
+export type { CaptchaSignal } from "./captcha-signal.js";
+
+export async function classifyCaptchaSignal(page: Page): Promise<CaptchaSignal> {
+  const urls = await collectFrameAndIframeUrls(page);
+  const fromFrames = captchaSignalFromFrameUrls(urls);
+  if (fromFrames === "active_challenge") {
+    return "active_challenge";
   }
-  for (const frame of page.frames()) {
-    const nested = await frame.locator('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha').count().catch(() => 0);
-    if (nested > 0) {
-      return true;
-    }
+  if (await visibleRecaptchaChallengeFrame(page)) {
+    return "active_challenge";
   }
   const text = await page.locator("body").innerText().catch(() => "");
-  return /verify you are human|i'?m not a robot|complete the captcha|answer validation task|protected by hcaptcha/i.test(text);
+  if (activeChallengePrompt(text)) {
+    return "active_challenge";
+  }
+  if (fromFrames === "passive_widget") {
+    return "passive_widget";
+  }
+  if (await passiveCaptchaWidgetPresent(page)) {
+    return "passive_widget";
+  }
+  return "none";
+}
+
+/** @deprecated Use classifyCaptchaSignal() === "active_challenge" */
+export async function detectCaptcha(page: Page): Promise<boolean> {
+  return (await classifyCaptchaSignal(page)) === "active_challenge";
 }
 
 export async function detectEmailVerification(page: Page): Promise<boolean> {
@@ -77,4 +92,43 @@ async function confirmationPhrase(page: Page): Promise<string | null> {
   const heading = await page.locator("h1, h2, [role='alert'], [class*='thank'], [class*='success'], .elementor-message-success").allInnerTexts().catch(() => []);
   chunks.push(...heading);
   return thankYouMatch(chunks.join("\n"), page.url());
+}
+
+async function collectFrameAndIframeUrls(page: Page): Promise<string[]> {
+  const urls = page.frames().map((frame) => frame.url());
+  const iframeSrcs = await page.evaluate(() => (
+    Array.from(document.querySelectorAll("iframe[src]")).map((node) => (node as HTMLIFrameElement).src)
+  )).catch(() => []);
+  return [...urls, ...iframeSrcs];
+}
+
+async function visibleRecaptchaChallengeFrame(page: Page): Promise<boolean> {
+  const loc = page.locator('iframe[src*="recaptcha"][src*="bframe"], iframe[title*="recaptcha challenge" i]');
+  const count = await loc.count().catch(() => 0);
+  if (count === 0) {
+    return false;
+  }
+  return loc.first().isVisible().catch(() => false);
+}
+
+async function passiveCaptchaWidgetPresent(page: Page): Promise<boolean> {
+  const widgets = await page.locator(
+    'iframe[src*="recaptcha"]:not([src*="bframe"]), iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha',
+  ).count();
+  if (widgets > 0) {
+    return true;
+  }
+  for (const frame of page.frames()) {
+    const nested = await frame.locator(
+      'iframe[src*="recaptcha"]:not([src*="bframe"]), iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha',
+    ).count().catch(() => 0);
+    if (nested > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function activeChallengePrompt(text: string): boolean {
+  return /complete the captcha|verify you are human|select all (squares|images)|solve the challenge|answer validation task|protected by hcaptcha.*challenge/i.test(text);
 }

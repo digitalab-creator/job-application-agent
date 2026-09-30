@@ -1,5 +1,6 @@
 import { candidate, SALARY_MAX, SALARY_MIN } from "../config/candidate.js";
 import type { Persona } from "../models/types.js";
+import { roles } from "../profile/facts.js";
 import { isPlatformQuestion, matchPlatforms, pickBudgetOption, pickYearsOption } from "./media-answers.js";
 
 export type FieldDecision =
@@ -26,13 +27,20 @@ const DEGREE = /university degree|what degree|bachelor|b\.?\s?sc|b\.?\s?a\b|mast
 
 export function decideField(input: {
   label: string;
+  name?: string;
+  id?: string;
+  groupLabel?: string;
   required: boolean;
   type: string;
   options: string[];
   ctx: FieldContext;
 }): FieldDecision {
-  const label = input.label.trim();
+  const hint = resolveFieldHint(input);
+  const label = hint;
   const options = input.options;
+  if (!label && input.required) {
+    return { action: "block", reason: `Required application question cannot be answered safely: ""` };
+  }
   if (!label) {
     return { action: "blank" };
   }
@@ -49,7 +57,7 @@ export function decideField(input: {
   if (input.type === "file" || /resume|cv|curriculum/i.test(label)) {
     return { action: "upload" };
   }
-  const bucket = chooseBucket(label, input.options);
+  const bucket = chooseBucket(label, input.options, input.type);
   if (bucket) {
     return bucket;
   }
@@ -62,12 +70,27 @@ export function decideField(input: {
     }
     return { action: "check-options", values: plan.check, source: "candidate_profile" };
   }
-  const mapped = mapKnown(label, input.type, input.ctx);
+  const mapped = mapKnown(label, input.type, input.ctx, input.name, input.id, options);
   if (mapped) {
     return mapped;
   }
-  if (input.type === "checkbox" && /privacy|terms|consent|agree|acknowledge/i.test(label) && !/marketing|newsletter/i.test(label)) {
+  if (input.type === "checkbox" && /privacy|terms|consent|agree|acknowledge|read and understood/i.test(label) && !/marketing|newsletter/i.test(label)) {
     return { action: "check", source: "candidate_profile" };
+  }
+  if (input.type === "checkbox-group" && /privacy|consent|submitting your application|third party|store and process/i.test(label)) {
+    const agree = options.filter((option) => /privacy|consent|agree|read and understood|submitting/i.test(option));
+    if (agree.length > 0) {
+      return { action: "check-options", values: agree, source: "candidate_profile" };
+    }
+  }
+  if (input.type === "checkbox-group" && /have you read or attended|click all that apply/i.test(label)) {
+    const none = options.find((option) => /none of the above|not applicable|none\b/i.test(option));
+    if (none) {
+      return { action: "check-options", values: [none], source: "candidate_profile" };
+    }
+    if (!input.required) {
+      return { action: "blank" };
+    }
   }
   if (input.type === "select" && /privacy|terms|consent|agree|store and process my data/i.test(label)) {
     const agree = options.find((option) => /^yes$/i.test(option.trim()))
@@ -85,12 +108,24 @@ export function decideField(input: {
       ? { action: "block", reason: `Required application question cannot be answered safely: "${label}"` }
       : { action: "blank" };
   }
-  if (/^how did you hear|source$/i.test(label) || /how did you hear/i.test(label)) {
-    const choice = options.find((option) => /^other$/i.test(option.trim()))
-      ?? options.find((option) => /comeet|job board|career site/i.test(option));
+  if (/^how did you hear|how did you find|source of application|referral source/i.test(label) || /how did you hear/i.test(label)) {
+    const choice = options.find((option) => /linkedin/i.test(option))
+      ?? options.find((option) => /company website|career site|careers page/i.test(option))
+      ?? options.find((option) => /job board|comeet|greenhouse/i.test(option))
+      ?? options.find((option) => /^other$/i.test(option.trim()))
+      ?? options.find((option) => /google/i.test(option));
     if (choice) {
       return { action: "fill", value: choice, source: "candidate_profile" };
     }
+    if (input.type === "text" || input.type === "textarea") {
+      return fill("LinkedIn");
+    }
+  }
+  if (/business relationship with|work for anyone that has a business relationship|customer, partner, service provider, or vendor/i.test(label)) {
+    return yesNo(false, input.type);
+  }
+  if (/axonius/i.test(label) && /how did you hear/i.test(label)) {
+    return fill(options[0] ?? "LinkedIn");
   }
   if (isFreeText(label, input.type)) {
     return input.required || label.length > 0 ? { action: "llm" } : { action: "blank" };
@@ -101,7 +136,75 @@ export function decideField(input: {
   return { action: "blank" };
 }
 
-function mapKnown(label: string, type: string, ctx: FieldContext): FieldDecision | null {
+function resolveFieldHint(input: {
+  label: string;
+  name?: string;
+  id?: string;
+  groupLabel?: string;
+}): string {
+  const primary = input.label.trim();
+  if (primary) {
+    return primary;
+  }
+  const group = (input.groupLabel ?? "").trim();
+  if (group) {
+    return group;
+  }
+  const name = (input.name ?? "").trim();
+  const id = (input.id ?? "").trim();
+  const blob = `${name} ${id}`.toLowerCase();
+  if (/^name$/i.test(name) || id === "name" || /\[field0\]/i.test(name)) {
+    return "full name";
+  }
+  if (/first.?name|fname|given.?name/i.test(blob)) {
+    return "first name";
+  }
+  if (/last.?name|lname|family.?name|surname/i.test(blob)) {
+    return "last name";
+  }
+  if (/email/i.test(blob)) {
+    return "email";
+  }
+  if (/phone|tel|mobile/i.test(blob) && !/country_phone|phone_code|dial/i.test(blob)) {
+    return "phone";
+  }
+  if (/country_phone_code|phone_country|dial.code|phone_code/i.test(blob)) {
+    return "country phone code";
+  }
+  if (/hubspot__estimated_monthly_orders|estimated_monthly_orders/i.test(blob)) {
+    return "estimated monthly orders";
+  }
+  if (/privacy|consent|agree/i.test(name + id)) {
+    return "privacy policy consent";
+  }
+  if (/cards\[/.test(name) && /field0/i.test(name)) {
+    return "full name";
+  }
+  return name || id;
+}
+
+function mostRecentEmployment(persona: Persona): { company: string; title: string } {
+  const current = roles[0];
+  if (!current) {
+    return { company: "CaseEdge", title: "Applied AI Engineer" };
+  }
+  const title = current.defaultTitle[persona] ?? current.defaultTitle.hybrid;
+  const company = current.company.split("/")[0]?.trim() ?? current.company;
+  return { company, title };
+}
+
+function mapKnown(
+  label: string,
+  type: string,
+  ctx: FieldContext,
+  name = "",
+  id = "",
+  options: string[] = [],
+): FieldDecision | null {
+  const blob = `${label} ${name} ${id}`;
+  if (/^name$/i.test(label.trim()) || (label === "full name" && !/first|last/i.test(blob))) {
+    return fill(candidate.fullName);
+  }
   if (/first name|שם פרטי/i.test(label)) {
     return fill(candidate.firstName);
   }
@@ -114,9 +217,35 @@ function mapKnown(label: string, type: string, ctx: FieldContext): FieldDecision
   if (/e-?mail|אימייל|דוא"ל/i.test(label)) {
     return fill(candidate.email);
   }
-  if (/phone|mobile|טלפון|נייד/i.test(label)) {
+  if (/phone|mobile|טלפון|נייד/i.test(label) && !/country phone code|phone_code|dial/i.test(blob)) {
     const international = /country|\+|international/i.test(label);
     return fill(international ? candidate.phone.international : candidate.phone.local);
+  }
+  if (/country phone code|country_phone_code|phone_country_code|dial code/i.test(blob)) {
+    if (type === "select" && options.length > 0) {
+      const choice = options.find((option) => /\+972|^972|\bisrael\b/i.test(option))
+        ?? options.find((option) => /israel/i.test(option));
+      if (choice) {
+        return { action: "fill", value: choice, source: "candidate_profile" };
+      }
+    }
+    return fill("+972");
+  }
+  if (/most recent company|current company|latest company/i.test(label)) {
+    return fill(mostRecentEmployment(ctx.persona).company);
+  }
+  if (/most recent title|current title|latest title|current job title/i.test(label)) {
+    return fill(mostRecentEmployment(ctx.persona).title);
+  }
+  if (/estimated monthly orders|hubspot__estimated/i.test(blob)) {
+    if (type === "select" && options.length > 0) {
+      const choice = options.find((option) => /1.*10|0.*50|under 100|1-50/i.test(option))
+        ?? options.find((option) => !/select|choose/i.test(option));
+      if (choice) {
+        return { action: "fill", value: choice, source: "candidate_profile" };
+      }
+    }
+    return fill("1-10");
   }
   if (/linkedin/i.test(label)) {
     return fill(candidate.linkedin);
@@ -204,12 +333,21 @@ function yesNo(yes: boolean, type: string): FieldDecision {
   return fill(yes ? "Yes" : "No");
 }
 
-function chooseBucket(label: string, options: string[]): FieldDecision | null {
+function chooseBucket(label: string, options: string[], type: string): FieldDecision | null {
   if (options.length === 0) {
     return null;
   }
-  if (/year/i.test(label) && /experience|ppc|ניסיון|paid|hands-on/i.test(label)) {
-    const years = /ppc|paid|performance|hands-on|media/i.test(label) ? candidate.media.ppcYears : 5;
+  const professionalYears = candidate.media.ppcYears;
+  if (/do you have|have you/i.test(label) && options.some((option) => /^yes$/i.test(option.trim()))) {
+    const threshold = parseExperienceThreshold(label);
+    if (threshold !== null) {
+      return professionalYears >= threshold
+        ? fill(options.find((option) => /^yes$/i.test(option.trim())) ?? "Yes")
+        : fill(options.find((option) => /^no$/i.test(option.trim())) ?? "No");
+    }
+  }
+  if (/year/i.test(label) && /experience|ppc|ניסיון|paid|hands-on|compiler|llm|production|serving|degree|field/i.test(label)) {
+    const years = /ppc|paid|performance|hands-on|media/i.test(label) ? candidate.media.ppcYears : professionalYears;
     const choice = pickYearsOption(options, years);
     if (!choice) {
       return { action: "block", reason: `No experience option fits ${years} years: "${label}"` };
@@ -222,6 +360,18 @@ function chooseBucket(label: string, options: string[]): FieldDecision | null {
       return { action: "block", reason: `No budget option fits the managed monthly budget: "${label}"` };
     }
     return { action: "fill", value: choice, source: "candidate_profile" };
+  }
+  return null;
+}
+
+function parseExperienceThreshold(label: string): number | null {
+  const plus = label.match(/(\d+(?:\.\d+)?)\s*\+/);
+  if (plus?.[1]) {
+    return Number(plus[1]);
+  }
+  const years = label.match(/(\d+(?:\.\d+)?)\s*(?:or more )?years/i);
+  if (years?.[1]) {
+    return Number(years[1]);
   }
   return null;
 }

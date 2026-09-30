@@ -68,6 +68,13 @@ function pickTightest(options: string[], value: number, parse: (option: string) 
     .map((option) => ({ option, range: parse(option) }))
     .filter((item): item is { option: string; range: Range } => item.range !== null && value >= item.range.min && value <= item.range.max);
   if (fits.length === 0) {
+    const minimumBuckets = options
+      .map((option) => ({ option, range: parse(option) }))
+      .filter((item): item is { option: string; range: Range } => item.range !== null && value >= item.range.min);
+    if (minimumBuckets.length > 0) {
+      minimumBuckets.sort((left, right) => right.range.min - left.range.min);
+      return minimumBuckets[0]?.option ?? null;
+    }
     return null;
   }
   fits.sort((left, right) => rangeWidth(left.range) - rangeWidth(right.range));

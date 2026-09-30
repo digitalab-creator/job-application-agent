@@ -140,3 +140,72 @@ test("expected salary for this senior role stays at the top of the band", () => 
     assert.equal(decision.value, "ILS 32,000 gross/month");
   }
 });
+
+test("privacy policy checkbox with long label is checked", () => {
+  const decision = decideField({
+    label: "I read and understood the privacy policy*",
+    required: true,
+    type: "checkbox",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "check");
+});
+
+test("empty label resolves from name=name to full name", () => {
+  const decision = decideField({
+    label: "",
+    name: "name",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "Or Shvartz");
+  }
+});
+
+test("country phone code selects Israel not full mobile number", () => {
+  const decision = decideField({
+    label: "country phone code",
+    name: "country_phone_code",
+    required: true,
+    type: "select",
+    options: ["Select", "+972 (Israel)", "+1 (US)"],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "+972 (Israel)");
+  }
+});
+
+test("LLM experience yes/no uses verified years", () => {
+  const decision = decideField({
+    label: "Do you have 3+ years of production LLM serving experience?",
+    required: true,
+    type: "select",
+    options: ["Yes", "No"],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "Yes");
+  }
+});
+
+test("how did you hear prefers LinkedIn option", () => {
+  const decision = decideField({
+    label: "How did you hear about this job?",
+    required: true,
+    type: "select",
+    options: ["Employee referral", "LinkedIn", "Other"],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "LinkedIn");
+  }
+});

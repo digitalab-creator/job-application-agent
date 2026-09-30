@@ -25,6 +25,24 @@ CONTAINER = "job-application-agent"
 APPLY_WF_ID = "fcYSvcG7IiP8xAqr"
 DISCOVER_WF_ID = "oreaKVjt7ifi0i6a"
 TZ = ZoneInfo("Asia/Jerusalem")
+DISCOVER_SKIP_NEW_MULTIPLIER = 3
+
+BLOCKER_WHY: dict[str, str] = {
+    "captcha": "Bot check on the careers site — worker stops; apply manually in a normal browser.",
+    "login_required": "Site requires an account login; not automated in v1.",
+    "navigation_failed": "Could not open the job URL or apply form.",
+    "cv_upload_failed": "Resume upload field not found or upload timed out.",
+    "missing_fact": "Screening question needs a fact not in the profile.",
+    "form_not_detected": "Apply form never appeared on the page.",
+    "email_verification_required": "Greenhouse email OTP — finish in browser.",
+    "confirmation_not_detected": "Submit may have happened but thank-you page not detected.",
+    "form_validation": "Form rejected answers (phone, checkbox, etc.).",
+    "cv_generation_failed": "LLM/truth gate failed before apply.",
+    "already_submitted": "Duplicate URL — already in ledger.",
+    "careers_page": "Landed on generic careers hub, not a single job.",
+    "no_matching_opening": "Multiple listings; worker could not pick a match.",
+    "dry_run": "Intentional preview (`submit: false`) — not a failed apply.",
+}
 
 COMEET_SIZE_ERROR = re.compile(r"reading 'size'", re.I)
 N8N_ENV = Path("/opt/apps/n8n/.env")
@@ -215,21 +233,65 @@ def read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def row_on_day(at: str, day: str) -> bool:
+    if not at:
+        return False
+    if str(at).startswith(day):
+        return True
+    try:
+        dt = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        return dt.astimezone(TZ).strftime("%Y-%m-%d") == day
+    except ValueError:
+        return False
+
+
 def confirmed_today(day: str) -> list[dict]:
     out: list[dict] = []
     for row in read_jsonl(LEDGER):
         if not row.get("confirmationDetected"):
             continue
-        at = str(row.get("at", ""))
-        if not at.startswith(day):
-            try:
-                dt = datetime.fromisoformat(at.replace("Z", "+00:00"))
-                if dt.astimezone(TZ).strftime("%Y-%m-%d") != day:
-                    continue
-            except ValueError:
-                continue
-        out.append(row)
+        if row_on_day(str(row.get("at", "")), day):
+            out.append(row)
     return out
+
+
+def attempts_today(day: str) -> list[dict]:
+    out: list[dict] = []
+    for row in read_jsonl(LEDGER):
+        if not row_on_day(str(row.get("at", "")), day):
+            continue
+        out.append(row)
+    out.sort(key=lambda r: str(r.get("at", "")))
+    return out
+
+
+def attempt_outcome_label(row: dict) -> str:
+    if row.get("confirmationDetected"):
+        return "confirmed"
+    blocker = str(row.get("blocker") or "").strip()
+    if blocker:
+        return blocker
+    return "no_confirmation"
+
+
+def failure_reason(row: dict) -> str:
+    if row.get("confirmationDetected"):
+        return "Submission confirmed on site."
+    label = attempt_outcome_label(row)
+    if label in BLOCKER_WHY:
+        return BLOCKER_WHY[label]
+    if label == "no_confirmation":
+        return "Worker finished without confirmation signal (check logs / sheet Notes)."
+    return f"Blocker `{label}` — see sheet Notes or worker logs."
+
+
+def cv_paths_from_attempts(attempts: list[dict]) -> set[str]:
+    names: set[str] = set()
+    for row in attempts:
+        cv_path = str(row.get("cvPath") or "")
+        if cv_path:
+            names.add(cv_path.split("/")[-1])
+    return names
 
 
 def quota_rows_today(day: str) -> list[dict]:
@@ -339,6 +401,29 @@ def review_questions(events: list[dict]) -> list[str]:
     return out
 
 
+def manual_queue_module():
+    import importlib.util
+
+    path = ROOT / "scripts" / "manual_apply_queue.py"
+    spec = importlib.util.spec_from_file_location("manual_apply_queue", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("manual_apply_queue.py missing")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def print_manual_queue_block(day: str) -> None:
+    mod = manual_queue_module()
+    items = mod.load_manual_queue()
+    if not items:
+        return
+    mod.print_markdown(items)
+    out = mod.OUT_DIR / f"{day}.html"
+    mod.write_html(items, out)
+    print(f"Manual queue tabs page: `{out}` (open in browser — **Open application** on each card)\n")
+
+
 def print_report(day: str | None = None) -> int:
     day = day or jerusalem_today()
     token = load_token()
@@ -353,18 +438,29 @@ def print_report(day: str | None = None) -> int:
     remaining = int(quota.get("remaining") if quota else max(0, limit - counted))
 
     confirmed = confirmed_today(day)
+    attempts = attempts_today(day)
     quota_rows = quota_rows_today(day)
     cv_count = count_generated_cvs(day)
+    cv_linked = len(cv_paths_from_attempts(attempts))
+    cv_orphan = max(0, cv_count - cv_linked)
     log_lines = docker_logs_today(day)
     events = parse_log_events(log_lines)
     event_names = Counter(str(e.get("event", "")) for e in events)
 
     job_opened = event_names.get("JOB_OPENED", 0)
+    ledger_attempts = len(attempts)
     request_failed = event_names.get("REQUEST_FAILED", 0)
     review_events = event_names.get("REVIEW_REQUIRED", 0)
 
     apply_runs = [r for r in n8n_runs_today(day) if r.workflow_id == APPLY_WF_ID]
     discover_runs = [r for r in n8n_runs_today(day) if r.workflow_id == DISCOVER_WF_ID]
+
+    queue = sheet_queue_snapshot()
+    discover_depth_threshold = limit * DISCOVER_SKIP_NEW_MULTIPLIER
+    sheet_new = queue["status_new"] if queue else None
+    discover_should_skip = (
+        isinstance(sheet_new, int) and sheet_new > discover_depth_threshold
+    )
 
     met_target = len(confirmed) >= limit
 
@@ -377,13 +473,14 @@ def print_report(day: str | None = None) -> int:
     print(f"| Daily limit | {limit} |")
     print(f"| **Confirmed submissions** | **{len(confirmed)}** |")
     print(f"| Quota counted (worker) | {counted} / {limit} ({remaining} remaining) |")
-    print(f"| Jobs opened (logs) | {job_opened} |")
-    print(f"| CVs generated today | {cv_count} |")
+    print(f"| Worker ledger attempts | {ledger_attempts} |")
+    print(f"| Jobs opened (docker logs) | {job_opened} |")
+    print(f"| CV PDFs in today's folder | {cv_count} ({cv_linked} tied to ledger, {cv_orphan} extra previews/retries) |")
+    print(f"| n8n Pick Jobs (latest run) | {queue['pick_jobs_output'] if queue else '—'} |")
     print(f"| Worker container | {'up' if container_running() else 'down/missing'} |")
     print(f"| Met {limit}-apply target? | **{'yes' if met_target else 'no'}** |")
     print()
 
-    queue = sheet_queue_snapshot()
     if queue:
         print("## Google Sheet queue (from latest apply run today)")
         print(
@@ -398,6 +495,11 @@ def print_report(day: str | None = None) -> int:
             print(
                 f"- Eligible queue is **{queue['automatable_new']}**, but this run only picked **{queue['pick_jobs_output']}**. "
                 "Check the Pick Jobs mix (13 tech / 7 marketing) and daily cap of 20."
+            )
+        if discover_should_skip:
+            print(
+                f"- Discover **should be skipped**: `{queue['status_new']}` New rows > "
+                f"{discover_depth_threshold} ({DISCOVER_SKIP_NEW_MULTIPLIER}× daily limit {limit})."
             )
         print()
 
@@ -420,13 +522,48 @@ def print_report(day: str | None = None) -> int:
         print("- No apply/discover executions found in n8n DB (or postgres unreachable).")
     else:
         for r in discover_runs:
-            print(f"- Discover: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}")
+            flag = ""
+            if discover_should_skip:
+                flag = " _(ran despite deep queue — should skip after worker deploy)_"
+            print(f"- Discover: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}{flag}")
         for r in apply_runs:
             print(f"- Apply: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}")
     print()
 
+    print("## Apply attempts (worker ledger, chronological)")
+    if not attempts:
+        print("- No ledger attempts for this calendar day.")
+        if cv_orphan:
+            print(
+                f"- **{cv_orphan}** CV PDF(s) exist without ledger rows — likely dry-runs, manual previews, "
+                "or logs lost after container restart."
+            )
+    else:
+        print("| # | Time (UTC) | Outcome | Company | Role | Why |")
+        print("|---|------------|---------|---------|------|-----|")
+        for i, row in enumerate(attempts, start=1):
+            at = str(row.get("at", ""))[:19]
+            outcome = attempt_outcome_label(row)
+            company = str(row.get("company", "?"))[:28]
+            role = str(row.get("role", "?"))[:40]
+            why = failure_reason(row).replace("|", "/")[:120]
+            print(f"| {i} | {at} | `{outcome}` | {company} | {role} | {why} |")
+        if cv_orphan:
+            print()
+            print(
+                f"- **{cv_orphan}** extra CV PDF(s) in today's folder are **not** tied to these ledger rows "
+                "(dry-run / retry / manual preview)."
+            )
+        pick_n = queue["pick_jobs_output"] if queue else None
+        if isinstance(pick_n, int) and pick_n > ledger_attempts:
+            print(
+                f"- n8n picked **{pick_n}** jobs but ledger shows **{ledger_attempts}** attempts — "
+                "remaining rows may still be `applying`, failed before ledger write, or blocked in n8n."
+            )
+    print()
+
     if confirmed:
-        print("## Confirmed applications")
+        print("## Confirmed applications (subset of attempts)")
         for row in confirmed:
             print(f"- {row.get('company', '?')}: {row.get('role', '?')[:60]}")
         print()
@@ -445,15 +582,28 @@ def print_report(day: str | None = None) -> int:
     print()
 
     blockers: list[str] = []
-    if len(confirmed) < limit and job_opened < limit:
+    if len(confirmed) < limit and ledger_attempts < limit:
         if queue and queue["pick_jobs_output"] < limit and queue["automatable_new"] >= limit:
             blockers.append(
                 f"Eligible `New` URLs: **{queue['automatable_new']}**, but Pick Jobs only output **{queue['pick_jobs_output']}**."
             )
+        elif pick_n := (queue["pick_jobs_output"] if queue else None):
+            if isinstance(pick_n, int) and pick_n > ledger_attempts:
+                blockers.append(
+                    f"n8n picked **{pick_n}** jobs but only **{ledger_attempts}** reached the worker ledger."
+                )
+            else:
+                blockers.append(
+                    f"Only **{ledger_attempts}** worker attempts logged (target {limit})."
+                )
         else:
             blockers.append(
-                f"Only **{job_opened}** apply attempts in logs (target {limit})."
+                f"Only **{ledger_attempts}** worker attempts logged (target {limit})."
             )
+    if job_opened == 0 and ledger_attempts > 0:
+        blockers.append(
+            "Docker logs for today lack `JOB_OPENED` (container likely restarted) — use the attempts table above."
+        )
     if request_failed:
         blockers.append(
             f"**{request_failed}** worker `REQUEST_FAILED` errors (often HTTP 500 to n8n)."
@@ -468,6 +618,10 @@ def print_report(day: str | None = None) -> int:
         blockers.append("Daily quota exhausted before enough confirmed submissions.")
     if budget and float(budget.get("remainingIls") or 0) <= 0:
         blockers.append("Monthly LLM budget exhausted (`budget_reached`).")
+    if discover_runs and discover_should_skip:
+        blockers.append(
+            f"Discover ran while sheet had **{sheet_new}** `New` rows (skip threshold **{discover_depth_threshold}**)."
+        )
     if not container_running():
         blockers.append("Worker container not running — no applies possible.")
     if not health.get("ok"):
@@ -484,15 +638,28 @@ def print_report(day: str | None = None) -> int:
             print(f"- {b}")
     print()
 
+    print_manual_queue_block(day)
+
+    failed_blockers = Counter(
+        attempt_outcome_label(r) for r in attempts if not r.get("confirmationDetected")
+    )
+
     print("## Suggested next steps")
     if any("Comeet careers.js" in b for b in blockers):
         print("- Fix Comeet submit: skip `file` inputs in `submit-application.ts` Angular sync loop; redeploy.")
-    if review_events:
-        print("- Answer or tune screening rules for `REVIEW_REQUIRED` jobs; re-run apply for those rows.")
-    if job_opened < limit and len(confirmed) < limit:
-        print("- Run discover workflow or add `New` rows if the sheet queue is thin.")
-    if request_failed and job_opened > 0 and len(confirmed) == 0:
-        print("- Re-trigger apply after fix: n8n webhook `job-apply-run` or wait for 09:00 cron.")
+    if failed_blockers.get("captcha", 0) >= 3:
+        print(
+            f"- **{failed_blockers['captcha']}** captcha blockers today — pause bulk apply; use "
+            f"`python3 scripts/manual-apply-queue.py --html` and finish tabs manually."
+        )
+    if review_events or failed_blockers.get("missing_fact"):
+        print("- Answer or tune screening rules for `REVIEW_REQUIRED` / missing-fact jobs; re-run apply for those rows.")
+    if len(confirmed) < limit and not discover_should_skip and (not queue or queue["automatable_new"] < limit):
+        print("- Sheet queue is thin — run discover or add `New` rows.")
+    elif len(confirmed) < limit and discover_should_skip:
+        print("- Queue is deep enough — **do not run discover**; fix apply blockers and re-run apply only.")
+    if request_failed and ledger_attempts > 0 and len(confirmed) == 0:
+        print("- Re-trigger apply after fix: n8n webhook `job-apply-run` or wait for scheduled apply.")
     print()
 
     return 0 if met_target else 1
