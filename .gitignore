@@ -5,6 +5,7 @@ generated-cv/
 screenshots/
 audit/
 data/ledger/
+data/config/
 data/browser-profile/
 *.log
 tmp/deploy/

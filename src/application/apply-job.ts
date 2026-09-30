@@ -16,6 +16,7 @@ import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
+import { isExcludedApplyCompany } from "./exclude-company.js";
 import { alreadySubmitted, rememberSubmission } from "./ledger.js";
 import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
@@ -42,6 +43,21 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   const jobSlug = slug(`${input.job.company}-${input.job.role}`);
   const shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
   const screenshots: string[] = [];
+  if (isExcludedApplyCompany(input.job.company)) {
+    log("COMPANY_EXCLUDED", { company: input.job.company, url: input.job.url });
+    return result(input, {
+      status: "not_relevant",
+      submitted: false,
+      confirmationDetected: false,
+      notes: lines([
+        "result=not_relevant",
+        "reason=company_excluded",
+        `company=${input.job.company}`,
+        "Company is on the apply exclude list. Nothing was submitted.",
+      ]),
+      screenshots,
+    });
+  }
   if (input.submit && !input.ignoreLedger && alreadySubmitted(input.job.url)) {
     return result(input, {
       status: "already_submitted",

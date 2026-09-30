@@ -1,5 +1,6 @@
 import http from "node:http";
 import { chromium } from "playwright";
+import { ensureExcludedCompaniesConfig, getExcludedCompanies, setExcludedCompanies } from "./application/exclude-company.js";
 import { applyToJob, type ApplyInput } from "./application/apply-job.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
 import { claimApplyRun, releaseApplyRun } from "./application/run-lock.js";
@@ -15,6 +16,7 @@ import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
 
 let busy = false;
+ensureExcludedCompaniesConfig();
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -29,6 +31,23 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && req.url?.startsWith("/quota")) {
       send(res, 200, quotaSnapshot());
+      return;
+    }
+    if (req.method === "GET" && (req.url === "/config/excluded-companies" || req.url?.startsWith("/config/excluded-companies?"))) {
+      send(res, 200, { companies: getExcludedCompanies() });
+      return;
+    }
+    if (req.method === "PUT" && req.url === "/config/excluded-companies") {
+      const body = await readBody(req) as { companies?: unknown; source?: unknown };
+      if (!Array.isArray(body.companies)) {
+        send(res, 400, { error: "companies must be an array of strings." });
+        return;
+      }
+      const companies = body.companies.map((item) => String(item ?? "").trim()).filter(Boolean);
+      const source = typeof body.source === "string" && body.source.trim() ? body.source.trim() : "api";
+      const saved = setExcludedCompanies(companies, source);
+      log("EXCLUDED_COMPANIES_UPDATED", { count: saved.companies.length, source: saved.source });
+      send(res, 200, saved);
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/budget")) {
@@ -251,6 +270,7 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     browserPersistentProfile: env.browserPersistentProfile,
     browserApplyHeadless: env.browserApplyHeadless,
     browserUserDataDir: env.browserUserDataDir,
+    excludedCompanies: getExcludedCompanies().length,
   };
 }
 

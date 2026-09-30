@@ -12,6 +12,7 @@ services:
     volumes:
       - ./data/cv:/app/data/cv:ro
       - ./data/ledger:/app/data/ledger
+      - ./data/config:/app/data/config
       - ./generated-cv:/app/generated-cv
       - ./screenshots:/app/screenshots
       - ./audit:/app/audit

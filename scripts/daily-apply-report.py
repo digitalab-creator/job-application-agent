@@ -30,6 +30,10 @@ COMEET_SIZE_ERROR = re.compile(r"reading 'size'", re.I)
 N8N_ENV = Path("/opt/apps/n8n/.env")
 
 
+# Mirror runtime worker config: Google Sheet "Exclude Companies" synced via n8n.
+APPLY_EXCLUDED_COMPANIES: tuple[str, ...] = ()
+
+
 def is_automatable_apply_url(url: str) -> bool:
     """Same gate as n8n Pick Jobs: any real http(s) job link except known junk."""
     u = str(url or "").strip()
@@ -40,6 +44,40 @@ def is_automatable_apply_url(url: str) -> bool:
     if re.match(r"^https://apply\.workable\.com/comeet/", u, re.I):
         return False
     return True
+
+
+def normalize_company_key(value: str) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"[\s_\-./]+", "", text)
+    return re.sub(r"[^\w]+", "", text, flags=re.UNICODE)
+
+
+def load_excluded_companies() -> tuple[str, ...]:
+    global APPLY_EXCLUDED_COMPANIES
+    if APPLY_EXCLUDED_COMPANIES:
+        return APPLY_EXCLUDED_COMPANIES
+    token = load_token()
+    if token:
+        payload = http_json(f"{WORKER_BASE}/config/excluded-companies", token)
+        if payload and isinstance(payload.get("companies"), list):
+            APPLY_EXCLUDED_COMPANIES = tuple(
+                str(item).strip() for item in payload["companies"] if str(item).strip()
+            )
+            return APPLY_EXCLUDED_COMPANIES
+    # Fallback seed if worker is down — keep report usable.
+    APPLY_EXCLUDED_COMPANIES = ("בורודה קפלן", "k-logic", "two-solutions")
+    return APPLY_EXCLUDED_COMPANIES
+
+
+def is_excluded_apply_company(company: str) -> bool:
+    key = normalize_company_key(company)
+    if not key:
+        return False
+    for excluded in load_excluded_companies():
+        needle = normalize_company_key(excluded)
+        if needle and (key == needle or needle in key):
+            return True
+    return False
 
 
 def load_n8n_api_key() -> str:
@@ -88,7 +126,12 @@ def sheet_queue_snapshot() -> dict[str, int] | None:
             continue
         rows = [item["json"] for item in read[0]["data"]["main"][0]]
         new_rows = [r for r in rows if str(r.get("Status", "")).strip() == "New"]
-        automatable = [r for r in new_rows if is_automatable_apply_url(str(r.get("Job URL", "")))]
+        automatable = [
+            r
+            for r in new_rows
+            if is_automatable_apply_url(str(r.get("Job URL", "")))
+            and not is_excluded_apply_company(str(r.get("Company", "")))
+        ]
         picked = 0
         if pick:
             picked = len(pick[0].get("data", {}).get("main", [[]])[0])
