@@ -49,7 +49,18 @@ export type CvSource = "generated" | "static_fallback";
 
 export type CvWording = "llm" | "verbatim";
 
-export type ApplicationStatus = "applied" | "closed" | "not_relevant" | "review" | "failed" | "quota_reached" | "budget_reached" | "already_submitted" | "location_ineligible";
+export type ApplicationStatus =
+  | "applied"
+  | "closed"
+  | "not_relevant"
+  | "review"
+  | "failed"
+  | "quota_reached"
+  | "budget_reached"
+  | "already_submitted"
+  | "location_ineligible"
+  /** Tried auto-apply; captcha / login / account gate — human only, not a fixable Review. */
+  | "manual_required";
 
 export type AnswerRecord = {
   question: string;

@@ -12,8 +12,19 @@ export type LedgerEntry = {
   blocker?: string;
 };
 
+/** Blockers that mean auto-apply already decided "won't" — do not treat as fixable Review. */
+export const MANUAL_LEDGER_BLOCKERS = new Set(["captcha", "login_required"]);
+
 export function alreadySubmitted(url: string): boolean {
-  return readLedger().some((entry) => entry.url === url && (entry.confirmationDetected || entry.blocker === "captcha"));
+  return Boolean(priorTerminalEntry(url)?.confirmationDetected);
+}
+
+/** Prior confirmed send, or a terminal manual blocker (captcha / login). */
+export function priorTerminalEntry(url: string): LedgerEntry | undefined {
+  return readLedger()
+    .filter((entry) => entry.url === url)
+    .reverse()
+    .find((entry) => entry.confirmationDetected || (entry.blocker != null && MANUAL_LEDGER_BLOCKERS.has(entry.blocker)));
 }
 
 export function rememberSubmission(entry: LedgerEntry): void {

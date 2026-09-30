@@ -32,8 +32,8 @@ Paste for the user: **row, job link, blocker, sheet notes**, and **likely code a
 | `careers_page` / `no_matching_opening` | Sometimes | `pick-opening.ts`, job URL on sheet |
 | `email_verification_required` | Yes (n8n Gmail OTP) | `greenhouse-otp-fetch.ts`, n8n `greenhouse-apply-otp`, `enterGreenhouseSecurityCode()` |
 | `submit_not_accepted` | Diagnose first | `greenhouse-post-submit.ts` — form still shows Submit application (often invisible reCAPTCHA) |
-| `captcha` | No (manual) | Report; optional headed browser note |
-| `login_required` | No (v1) | Report; mark not automatable unless product asks |
+| `captcha` | No (manual) | Report; status **`manual_required`** → sheet **Manual** |
+| `login_required` | No (v1) | Report; status **`manual_required`** → sheet **Manual** |
 | `cv_generation_failed` | Yes | `cv/generate.ts`, `cv/validate.ts` |
 | `already_submitted` | No | Ledger / duplicate URL |
 
@@ -67,7 +67,8 @@ If logs show `REQUEST_FAILED` / redirect errors, treat as **navigation_failed** 
 
 ## 4. When not to code
 
-- One-off site outage, geo block, or captcha → explain; leave row on **Review**.
+- One-off site outage or geo block → explain; leave row on **Review**.
+- Captcha / login / account gate → **Manual** (`manual_required`), not Review — ye already tried.
 - Bad sheet URL (listing page, LinkedIn authwall) → suggest sheet fix or `isAutomatableApplyUrl` skip; code only if the worker should detect and set a clearer blocker.
 
 ## SSOT
