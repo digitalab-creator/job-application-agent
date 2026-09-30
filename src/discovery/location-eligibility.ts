@@ -1,6 +1,6 @@
 /**
- * Discovery and apply only pursue remote roles or on-site/hybrid in Israel's Central District,
- * minus admin-configured excluded locations (e.g. Ra'anana).
+ * Discovery and apply pursue remote roles or on-site/hybrid in Israel's Central District
+ * or Tel Aviv District (incl. Sharon cities), minus admin-configured excluded locations.
  */
 import { getExcludedLocations, textMatchesExcludedLocation } from "../application/exclude-location.js";
 
@@ -85,6 +85,29 @@ const CENTRAL_DISTRICT = [
   /\bמחוז\s*המרכז\b/,
 ];
 
+/** מחוז תל אביב / Gush Dan fringe (Central overlap removed above). */
+const TEL_AVIV_DISTRICT = [
+  /\bherzliya\b/i,
+  /\bהרצליה\b/,
+  /\braanana\b/i,
+  /\bra'?anana\b/i,
+  /\bרעננה\b/,
+  /\bkfar\s*saba\b/i,
+  /\bכפר\s*סבא\b/,
+  /\bhod\s*hasharon\b/i,
+  /\bהוד\s*השרון\b/,
+  /\bramat\s*hasharon\b/i,
+  /\bרמת\s*השרון\b/,
+  /\btel\s*aviv\s+district\b/i,
+  /\bמחוז\s*תל\s*אביב\b/,
+  /\bגוש\s*דן\b/,
+  /\bgush\s*dan\b/i,
+  /\bהשרון\b/,
+  /\bsharon\b/i,
+];
+
+const ON_SITE_ACCEPTABLE = [...CENTRAL_DISTRICT, ...TEL_AVIV_DISTRICT];
+
 const FOREIGN_LOCATION = [
   /\bunited\s+states\b/i,
   /\bu\.s\.a?\.?\b/i,
@@ -123,12 +146,6 @@ const OTHER_ISRAEL_REGIONS = [
   /\bבאר\s*שבע\b/,
   /\bnetanya\b/i,
   /\bנתניה\b/,
-  /\bherzliya\b/i,
-  /\bהרצליה\b/,
-  /\bhod\s*hasharon\b/i,
-  /\bהוד\s*השרון\b/,
-  /\bkfar\s*saba\b/i,
-  /\bכפר\s*סבא\b/,
   /\bachziv\b/i,
   /\beilat\b/i,
   /\bאילת\b/,
@@ -143,14 +160,14 @@ function combinedText(title: string, snippet: string, url: string): string {
 
 function isForeignOnlySite(title: string, snippet: string, url: string): boolean {
   const titleText = title.replace(/\s+/g, " ").trim();
-  if (FOREIGN_LOCATION.some((re) => re.test(titleText)) && !CENTRAL_DISTRICT.some((re) => re.test(titleText))) {
+  if (FOREIGN_LOCATION.some((re) => re.test(titleText)) && !ON_SITE_ACCEPTABLE.some((re) => re.test(titleText))) {
     return true;
   }
   const text = combinedText(title, snippet, url);
   if (FOREIGN_LOCATION.some((re) => re.test(text))) {
     const hasIsraelRemote = REMOTE_FROM_ISRAEL.some((re) => re.test(text));
-    const hasCentral = CENTRAL_DISTRICT.some((re) => re.test(text));
-    if (!hasIsraelRemote && !hasCentral) {
+    const hasOnSiteMetro = ON_SITE_ACCEPTABLE.some((re) => re.test(text));
+    if (!hasIsraelRemote && !hasOnSiteMetro) {
       return true;
     }
   }
@@ -168,22 +185,22 @@ function isRemoteEligible(title: string, snippet: string, url: string): boolean 
   return REMOTE_GENERAL.some((re) => re.test(text));
 }
 
-function isCentralDistrictEligible(title: string, snippet: string, url: string): boolean {
+function isOnSiteMetroEligible(title: string, snippet: string, url: string): boolean {
   const text = combinedText(title, snippet, url);
-  return CENTRAL_DISTRICT.some((re) => re.test(text));
+  return ON_SITE_ACCEPTABLE.some((re) => re.test(text));
 }
 
 function isOtherIsraelRegionOnly(title: string, snippet: string, url: string): boolean {
   const text = combinedText(title, snippet, url);
   const other = OTHER_ISRAEL_REGIONS.some((re) => re.test(text));
-  const central = CENTRAL_DISTRICT.some((re) => re.test(text));
+  const metro = ON_SITE_ACCEPTABLE.some((re) => re.test(text));
   const remote = isRemoteEligible(title, snippet, url);
-  return other && !central && !remote;
+  return other && !metro && !remote;
 }
 
 export type LocationRulesVerdict = "eligible" | "ineligible" | "needs_lookup";
 
-/** Job appears Israeli but rules cannot confirm remote / Central District / excluded city. */
+/** Job appears Israeli but rules cannot confirm remote / metro districts / excluded city. */
 export function isIsraelLocationUncertain(title: string, snippet: string, url: string): boolean {
   const blob = combinedText(title, snippet, url);
   if (/\bisrael\b/i.test(blob)) {
@@ -221,7 +238,7 @@ export function classifyLocationRules(
   if (isRemoteEligible(title, snippet, url)) {
     return "eligible";
   }
-  if (isCentralDistrictEligible(title, snippet, url)) {
+  if (isOnSiteMetroEligible(title, snippet, url)) {
     return "eligible";
   }
   if (isOtherIsraelRegionOnly(title, snippet, url)) {

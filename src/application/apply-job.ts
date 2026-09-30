@@ -52,7 +52,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       notes: lines([
         "result=not_relevant",
         "reason=location_ineligible",
-        "Role must be remote or in Israel Central District, and not in an excluded location. Nothing was submitted.",
+        "Role must be remote or in Central/Tel Aviv District, and not in an excluded location. Nothing was submitted.",
       ]),
       screenshots,
     });
@@ -183,7 +183,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         notes: lines([
           "result=not_relevant",
           "reason=location_ineligible",
-          "Role must be remote or in Israel Central District, and not in an excluded location. Nothing was submitted.",
+          "Role must be remote or in Central/Tel Aviv District, and not in an excluded location. Nothing was submitted.",
         ]),
         screenshots,
       });
@@ -877,7 +877,7 @@ async function enterBestOpening(
       title: role,
       blocked: true,
       outcome: "location_ineligible",
-      line: "No opening on this list matches remote or Central District location policy.",
+      line: "No opening on this list matches remote or Central/Tel Aviv District location policy.",
     };
   }
   let chosen: Awaited<ReturnType<typeof chooseOpening>>;
