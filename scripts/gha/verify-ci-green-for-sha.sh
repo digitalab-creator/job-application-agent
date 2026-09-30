@@ -36,9 +36,9 @@ if not runs:
 if any(r.get("status") != "completed" for r in runs):
     print(f"verify-ci-green-for-sha: CI still in progress for {sha}")
     raise SystemExit(1)
-bad = [r for r in runs if r.get("conclusion") not in ("success", "skipped")]
-if bad:
-    print(f"verify-ci-green-for-sha: CI failed for {sha}")
+if not any(r.get("conclusion") in ("success", "skipped") for r in runs):
+    bad = next((r.get("conclusion") for r in runs if r.get("conclusion") not in ("success", "skipped")), "unknown")
+    print(f"verify-ci-green-for-sha: CI failed for {sha} (conclusion={bad})")
     raise SystemExit(1)
 print(f"verify-ci-green-for-sha: CI green for {sha}")
 PY
