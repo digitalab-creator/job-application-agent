@@ -50,7 +50,7 @@ async function resolveUncached(input: ResolveLocationInput, key: string): Promis
   const excluded = getExcludedLocations();
   const verdict = classifyLocationRules(input.title, input.snippet, input.url, excluded);
   if (verdict === "eligible") {
-    return remember(key, true, "rules", "matched_remote_or_central");
+    return remember(key, true, "rules", "matched_remote_or_metro_district");
   }
   if (verdict === "ineligible") {
     return remember(key, false, "rules", "failed_rules");

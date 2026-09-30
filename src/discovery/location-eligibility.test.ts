@@ -12,6 +12,14 @@ test("Petah Tikva on-site role is eligible", () => {
   assert.equal(isDiscoveryLocationEligible("Backend Engineer Petah Tikva", "", "", NO_EXCLUDED), true);
 });
 
+test("Herzliya on-site role is eligible (Tel Aviv District)", () => {
+  assert.equal(isDiscoveryLocationEligible("DevOps Engineer Herzliya", "", "", NO_EXCLUDED), true);
+});
+
+test("Kfar Saba on-site role is eligible (Tel Aviv District)", () => {
+  assert.equal(isDiscoveryLocationEligible("Product Manager Kfar Saba", "", "", NO_EXCLUDED), true);
+});
+
 test("Haifa on-site without remote is not eligible", () => {
   assert.equal(isDiscoveryLocationEligible("Backend Engineer Haifa Full-time", "", "", NO_EXCLUDED), false);
 });
