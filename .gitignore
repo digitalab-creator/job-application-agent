@@ -7,5 +7,7 @@ audit/
 data/ledger/
 data/config/
 data/browser-profile/
+.runners/
+scripts/__pycache__/
 *.log
 tmp/deploy/
