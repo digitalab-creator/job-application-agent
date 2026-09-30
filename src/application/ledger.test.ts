@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isTerminalManualBlocker, type LedgerEntry } from "./ledger.js";
+import { isTerminalManualBlocker, type LedgerEntry } from "./ledger-policy.js";
 
 test("passive captcha ledger rows are not terminal", () => {
   const row: LedgerEntry = {
