@@ -37,11 +37,12 @@ test("excluded companies match flexible spelling against a provided list", () =>
 });
 
 test("Hunt agency is excluded by company name and careers URL", () => {
-  assert.equal(isExcludedApplyCompany("Hunt"), true);
-  assert.equal(isExcludedApplyCompany("Hunt Agency"), true);
+  const excluded = ["בורודה קפלן", "k-logic", "two-solutions", "Hunt"];
+  assert.equal(isExcludedApplyCompany("Hunt", excluded), true);
+  assert.equal(isExcludedApplyCompany("Hunt Agency", excluded), true);
   assert.equal(isExcludedApplyUrl("https://www.comeet.com/jobs/Hunt/B4.007/ppc-manager/AA.11"), true);
-  assert.equal(isExcludedApplyTarget("Orca Security", "https://www.comeet.com/jobs/orca/1"), false);
-  assert.equal(isExcludedApplyTarget("Hunt", "https://example.com/jobs"), true);
+  assert.equal(isExcludedApplyTarget("Orca Security", "https://www.comeet.com/jobs/orca/1", excluded), false);
+  assert.equal(isExcludedApplyTarget("Hunt", "https://example.com/jobs", excluded), true);
 });
 
 test("setExcludedCompanies writes runtime config file", () => {
