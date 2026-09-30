@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { detectGreenhouseConfirmation } from "./greenhouse.js";
+import { looksLikeLoginWall } from "./login-wall.js";
 import { thankYouMatch } from "./thank-you.js";
 
 export async function detectCaptcha(page: Page): Promise<boolean> {
@@ -7,8 +8,14 @@ export async function detectCaptcha(page: Page): Promise<boolean> {
   if (widgets > 0) {
     return true;
   }
+  for (const frame of page.frames()) {
+    const nested = await frame.locator('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, .h-captcha').count().catch(() => 0);
+    if (nested > 0) {
+      return true;
+    }
+  }
   const text = await page.locator("body").innerText().catch(() => "");
-  return /verify you are human|i'?m not a robot|complete the captcha|answer validation task/i.test(text);
+  return /verify you are human|i'?m not a robot|complete the captcha|answer validation task|protected by hcaptcha/i.test(text);
 }
 
 export async function detectEmailVerification(page: Page): Promise<boolean> {
@@ -22,12 +29,26 @@ export async function detectEmailVerification(page: Page): Promise<boolean> {
 }
 
 export async function detectLoginWall(page: Page): Promise<boolean> {
-  const passwords = await page.locator('input[type="password"]').count();
-  if (passwords === 0) {
-    return false;
+  const scopes = [page, ...page.frames()];
+  let hasPassword = false;
+  let hasEmail = false;
+  let hasResumeFile = false;
+  const chunks: string[] = [];
+  for (const scope of scopes) {
+    hasPassword = hasPassword || (await scope.locator('input[type="password"]').count().catch(() => 0)) > 0;
+    hasEmail = hasEmail || (await scope.locator('input[type="email"]').count().catch(() => 0)) > 0;
+    hasResumeFile = hasResumeFile || (await scope.locator('input[type="file"]').count().catch(() => 0)) > 0;
+    chunks.push(await scope.locator("body").innerText().catch(() => ""));
   }
-  const text = await page.locator("body").innerText().catch(() => "");
-  return /sign in|log in|create an account|create your account/i.test(text);
+  const title = await page.title().catch(() => "");
+  return looksLikeLoginWall({
+    url: page.url(),
+    title,
+    text: chunks.join("\n"),
+    hasPassword,
+    hasEmail,
+    hasResumeFile,
+  });
 }
 
 export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {

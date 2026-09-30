@@ -2,7 +2,7 @@ import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
 import { classifyJobPage } from "../application/classify-page.js";
-import { applyFormScope, fillFields, readFields, uploadResume, waitForResumeUploadTarget, type FormScope } from "../browser/form-filler.js";
+import { applyFormScope, fillFields, readFields, uploadResume, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
 import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
 import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
@@ -17,7 +17,7 @@ import { validateCv } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
 import { isExcludedApplyCompany } from "./exclude-company.js";
-import { alreadySubmitted, rememberSubmission } from "./ledger.js";
+import { alreadySubmitted, priorTerminalEntry, rememberSubmission, MANUAL_LEDGER_BLOCKERS } from "./ledger.js";
 import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { isDiscoveryLocationEligible } from "../discovery/location-eligibility.js";
@@ -58,15 +58,32 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       screenshots,
     });
   }
-  if (input.submit && !input.ignoreLedger && alreadySubmitted(input.job.url)) {
-    return result(input, {
-      status: "already_submitted",
-      submitted: false,
-      confirmationDetected: false,
-      blocker: "already_submitted",
-      notes: lines(["result=review", "blocker=already_submitted", "Previous confirmation exists. Not submitted again."]),
-      screenshots,
-    });
+  if (input.submit && !input.ignoreLedger) {
+    const prior = priorTerminalEntry(input.job.url);
+    if (prior?.confirmationDetected || alreadySubmitted(input.job.url)) {
+      return result(input, {
+        status: "already_submitted",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "already_submitted",
+        notes: lines(["result=review", "blocker=already_submitted", "Previous confirmation exists. Not submitted again."]),
+        screenshots,
+      });
+    }
+    if (prior?.blocker && MANUAL_LEDGER_BLOCKERS.has(prior.blocker)) {
+      return result(input, {
+        status: "manual_required",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: prior.blocker,
+        notes: lines([
+          "result=manual_required",
+          `blocker=${prior.blocker}`,
+          "Auto-apply already hit this gate earlier. Finish in a browser if you still want the job.",
+        ]),
+        screenshots,
+      });
+    }
   }
 
   const page = await context.newPage();
@@ -219,27 +236,54 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     if (await detectCaptcha(page)) {
       log("CAPTCHA_REQUIRED", { company: input.job.company });
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      rememberSubmission({
+        url: input.job.url,
+        company: input.job.company,
+        role: input.job.role,
+        confirmationDetected: false,
+        at: new Date().toISOString(),
+        cvPath: cv.cvPath,
+        blocker: "captcha",
+      });
       return result(input, {
-        status: "review",
+        status: "manual_required",
         submitted: false,
         confirmationDetected: false,
         blocker: "captcha",
         persona,
         ...cv.publicFields,
-        notes: lines(["result=review", "blocker=captcha", `cv=${persona}`, "Application prepared but CAPTCHA requires manual completion."]),
+        notes: lines([
+          "result=manual_required",
+          "blocker=captcha",
+          `cv=${persona}`,
+          "CAPTCHA / human check blocks auto-apply. Finish manually in a browser if you want this job.",
+        ]),
         screenshots,
       });
     }
     if (await detectLoginWall(page)) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      rememberSubmission({
+        url: input.job.url,
+        company: input.job.company,
+        role: input.job.role,
+        confirmationDetected: false,
+        at: new Date().toISOString(),
+        cvPath: cv.cvPath,
+        blocker: "login_required",
+      });
       return result(input, {
-        status: "review",
+        status: "manual_required",
         submitted: false,
         confirmationDetected: false,
         blocker: "login_required",
         persona,
         ...cv.publicFields,
-        notes: lines(["result=review", "blocker=login_required", "Account creation is not handled in this version."]),
+        notes: lines([
+          "result=manual_required",
+          "blocker=login_required",
+          "Apply opened an account / email login gate (often iCIMS). Account creation is not handled in this version.",
+        ]),
         screenshots,
       });
     }
@@ -247,7 +291,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     const scope = await applyFormScope(page);
     const fields = await readFields(scope);
     log("FORM_DETECTED", { fields: fields.map((field) => field.label) });
-    if (fields.length === 0) {
+    if (fields.length === 0 || looksLikeSiteChromeFields(fields)) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       return result(input, {
         status: "review",
@@ -377,8 +421,19 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
           ? "Greenhouse kept the form open and showed a validation error. The application was not accepted."
           : "The Submit application button is still on the form. The click did not leave the application form.";
       const blocker = greenhouseAfter.recaptcha === "challenge" ? "captcha" : validation ? "form_validation" : "submit_not_accepted";
+      if (blocker === "captcha") {
+        rememberSubmission({
+          url: input.job.url,
+          company: input.job.company,
+          role: input.job.role,
+          confirmationDetected: false,
+          at: new Date().toISOString(),
+          cvPath: cv.cvPath,
+          blocker: "captcha",
+        });
+      }
       return result(input, {
-        status: "review",
+        status: blocker === "captcha" ? "manual_required" : "review",
         submitted: false,
         confirmationDetected: false,
         blocker,
@@ -387,7 +442,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         answers: filled.answers,
         canonicalJobUrl: page.url(),
         notes: lines([
-          "result=review",
+          `result=${blocker === "captcha" ? "manual_required" : "review"}`,
           `blocker=${blocker}`,
           `greenhouse_kind=${greenhouseAfter.kind}`,
           `recaptcha=${greenhouseAfter.recaptcha}`,
@@ -411,14 +466,18 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         blocker: "captcha",
       });
       return result(input, {
-        status: "review",
+        status: "manual_required",
         submitted: false,
         confirmationDetected: false,
         blocker: "captcha",
         persona,
         ...cv.publicFields,
         answers: filled.answers,
-        notes: lines(["result=review", "blocker=captcha", "The site asked for a human validation task. The form is still open, so this was not submitted."]),
+        notes: lines([
+          "result=manual_required",
+          "blocker=captcha",
+          "The site asked for a human validation task. The form is still open — finish manually if you want this job.",
+        ]),
         screenshots,
       });
     }
@@ -581,7 +640,13 @@ async function dismissOverlays(page: Page): Promise<void> {
     await oneTrust.click({ timeout: 4000, force: true }).catch(() => undefined);
     await page.waitForTimeout(600);
   }
-  const acceptAllCookies = page.getByRole("button", { name: /accept all cookies/i }).first();
+  // PepsiCo / Phenom tracking banner uses a short "Accept" label, not "Accept all cookies".
+  const pixelAccept = page.locator("#pixel-consent-accept-button").first();
+  if (await pixelAccept.count()) {
+    await pixelAccept.click({ timeout: 4000, force: true }).catch(() => undefined);
+    await page.waitForTimeout(600);
+  }
+  const acceptAllCookies = page.getByRole("button", { name: /accept all cookies|^accept all$|^accept$/i }).first();
   if (await acceptAllCookies.count()) {
     await acceptAllCookies.click({ timeout: 4000, force: true }).catch(() => undefined);
     await page.waitForTimeout(600);
@@ -600,14 +665,24 @@ async function dismissOverlays(page: Page): Promise<void> {
 }
 
 async function revealApplyForm(page: Page): Promise<void> {
-  if (await pageHasResumeField(page)) {
+  if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
     return;
   }
   const applyLabel = /apply|הגש|מועמדות/i;
   const apply = page.getByRole("button", { name: applyLabel }).or(page.getByRole("link", { name: applyLabel })).first();
   if (await apply.count()) {
-    await apply.click().catch(() => undefined);
-    await page.locator('input[type="file"], input[type="email"]').first().waitFor({ timeout: 15_000 }).catch(() => undefined);
+    const beforeUrl = page.url();
+    const href = await apply.getAttribute("href").catch(() => null);
+    await Promise.all([
+      page.waitForURL((url) => url.href !== beforeUrl, { timeout: 15_000 }).catch(() => undefined),
+      apply.click({ timeout: 5000 }).catch(() => undefined),
+    ]);
+    // Career sites sometimes swallow the click (sticky cookie layer). Follow the Apply href.
+    if (href && /^https?:\/\//i.test(href) && page.url() === beforeUrl) {
+      await page.goto(href, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+      await dismissOverlays(page);
+    }
+    await waitForApplyEntry(page, 15_000);
     return;
   }
   const clicked = await page.evaluate(() => {
@@ -620,9 +695,29 @@ async function revealApplyForm(page: Page): Promise<void> {
     return true;
   }).catch(() => false);
   if (clicked) {
-    await page.locator('input[type="file"], input[type="email"]').first().waitFor({ timeout: 15_000 }).catch(() => undefined);
+    await waitForApplyEntry(page, 15_000);
   }
   await waitForResumeUploadTarget(page, 20_000).catch(() => undefined);
+}
+
+async function waitForApplyEntry(page: Page, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
+      return;
+    }
+    await page.waitForTimeout(250);
+  }
+}
+
+async function pageHasApplyEmailField(page: Page): Promise<boolean> {
+  for (const scope of [page, ...page.frames()]) {
+    const count = await scope.locator('input[type="email"]').count().catch(() => 0);
+    if (count > 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function resolveGreenhouseEmailVerification(
@@ -797,6 +892,27 @@ async function pageHasResumeField(page: Page): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Career-site chrome (search box) is not an application form — reject before CV upload. */
+function looksLikeSiteChromeFields(fields: DetectedField[]): boolean {
+  if (fields.length === 0) {
+    return true;
+  }
+  const hasApplySignal = fields.some((field) => {
+    const hint = `${field.label} ${field.name} ${field.id} ${field.type}`.toLowerCase();
+    return field.type === "email"
+      || field.type === "file"
+      || field.type === "tel"
+      || /resume|cv|curriculum|first.?name|last.?name|phone|email|linkedin|cover.?letter/i.test(hint);
+  });
+  if (hasApplySignal) {
+    return false;
+  }
+  return fields.every((field) => {
+    const hint = `${field.label} ${field.name} ${field.id}`.toLowerCase();
+    return !hint.trim() || /find jobs|search|keywords|location|filter/i.test(hint);
+  });
 }
 
 function todayJerusalem(): string {

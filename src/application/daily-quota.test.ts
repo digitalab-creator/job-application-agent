@@ -15,6 +15,7 @@ test("only a confirmed application uses a daily slot", () => {
   assert.equal(countsTowardDailyLimit("not_relevant"), false);
   assert.equal(countsTowardDailyLimit("already_submitted"), false);
   assert.equal(countsTowardDailyLimit("location_ineligible"), false);
+  assert.equal(countsTowardDailyLimit("manual_required"), false);
 });
 
 test("quota counts real attempts and ignores closed rows", () => {
