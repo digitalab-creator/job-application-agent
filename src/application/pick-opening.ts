@@ -3,7 +3,7 @@ import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import { log } from "../logging/logger.js";
 import { factById } from "../profile/facts.js";
-import { isDiscoveryLocationEligible } from "../discovery/location-eligibility.js";
+import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
 import { acceptOpeningChoice } from "./opening-choice.js";
 import { normalizeOpenings, type ListedJob } from "./openings.js";
 
@@ -42,7 +42,13 @@ export async function chooseOpening(input: {
   if (input.openings.length === 0) {
     return null;
   }
-  const openings = input.openings.filter((job) => isDiscoveryLocationEligible(job.title, job.snippet, job.href));
+  const locationChecks = await Promise.all(
+    input.openings.map(async (job) => ({
+      job,
+      ok: await resolveJobLocationEligible({ title: job.title, snippet: job.snippet, url: job.href }),
+    })),
+  );
+  const openings = locationChecks.filter((row) => row.ok).map((row) => row.job);
   if (openings.length === 0) {
     log("LISTING_NO_MATCH", { company: input.company, targetRole: input.targetRole, reason: "location_ineligible" });
     return null;

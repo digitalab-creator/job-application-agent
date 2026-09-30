@@ -3,7 +3,8 @@ import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import type { RawBoardJob } from "./scan-boards.js";
 import { sheetCategoryFromDiscovery } from "./category-map.js";
-import { isDiscoveryLocationEligible } from "./location-eligibility.js";
+import { resolveJobLocationEligible } from "./resolve-location-eligibility.js";
+import { uniqueKeyForUrl } from "./job-url-key.js";
 
 const SYSTEM = `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
 Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"AI|Growth|Hybrid|Other","whyItFits":"one sentence","relevant":true}]}
@@ -11,6 +12,7 @@ category: AI = engineering/product AI roles; Growth = marketing, PPC, growth, pe
 Target mix over time: roughly 65% AI and 35% Growth — prefer labeling true growth/performance roles as Growth, not AI.
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
+relevant=false for on-site roles outside Israel Central District (e.g. Haifa, Jerusalem, Netanya only) unless remote/hybrid is stated.
 Do not invent candidate facts. Base only on title and snippet.`;
 
 const schema = z.object({
@@ -66,7 +68,11 @@ export async function scoreDiscoveryJobs(
     if (!opening) {
       continue;
     }
-    if (!isDiscoveryLocationEligible(opening.title, opening.snippet, opening.href)) {
+    if (!await resolveJobLocationEligible({
+      title: opening.title,
+      snippet: opening.snippet,
+      url: opening.href,
+    })) {
       continue;
     }
     out.push({
@@ -83,14 +89,7 @@ export async function scoreDiscoveryJobs(
   return out;
 }
 
-export function uniqueKeyForUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    return parsed.pathname.replace(/\/$/, "").toLowerCase();
-  } catch {
-    return url.toLowerCase();
-  }
-}
+export { uniqueKeyForUrl } from "./job-url-key.js";
 
 function companyFromBoardUrl(boardUrl: string): string {
   try {

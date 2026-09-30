@@ -13,7 +13,15 @@ export type ExcludedCompaniesConfig = {
   source?: string;
 };
 
-const DEFAULT_SEED = ["בורודה קפלן", "k-logic", "two-solutions"];
+const DEFAULT_SEED = ["בורודה קפלן", "k-logic", "two-solutions", "Hunt"];
+
+/** Recruitment agency / ATS hosts we never auto-apply to (matched on job URL). */
+const EXCLUDED_APPLY_URL_PATTERNS: RegExp[] = [
+  /\/jobs\/hunt\//i,
+  /hunt\.co\.il/i,
+  /joinhunt/i,
+  /careers\.hunt/i,
+];
 
 export function normalizeCompanyKey(value: string): string {
   return String(value || "")
@@ -117,6 +125,22 @@ export function isExcludedApplyCompany(
     }
   }
   return false;
+}
+
+export function isExcludedApplyUrl(url: string): boolean {
+  const text = String(url || "").trim();
+  if (!text) {
+    return false;
+  }
+  return EXCLUDED_APPLY_URL_PATTERNS.some((re) => re.test(text));
+}
+
+export function isExcludedApplyTarget(
+  company: string,
+  url = "",
+  excluded: readonly string[] = getExcludedCompanies(),
+): boolean {
+  return isExcludedApplyCompany(company, excluded) || isExcludedApplyUrl(url);
 }
 
 function normalizeCompanyList(companies: string[]): string[] {

@@ -1,6 +1,8 @@
 /**
- * Discovery only adds jobs in Israel or roles that explicitly allow working remotely from Israel.
+ * Discovery and apply only pursue remote roles or on-site/hybrid in Israel's Central District,
+ * minus admin-configured excluded locations (e.g. Ra'anana).
  */
+import { getExcludedLocations, textMatchesExcludedLocation } from "../application/exclude-location.js";
 
 const REMOTE_FROM_ISRAEL = [
   /\bremote\s+(?:from|in)\s+israel\b/i,
@@ -16,27 +18,71 @@ const REMOTE_FROM_ISRAEL = [
   /\bisrael\b.*\bworldwide\s+remote\b/i,
 ];
 
-const ISRAEL_SITE = [
-  /\bisrael\b/i,
+/** Remote / WFH when not tied to a foreign-only location. */
+const REMOTE_GENERAL = [
+  /\bfully\s+remote\b/i,
+  /\b100\s*%\s*remote\b/i,
+  /\bremote\s+position\b/i,
+  /\bremote\s+role\b/i,
+  /\bremote\s+job\b/i,
+  /\bwork\s+remotely\b/i,
+  /\bremote\s+work\b/i,
+  /\bwork\s+from\s+home\b/i,
+  /\bwfh\b/i,
+  /\bמהבית\b/,
+  /\bעבודה\s+מהבית\b/,
+  /\bמרחוק\b/,
+  /\bעבודה\s+מרחוק\b/,
+  /\b(?:full|partial)\s+remote\b/i,
+  /\bremote\s*[-–]\s*ok\b/i,
+  /\bremote\s+friendly\b/i,
+  /\bהיברידי\b/,
+  /\bhybrid\b/i,
+  /\bremote\b/i,
+];
+
+const CENTRAL_DISTRICT = [
   /\btel\s*aviv\b/i,
   /\btel-?aviv\b/i,
   /\b(tlv|t\.l\.v)\b/i,
-  /\braanana\b/i,
-  /\bherzliya\b/i,
-  /\bnetanya\b/i,
-  /\bhaifa\b/i,
-  /\bjerusalem\b/i,
-  /\bgivatayim\b/i,
-  /\bpetah\s*tikva\b/i,
-  /\bholon\b/i,
-  /\bbeer\s*sheva\b/i,
-  /\brehovot\b/i,
-  /\bkfar\s*saba\b/i,
+  /\bתל[\s-]?אביב\b/,
   /\bramat\s*gan\b/i,
-  /\bhod\s*hasharon\b/i,
+  /\bרמת\s*גן\b/,
+  /\bgivatayim\b/i,
+  /\bגבעתיים\b/,
+  /\bbnei\s*brak\b/i,
+  /\bבני\s*ברק\b/,
+  /\bpetah\s*tikva\b/i,
+  /\bפתח\s*תקו?וה\b/,
+  /\bholon\b/i,
+  /\bחולון\b/,
+  /\bbat\s*yam\b/i,
+  /\bבת\s*ים\b/,
+  /\brishon\s*le?zion\b/i,
+  /\bראשון\s*לציון\b/,
+  /\bnes\s*ziona\b/i,
+  /\bנס\s*ציונה\b/,
+  /\blod\b/i,
+  /\bלוד\b/,
+  /\bramla\b/i,
+  /\bרמלה\b/,
   /\bmodiin\b/i,
-  /\bhybrid\b.*\bisrael\b/i,
-  /\bisrael\b.*\bhybrid\b/i,
+  /\bמודיעין\b/,
+  /\bor\s*yehuda\b/i,
+  /\bאור\s*יהודה\b/,
+  /\byehud\b/i,
+  /\bיהוד\b/,
+  /\bazor\b/i,
+  /\bאזור\b/,
+  /\bkiryat\s*ono\b/i,
+  /\bקריית\s*אונו\b/,
+  /\bshoham\b/i,
+  /\bשוהם\b/,
+  /\bel'?ad\b/i,
+  /\bאלעד\b/,
+  /\bמרכז\b/,
+  /\bcentral\s+district\b/i,
+  /\bמחוז\s*המרכז\b/,
 ];
 
 const FOREIGN_LOCATION = [
@@ -68,27 +114,130 @@ const FOREIGN_LOCATION = [
   /\b(?:us|usa|uk|eu)\s*[-–]\s*remote\b/i,
 ];
 
-export function isDiscoveryLocationEligible(title: string, snippet: string, url = ""): boolean {
+const OTHER_ISRAEL_REGIONS = [
+  /\bhaifa\b/i,
+  /\bחיפה\b/,
+  /\bjerusalem\b/i,
+  /\bירושלים\b/,
+  /\bbeer\s*sheva\b/i,
+  /\bבאר\s*שבע\b/,
+  /\bnetanya\b/i,
+  /\bנתניה\b/,
+  /\bherzliya\b/i,
+  /\bהרצליה\b/,
+  /\bhod\s*hasharon\b/i,
+  /\bהוד\s*השרון\b/,
+  /\bkfar\s*saba\b/i,
+  /\bכפר\s*סבא\b/,
+  /\bachziv\b/i,
+  /\beilat\b/i,
+  /\bאילת\b/,
+];
+
+function combinedText(title: string, snippet: string, url: string): string {
   const titleText = title.replace(/\s+/g, " ").trim();
   const urlText = decodeURIComponent(url);
-
-  if (REMOTE_FROM_ISRAEL.some((re) => re.test(titleText) || re.test(urlText))) {
-    return true;
-  }
-  // Comeet puts the workplace in the job title. A Warsaw title stays ineligible even if the description mentions Israel.
-  if (FOREIGN_LOCATION.some((re) => re.test(titleText)) && !ISRAEL_SITE.some((re) => re.test(titleText))) {
-    return false;
-  }
-
   const text = `${titleText} ${snippet}`.replace(/\s+/g, " ").trim();
-  if (REMOTE_FROM_ISRAEL.some((re) => re.test(text) || re.test(urlText))) {
+  return `${titleText} ${text} ${urlText}`.trim();
+}
+
+function isForeignOnlySite(title: string, snippet: string, url: string): boolean {
+  const titleText = title.replace(/\s+/g, " ").trim();
+  if (FOREIGN_LOCATION.some((re) => re.test(titleText)) && !CENTRAL_DISTRICT.some((re) => re.test(titleText))) {
     return true;
   }
-  if (ISRAEL_SITE.some((re) => re.test(text) || re.test(urlText))) {
-    return true;
-  }
+  const text = combinedText(title, snippet, url);
   if (FOREIGN_LOCATION.some((re) => re.test(text))) {
+    const hasIsraelRemote = REMOTE_FROM_ISRAEL.some((re) => re.test(text));
+    const hasCentral = CENTRAL_DISTRICT.some((re) => re.test(text));
+    if (!hasIsraelRemote && !hasCentral) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isRemoteEligible(title: string, snippet: string, url: string): boolean {
+  const text = combinedText(title, snippet, url);
+  if (REMOTE_FROM_ISRAEL.some((re) => re.test(text))) {
+    return true;
+  }
+  if (isForeignOnlySite(title, snippet, url)) {
     return false;
   }
-  return true;
+  return REMOTE_GENERAL.some((re) => re.test(text));
+}
+
+function isCentralDistrictEligible(title: string, snippet: string, url: string): boolean {
+  const text = combinedText(title, snippet, url);
+  return CENTRAL_DISTRICT.some((re) => re.test(text));
+}
+
+function isOtherIsraelRegionOnly(title: string, snippet: string, url: string): boolean {
+  const text = combinedText(title, snippet, url);
+  const other = OTHER_ISRAEL_REGIONS.some((re) => re.test(text));
+  const central = CENTRAL_DISTRICT.some((re) => re.test(text));
+  const remote = isRemoteEligible(title, snippet, url);
+  return other && !central && !remote;
+}
+
+export type LocationRulesVerdict = "eligible" | "ineligible" | "needs_lookup";
+
+/** Job appears Israeli but rules cannot confirm remote / Central District / excluded city. */
+export function isIsraelLocationUncertain(title: string, snippet: string, url: string): boolean {
+  const blob = combinedText(title, snippet, url);
+  if (/\bisrael\b/i.test(blob)) {
+    return true;
+  }
+  if (/\.co\.il\b/i.test(url)) {
+    return true;
+  }
+  if (/[\u0590-\u05FF]/.test(blob)) {
+    return true;
+  }
+  try {
+    if (/comeet\.com/i.test(url) && /location=.*israel/i.test(decodeURIComponent(url))) {
+      return true;
+    }
+  } catch {
+    // ignore bad URLs
+  }
+  return false;
+}
+
+export function classifyLocationRules(
+  title: string,
+  snippet: string,
+  url = "",
+  excludedLocations: readonly string[] = getExcludedLocations(),
+): LocationRulesVerdict {
+  const blob = combinedText(title, snippet, url);
+  if (textMatchesExcludedLocation(blob, excludedLocations)) {
+    return "ineligible";
+  }
+  if (isForeignOnlySite(title, snippet, url)) {
+    return "ineligible";
+  }
+  if (isRemoteEligible(title, snippet, url)) {
+    return "eligible";
+  }
+  if (isCentralDistrictEligible(title, snippet, url)) {
+    return "eligible";
+  }
+  if (isOtherIsraelRegionOnly(title, snippet, url)) {
+    return "ineligible";
+  }
+  if (isIsraelLocationUncertain(title, snippet, url)) {
+    return "needs_lookup";
+  }
+  return "ineligible";
+}
+
+export function isDiscoveryLocationEligible(
+  title: string,
+  snippet: string,
+  url = "",
+  excludedLocations: readonly string[] = getExcludedLocations(),
+): boolean {
+  return classifyLocationRules(title, snippet, url, excludedLocations) === "eligible";
 }
