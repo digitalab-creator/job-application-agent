@@ -16,11 +16,11 @@ import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
-import { isExcludedApplyCompany } from "./exclude-company.js";
+import { isExcludedApplyTarget } from "./exclude-company.js";
 import { alreadySubmitted, priorTerminalEntry, rememberSubmission, MANUAL_LEDGER_BLOCKERS } from "./ledger.js";
 import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
-import { isDiscoveryLocationEligible } from "../discovery/location-eligibility.js";
+import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
 import { detectCaptcha, detectConfirmation, detectEmailVerification, detectLoginWall } from "./verify-submission.js";
 
 export type ApplyInput = {
@@ -43,7 +43,21 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   const jobSlug = slug(`${input.job.company}-${input.job.role}`);
   const shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
   const screenshots: string[] = [];
-  if (isExcludedApplyCompany(input.job.company)) {
+  if (!await resolveJobLocationEligible({ title: input.job.role, snippet: "", url: input.job.url })) {
+    log("JOB_LOCATION_INELIGIBLE_PRECHECK", { role: input.job.role, url: input.job.url });
+    return result(input, {
+      status: "location_ineligible",
+      submitted: false,
+      confirmationDetected: false,
+      notes: lines([
+        "result=not_relevant",
+        "reason=location_ineligible",
+        "Role must be remote or in Israel Central District, and not in an excluded location. Nothing was submitted.",
+      ]),
+      screenshots,
+    });
+  }
+  if (isExcludedApplyTarget(input.job.company, input.job.url)) {
     log("COMPANY_EXCLUDED", { company: input.job.company, url: input.job.url });
     return result(input, {
       status: "not_relevant",
@@ -53,7 +67,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         "result=not_relevant",
         "reason=company_excluded",
         `company=${input.job.company}`,
-        "Company is on the apply exclude list. Nothing was submitted.",
+        "Company or job URL is on the apply exclude list. Nothing was submitted.",
       ]),
       screenshots,
     });
@@ -159,7 +173,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    if (!isDiscoveryLocationEligible(activeRole, "", page.url())) {
+    if (!await resolveJobLocationEligible({ title: activeRole, snippet: bodyText, url: page.url() })) {
       log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url() });
       return result(input, {
         status: "location_ineligible",
@@ -169,7 +183,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         notes: lines([
           "result=not_relevant",
           "reason=location_ineligible",
-          "This role is not in Israel and does not say remote from Israel. Nothing was submitted.",
+          "Role must be remote or in Israel Central District, and not in an excluded location. Nothing was submitted.",
         ]),
         screenshots,
       });
@@ -851,13 +865,19 @@ async function enterBestOpening(
   if (openings.length < 2) {
     return null;
   }
-  const eligible = openings.filter((job) => isDiscoveryLocationEligible(job.title, job.snippet, job.href));
+  const locationChecks = await Promise.all(
+    openings.map(async (job) => ({
+      job,
+      ok: await resolveJobLocationEligible({ title: job.title, snippet: job.snippet, url: job.href }),
+    })),
+  );
+  const eligible = locationChecks.filter((row) => row.ok).map((row) => row.job);
   if (eligible.length === 0) {
     return {
       title: role,
       blocked: true,
       outcome: "location_ineligible",
-      line: "Every opening on this list is outside Israel.",
+      line: "No opening on this list matches remote or Central District location policy.",
     };
   }
   let chosen: Awaited<ReturnType<typeof chooseOpening>>;

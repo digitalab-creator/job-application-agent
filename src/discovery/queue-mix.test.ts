@@ -12,7 +12,7 @@ import type { ScoredDiscoveryJob } from "./score-jobs.js";
 function job(partial: Partial<ScoredDiscoveryJob> & Pick<ScoredDiscoveryJob, "category" | "matchScore">): ScoredDiscoveryJob {
   return {
     uniqueKey: "k",
-    role: partial.role ?? "Role",
+    role: partial.role ?? "Engineer Tel Aviv",
     company: "co",
     url: "https://example.com/jobs/x",
     whyItFits: partial.whyItFits ?? "fit",
@@ -59,7 +59,7 @@ test("batch selection prioritizes marketing when rebalancing", () => {
   const candidates = [
     job({ category: "Applied AI", matchScore: 95, role: "AI Engineer Tel Aviv" }),
     job({ category: "Applied AI", matchScore: 88, role: "Backend Tel Aviv" }),
-    job({ category: "Growth Marketing", matchScore: 70, role: "Growth Lead Israel" }),
+    job({ category: "Growth Marketing", matchScore: 70, role: "Growth Lead Remote" }),
     job({ category: "Performance Marketing Leadership", matchScore: 72, role: "PPC Lead TLV" }),
   ];
   const { selected, addedMarketing } = selectDiscoveryBatch(candidates, policy, 4);
