@@ -3,6 +3,7 @@
  * or Tel Aviv District (incl. Sharon cities), minus admin-configured excluded locations.
  */
 import { getExcludedLocations, textMatchesExcludedLocation } from "../application/exclude-location.js";
+import { normalizeLocationAliases } from "./location-aliases.js";
 
 const REMOTE_FROM_ISRAEL = [
   /\bremote\s+(?:from|in)\s+israel\b/i,
@@ -76,6 +77,8 @@ const CENTRAL_DISTRICT = [
   /\bאזור\b/,
   /\bkiryat\s*ono\b/i,
   /\bקריית\s*אונו\b/,
+  /\brehovot\b/i,
+  /\bרחובות\b/,
   /\bshoham\b/i,
   /\bשוהם\b/,
   /\bel'?ad\b/i,
@@ -103,7 +106,6 @@ const TEL_AVIV_DISTRICT = [
   /\bגוש\s*דן\b/,
   /\bgush\s*dan\b/i,
   /\bהשרון\b/,
-  /\bsharon\b/i,
 ];
 
 const ON_SITE_ACCEPTABLE = [...CENTRAL_DISTRICT, ...TEL_AVIV_DISTRICT];
@@ -155,7 +157,8 @@ function combinedText(title: string, snippet: string, url: string): string {
   const titleText = title.replace(/\s+/g, " ").trim();
   const urlText = decodeURIComponent(url);
   const text = `${titleText} ${snippet}`.replace(/\s+/g, " ").trim();
-  return `${titleText} ${text} ${urlText}`.trim();
+  const raw = `${titleText} ${text} ${urlText}`.trim();
+  return normalizeLocationAliases(raw);
 }
 
 function isForeignOnlySite(title: string, snippet: string, url: string): boolean {
@@ -187,7 +190,21 @@ function isRemoteEligible(title: string, snippet: string, url: string): boolean 
 
 function isOnSiteMetroEligible(title: string, snippet: string, url: string): boolean {
   const text = combinedText(title, snippet, url);
-  return ON_SITE_ACCEPTABLE.some((re) => re.test(text));
+  if (ON_SITE_ACCEPTABLE.some((re) => re.test(text))) {
+    return true;
+  }
+  return matchesIsraeliSharonPlaintext(text);
+}
+
+/** "Sharon" alone matches US towns (Sharon, CT). Require Israel context for Latin "sharon". */
+function matchesIsraeliSharonPlaintext(text: string): boolean {
+  if (!/\bsharon\b/i.test(text)) {
+    return false;
+  }
+  if (/\bsharon,\s*(ct|ma|pa|nh|vt|usa|u\.s\.)\b/i.test(text)) {
+    return false;
+  }
+  return /\bisrael\b/i.test(text) || /[\u0590-\u05FF]/.test(text);
 }
 
 function isOtherIsraelRegionOnly(title: string, snippet: string, url: string): boolean {

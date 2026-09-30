@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   getExcludedLocations,
+  locationNeedleMatchesText,
   parseExcludedLocationsText,
   setExcludedLocations,
   textMatchesExcludedLocation,
@@ -18,6 +19,11 @@ test("textMatchesExcludedLocation finds Hebrew and Latin spellings", () => {
   assert.equal(textMatchesExcludedLocation("משרה ברעננה", ["רעננה"]), true);
   assert.equal(textMatchesExcludedLocation("Office in Ra'anana", ["Raanana"]), true);
   assert.equal(textMatchesExcludedLocation("Tel Aviv", ["רעננה"]), false);
+});
+
+test("excluded location does not match substring inside unrelated words", () => {
+  assert.equal(locationNeedleMatchesText("Raanana", "Extraordinary performance"), false);
+  assert.equal(locationNeedleMatchesText("Raanana", "Team based in Raanana"), true);
 });
 
 test("setExcludedLocations writes runtime config file", () => {

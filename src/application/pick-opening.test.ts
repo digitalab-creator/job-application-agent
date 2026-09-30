@@ -12,3 +12,13 @@ test("a Comeet company board keeps specific jobs and drops the board link", () =
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0]?.title, "Data Science Team Lead");
 });
+
+test("Wix sibling position links stay visible from a position URL that renders the list", () => {
+  const jobs = normalizeOpenings([
+    { title: "Full Stack AI Engineer", href: "https://careers.wix.com/location/tel-aviv/positions/10022791", snippet: "Tel Aviv" },
+    { title: "Backend Engineer", href: "https://careers.wix.com/location/tel-aviv/positions/10022800", snippet: "Tel Aviv" },
+    { title: "Tel Aviv", href: "https://careers.wix.com/location/tel-aviv", snippet: "All jobs" },
+  ], "https://careers.wix.com/location/tel-aviv/positions/10022791");
+  assert.equal(jobs.length, 1);
+  assert.ok(jobs[0]?.href.includes("10022800"));
+});

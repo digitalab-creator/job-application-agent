@@ -29,7 +29,8 @@ export type ResolveLocationInput = {
 export async function resolveJobLocationEligible(input: ResolveLocationInput): Promise<boolean> {
   const key = locationCacheKey(input.url, input.title);
   const cached = getCachedLocationVerdict(key);
-  if (cached) {
+  const snippetRich = input.snippet.trim().length > 300;
+  if (cached && !(snippetRich && cached.source === "rules" && cached.eligible === false)) {
     log("LOCATION_VERDICT_CACHE_HIT", { key, eligible: cached.eligible, source: cached.source });
     return cached.eligible;
   }

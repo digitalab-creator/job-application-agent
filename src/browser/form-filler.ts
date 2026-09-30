@@ -161,6 +161,9 @@ export async function fillFields(input: {
     }
     const decision = decideField({
       label: field.label,
+      name: field.name,
+      id: field.id,
+      groupLabel: field.groupLabel,
       required: field.required,
       type: field.tag === "textarea" ? "textarea" : field.type,
       options: field.options,
@@ -249,7 +252,21 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
     return;
   }
   const locator = scope.locator(`[data-agent-field="${field.index}"]`);
-  if (field.id === "country" || /country/i.test(field.label)) {
+  const fieldBlob = `${field.name} ${field.id} ${field.label}`;
+  if (/country_phone_code|phone_country_code|dial.code/i.test(fieldBlob)) {
+    const prefer = field.options.find((option) => /\+972|^972|\(\+972\)|israel/i.test(option))
+      ?? field.options.find((option) => /israel/i.test(option));
+    const pick = prefer ?? value;
+    if (field.tag === "select" && field.options.length > 0) {
+      await locator.selectOption({ label: pick }).catch(async () => {
+        await locator.selectOption({ value: pick });
+      });
+      return;
+    }
+    await locator.fill(pick);
+    return;
+  }
+  if (field.id === "country" || (/country/i.test(field.label) && !/phone.code|country_phone/i.test(fieldBlob))) {
     const country = field.id === "country" ? scope.locator("#country") : locator;
     await country.click({ timeout: 5000 }).catch(() => undefined);
     await country.fill(value);

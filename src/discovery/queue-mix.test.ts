@@ -6,6 +6,7 @@ import {
   rebalancePolicy,
   selectApplyDailyBatch,
   selectDiscoveryBatch,
+  shouldSkipDiscoveryForQueueDepth,
 } from "./queue-mix.js";
 import type { ScoredDiscoveryJob } from "./score-jobs.js";
 
@@ -65,4 +66,10 @@ test("batch selection prioritizes marketing when rebalancing", () => {
   const { selected, addedMarketing } = selectDiscoveryBatch(candidates, policy, 4);
   assert.ok(addedMarketing >= 2);
   assert.ok(selected.some((row) => row.category === "Growth Marketing"));
+});
+
+test("skip discover when New rows exceed 3× daily apply limit", () => {
+  assert.equal(shouldSkipDiscoveryForQueueDepth(61, 20), true);
+  assert.equal(shouldSkipDiscoveryForQueueDepth(60, 20), false);
+  assert.equal(shouldSkipDiscoveryForQueueDepth(undefined, 20), false);
 });

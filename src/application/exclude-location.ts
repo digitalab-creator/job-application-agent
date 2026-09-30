@@ -11,7 +11,18 @@ export type ExcludedLocationsConfig = {
   source?: string;
 };
 
-const DEFAULT_SEED = ["רעננה", "Ra'anana", "Raanana"];
+const DEFAULT_SEED = [
+  "רעננה",
+  "Ra'anana",
+  "Raanana",
+  "רחובות",
+  "Rehovot",
+  "נס ציונה",
+  "Nes Ziona",
+  "Nes-Ziona",
+  "חולון",
+  "Holon",
+];
 
 export function parseExcludedLocationsText(raw: string): string[] {
   const seen = new Set<string>();
@@ -105,21 +116,34 @@ export function textMatchesExcludedLocation(
   if (!blob.trim()) {
     return false;
   }
-  const blobKey = normalizeLocationKey(blob);
   for (const item of excluded) {
     const needle = String(item || "").trim();
     if (!needle) {
       continue;
     }
-    if (blob.includes(needle)) {
-      return true;
-    }
-    const needleKey = normalizeLocationKey(needle);
-    if (needleKey && blobKey.includes(needleKey)) {
+    if (locationNeedleMatchesText(needle, blob)) {
       return true;
     }
   }
   return false;
+}
+
+/** Match whole location tokens — avoid substring hits inside unrelated words. */
+export function locationNeedleMatchesText(needle: string, blob: string): boolean {
+  const trimmed = needle.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (/[\u0590-\u05FF]/.test(trimmed)) {
+    return blob.includes(trimmed);
+  }
+  const strippedBlob = blob.replace(/[''´`]/g, "");
+  const strippedNeedle = trimmed.replace(/[''´`]/g, "");
+  const escaped = strippedNeedle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (/\w/.test(strippedNeedle)) {
+    return new RegExp(`\\b${escaped}\\b`, "i").test(strippedBlob);
+  }
+  return blob.includes(trimmed);
 }
 
 function normalizeLocationList(locations: string[]): string[] {

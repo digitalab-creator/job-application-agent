@@ -22,15 +22,26 @@ export function normalizeOpenings(
     }
     const path = target.pathname.replace(/\/$/, "");
     const here = page.pathname.replace(/\/$/, "");
-    if (path === here || path.length <= here.length) {
+    if (path === here) {
+      continue;
+    }
+    // Drop board/root links when we are already on a deeper posting (Comeet, etc.).
+    if (here.startsWith(`${path}/`)) {
       continue;
     }
     if (!/\/jobs\/|\/job\/|\/j\/|\/positions\//i.test(path)) {
       continue;
     }
-    const rawSlug = path.split("/").filter(Boolean).at(-2) ?? "";
+    const segments = path.split("/").filter(Boolean);
+    const lastSegment = segments.at(-1) ?? "";
+    const rawSlug = /^\d+$/.test(lastSegment)
+      ? (segments.at(-2) ?? lastSegment)
+      : (segments.at(-2) ?? lastSegment);
     const slug = rawSlug.toLowerCase();
     if (!slug || slug === "none" || slug === "---" || slug === "-") {
+      continue;
+    }
+    if (slug === "positions" && !/^\d+$/.test(lastSegment)) {
       continue;
     }
     if (seen.has(path)) {

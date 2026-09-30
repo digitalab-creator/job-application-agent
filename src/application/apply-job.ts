@@ -6,7 +6,7 @@ import { applyFormScope, fillFields, readFields, uploadResume, waitForResumeUplo
 import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
 import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
-import { navigationRetryUrls } from "./job-navigation-url.js";
+import { directGreenhouseUrlsForCareersUrl, navigationRetryUrls } from "./job-navigation-url.js";
 import { submitApplication } from "../browser/submit-application.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { saveScreenshot } from "../browser/screenshot.js";
@@ -16,12 +16,13 @@ import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
+import type { LedgerEntry } from "./ledger.js";
 import { isExcludedApplyTarget } from "./exclude-company.js";
-import { alreadySubmitted, priorTerminalEntry, rememberSubmission, MANUAL_LEDGER_BLOCKERS } from "./ledger.js";
-import { chooseOpening, listOpenings, openChosen } from "./pick-opening.js";
+import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledger.js";
+import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
-import { detectCaptcha, detectConfirmation, detectEmailVerification, detectLoginWall } from "./verify-submission.js";
+import { detectConfirmation, detectEmailVerification, detectLoginWall, classifyCaptchaSignal } from "./verify-submission.js";
 
 export type ApplyInput = {
   row?: number;
@@ -43,20 +44,6 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   const jobSlug = slug(`${input.job.company}-${input.job.role}`);
   const shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
   const screenshots: string[] = [];
-  if (!await resolveJobLocationEligible({ title: input.job.role, snippet: "", url: input.job.url })) {
-    log("JOB_LOCATION_INELIGIBLE_PRECHECK", { role: input.job.role, url: input.job.url });
-    return result(input, {
-      status: "location_ineligible",
-      submitted: false,
-      confirmationDetected: false,
-      notes: lines([
-        "result=not_relevant",
-        "reason=location_ineligible",
-        "Role must be remote or in Central/Tel Aviv District, and not in an excluded location. Nothing was submitted.",
-      ]),
-      screenshots,
-    });
-  }
   if (isExcludedApplyTarget(input.job.company, input.job.url)) {
     log("COMPANY_EXCLUDED", { company: input.job.company, url: input.job.url });
     return result(input, {
@@ -84,7 +71,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    if (prior?.blocker && MANUAL_LEDGER_BLOCKERS.has(prior.blocker)) {
+    if (prior?.blocker) {
       return result(input, {
         status: "manual_required",
         submitted: false,
@@ -104,8 +91,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   page.setDefaultNavigationTimeout(env.navigationTimeoutMs);
   page.setDefaultTimeout(env.actionTimeoutMs);
   try {
+    let listingNote: Awaited<ReturnType<typeof enterBestOpening>> = null;
     try {
       await openJob(page, input.job.url);
+      listingNote = await enterBestOpening(page, input.job.role, input.job.company, input.job.url);
+      await ensurePositionDetailPage(page, input.job.role, input.job.url);
+      await tryGreenhouseCareersFallback(page, input.job.url);
     } catch (error) {
       const message = error instanceof Error ? error.message : "navigation_failed";
       log("JOB_NAVIGATION_FAILED", { url: input.job.url, message });
@@ -125,7 +116,6 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     log("JOB_OPENED", { url: page.url(), company: input.job.company, role: input.job.role });
-    const listingNote = await enterBestOpening(page, input.job.role, input.job.company);
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
     if (listingNote?.blocked) {
       if (listingNote.outcome === "location_ineligible") {
@@ -133,7 +123,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
           status: "location_ineligible",
           submitted: false,
           confirmationDetected: false,
-          canonicalJobUrl: page.url(),
+          canonicalJobUrl: listingNote.canonicalUrl || page.url(),
           notes: lines(["result=not_relevant", "reason=location_ineligible", listingNote.line, "Nothing was submitted."]),
           screenshots,
         });
@@ -189,15 +179,24 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     if (pageStatus === "CAREERS_PAGE") {
-      return result(input, {
-        status: "review",
-        submitted: false,
-        confirmationDetected: false,
-        blocker: "careers_page",
-        canonicalJobUrl: page.url(),
-        notes: lines(["result=review", "blocker=careers_page", listingNote?.line ?? "Live page was a careers list, not one job."]),
-        screenshots,
+      await tryGreenhouseCareersFallback(page, input.job.url);
+      const afterFallback = classifyJobPage({
+        url: page.url(),
+        title: await page.title(),
+        text: await page.locator("body").innerText(),
+        role: activeRole,
       });
+      if (afterFallback === "CAREERS_PAGE" && !(await pageHasResumeField(page)) && !(await pageHasApplyEmailField(page))) {
+        return result(input, {
+          status: "review",
+          submitted: false,
+          confirmationDetected: false,
+          blocker: "careers_page",
+          canonicalJobUrl: page.url(),
+          notes: lines(["result=review", "blocker=careers_page", listingNote?.line ?? "Live page was a careers list, not one job."]),
+          screenshots,
+        });
+      }
     }
     if (pageStatus === "UNKNOWN") {
       log("JOB_PAGE_UNCONFIRMED", { url: page.url(), company: input.job.company });
@@ -247,44 +246,19 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     await page.evaluate(() => {
       document.querySelector("#application-form, .application--form, iframe[src*='greenhouse']")?.scrollIntoView({ block: "center" });
     }).catch(() => undefined);
-    if (await detectCaptcha(page)) {
-      log("CAPTCHA_REQUIRED", { company: input.job.company });
-      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
-      rememberSubmission({
-        url: input.job.url,
-        company: input.job.company,
-        role: input.job.role,
-        confirmationDetected: false,
-        at: new Date().toISOString(),
-        cvPath: cv.cvPath,
-        blocker: "captcha",
-      });
-      return result(input, {
-        status: "manual_required",
-        submitted: false,
-        confirmationDetected: false,
-        blocker: "captcha",
-        persona,
-        ...cv.publicFields,
-        notes: lines([
-          "result=manual_required",
-          "blocker=captcha",
-          `cv=${persona}`,
-          "CAPTCHA / human check blocks auto-apply. Finish manually in a browser if you want this job.",
-        ]),
-        screenshots,
-      });
-    }
+    const preCaptchaSignal = await classifyCaptchaSignal(page);
+    log("CAPTCHA_SIGNAL", {
+      company: input.job.company,
+      ats: atsLabel(page.url()),
+      stage: "pre_submit",
+      signal: preCaptchaSignal,
+    });
     if (await detectLoginWall(page)) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
-      rememberSubmission({
-        url: input.job.url,
-        company: input.job.company,
-        role: input.job.role,
-        confirmationDetected: false,
-        at: new Date().toISOString(),
-        cvPath: cv.cvPath,
+      rememberManualApply(input, {
         blocker: "login_required",
+        cvPath: cv.cvPath,
+        canonicalJobUrl: page.url(),
       });
       return result(input, {
         status: "manual_required",
@@ -436,14 +410,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
           : "The Submit application button is still on the form. The click did not leave the application form.";
       const blocker = greenhouseAfter.recaptcha === "challenge" ? "captcha" : validation ? "form_validation" : "submit_not_accepted";
       if (blocker === "captcha") {
-        rememberSubmission({
-          url: input.job.url,
-          company: input.job.company,
-          role: input.job.role,
-          confirmationDetected: false,
-          at: new Date().toISOString(),
-          cvPath: cv.cvPath,
+        rememberManualApply(input, {
           blocker: "captcha",
+          cvPath: cv.cvPath,
+          captchaSignal: "active_challenge",
+          stage: "post_submit",
+          answers: filled.answers,
+          canonicalJobUrl: page.url(),
         });
       }
       return result(input, {
@@ -467,17 +440,23 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    if (await detectCaptcha(page)) {
-      log("CAPTCHA_REQUIRED", { company: input.job.company, stage: "after_submit" });
+    const postCaptchaSignal = await classifyCaptchaSignal(page);
+    log("CAPTCHA_SIGNAL", {
+      company: input.job.company,
+      ats: atsLabel(page.url()),
+      stage: "post_submit",
+      signal: postCaptchaSignal,
+    });
+    if (postCaptchaSignal === "active_challenge") {
+      log("CAPTCHA_REQUIRED", { company: input.job.company, stage: "post_submit", signal: postCaptchaSignal });
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
-      rememberSubmission({
-        url: input.job.url,
-        company: input.job.company,
-        role: input.job.role,
-        confirmationDetected: false,
-        at: new Date().toISOString(),
-        cvPath: cv.cvPath,
+      rememberManualApply(input, {
         blocker: "captcha",
+        cvPath: cv.cvPath,
+        captchaSignal: "active_challenge",
+        stage: "post_submit",
+        answers: filled.answers,
+        canonicalJobUrl: page.url(),
       });
       return result(input, {
         status: "manual_required",
@@ -490,7 +469,8 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         notes: lines([
           "result=manual_required",
           "blocker=captcha",
-          "The site asked for a human validation task. The form is still open — finish manually if you want this job.",
+          "captchaSignal=active_challenge",
+          "A visible CAPTCHA challenge appeared after submit. Finish manually if you want this job.",
         ]),
         screenshots,
       });
@@ -615,6 +595,10 @@ async function openJob(page: Page, url: string): Promise<void> {
         try {
           await page.goto(target, { waitUntil });
           await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
+          if (/greenhouse\.io/i.test(target) && !/greenhouse\.io/i.test(page.url())) {
+            log("NAVIGATION_LEFT_GREENHOUSE", { target, landed: page.url() });
+            continue;
+          }
           await dismissOverlays(page);
           return;
         } catch (error) {
@@ -678,6 +662,66 @@ async function dismissOverlays(page: Page): Promise<void> {
   }).catch(() => undefined);
 }
 
+async function ensurePositionDetailPage(page: Page, role: string, targetUrl: string): Promise<void> {
+  const positionMatch = page.url().match(/\/positions\/(\d+)/i)
+    ?? targetUrl.match(/\/positions\/(\d+)/i);
+  if (!positionMatch) {
+    return;
+  }
+  const positionId = positionMatch[1];
+  const roleKeyword = role.split(/\s+/).find((word) => word.length > 3) ?? role;
+  const hasDetail = async (): Promise<boolean> => {
+    if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
+      return true;
+    }
+    const body = await page.locator("body").innerText().catch(() => "");
+    return body.includes(roleKeyword) && !/showing \d+ positions/i.test(body);
+  };
+  if (await hasDetail()) {
+    return;
+  }
+  await page.goto(page.url(), { waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => undefined);
+  await page.waitForFunction(
+    ({ keyword, id }) => {
+      const text = document.body?.innerText ?? "";
+      return text.includes(keyword) || Boolean(document.querySelector(`a[href*="${id}"]`));
+    },
+    { keyword: roleKeyword, id: positionId },
+    { timeout: 20_000 },
+  ).catch(() => undefined);
+  if (await hasDetail()) {
+    return;
+  }
+  const listView = await page.getByText(/showing \d+ positions/i).count().catch(() => 0);
+  if (listView === 0) {
+    return;
+  }
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const deepLink = page.locator(`a[href*="/positions/${positionId}"]`).first();
+    if (await deepLink.count()) {
+      await deepLink.click({ timeout: 8000 }).catch(() => undefined);
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      if (await hasDetail()) {
+        return;
+      }
+    }
+    const roleLink = page.locator("a[href*='/positions/']").filter({ hasText: new RegExp(roleKeyword, "i") }).first();
+    if (await roleLink.count()) {
+      await roleLink.click({ timeout: 8000 }).catch(() => undefined);
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      if (await hasDetail()) {
+        return;
+      }
+    }
+    const loadMore = page.getByRole("button", { name: /load more/i });
+    if (!(await loadMore.count())) {
+      break;
+    }
+    await loadMore.click({ timeout: 5000 }).catch(() => undefined);
+    await page.waitForTimeout(1200);
+  }
+}
+
 async function revealApplyForm(page: Page): Promise<void> {
   if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
     return;
@@ -697,6 +741,7 @@ async function revealApplyForm(page: Page): Promise<void> {
       await dismissOverlays(page);
     }
     await waitForApplyEntry(page, 15_000);
+    await waitForGreenhouseFrame(page);
     return;
   }
   const clicked = await page.evaluate(() => {
@@ -711,7 +756,21 @@ async function revealApplyForm(page: Page): Promise<void> {
   if (clicked) {
     await waitForApplyEntry(page, 15_000);
   }
+  await waitForGreenhouseFrame(page);
   await waitForResumeUploadTarget(page, 20_000).catch(() => undefined);
+}
+
+async function waitForGreenhouseFrame(page: Page): Promise<void> {
+  const frame = page.locator("iframe[src*='greenhouse'], iframe[src*='grnh.se'], iframe[id*='grnhse']").first();
+  if (await frame.count().catch(() => 0)) {
+    await frame.waitFor({ state: "attached", timeout: 12_000 }).catch(() => undefined);
+    return;
+  }
+  const apply = page.getByRole("link", { name: /^apply/i }).or(page.getByRole("button", { name: /^apply/i })).first();
+  if (await apply.count().catch(() => 0)) {
+    await apply.click({ timeout: 5000 }).catch(() => undefined);
+    await page.locator("iframe[src*='greenhouse'], iframe[src*='grnh.se']").first().waitFor({ state: "attached", timeout: 12_000 }).catch(() => undefined);
+  }
 }
 
 async function waitForApplyEntry(page: Page, timeoutMs: number): Promise<void> {
@@ -845,6 +904,20 @@ async function resolveGreenhouseEmailVerification(
   return null;
 }
 
+function rememberManualApply(
+  input: ApplyInput,
+  extra: Pick<LedgerEntry, "blocker" | "cvPath" | "captchaSignal" | "stage" | "answers" | "canonicalJobUrl">,
+): void {
+  rememberSubmission({
+    url: input.job.url,
+    company: input.job.company,
+    role: input.job.role,
+    confirmationDetected: false,
+    at: new Date().toISOString(),
+    ...extra,
+  });
+}
+
 function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): ApplicationResult {
   return { jobUrl: input.job.url, ...extra };
 }
@@ -853,17 +926,101 @@ function lines(parts: string[]): string {
   return parts.join("\n");
 }
 
+function looksLikeGarbageListTitle(title: string): boolean {
+  const cleaned = title.replace(/\s+/g, " ").trim();
+  return cleaned.length < 8 || /^(page down|apply|view|learn more|next|previous)$/i.test(cleaned);
+}
+
+function bestTitleMatch(role: string, openings: { title: string; href: string }[]): { title: string; href: string } | null {
+  const words = role.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3);
+  if (words.length === 0 || openings.length === 0) {
+    return null;
+  }
+  let best: { title: string; href: string; hits: number } | null = null;
+  for (const job of openings) {
+    const hay = job.title.toLowerCase();
+    const hits = words.filter((word) => hay.includes(word)).length;
+    if (hits === 0) {
+      continue;
+    }
+    if (!best || hits > best.hits) {
+      best = { title: job.title, href: job.href, hits };
+    }
+  }
+  if (!best || best.hits < Math.ceil(words.length / 2)) {
+    return null;
+  }
+  return { title: best.title, href: best.href };
+}
+
 async function enterBestOpening(
   page: Page,
   role: string,
   company: string,
-): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" | "location_ineligible" } | null> {
+  targetUrl: string,
+): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" | "location_ineligible"; canonicalUrl?: string } | null> {
   if (await pageHasResumeField(page)) {
     return null;
   }
   const openings = await listOpenings(page);
-  if (openings.length < 2) {
+  const positionId = careersPositionId(targetUrl);
+  if (positionId && openings.length > 0) {
+    const byId = openings.filter((job) => openingMatchesPositionId(job, positionId));
+    const targetPath = new URL(targetUrl).pathname.replace(/\/$/, "");
+    const uniqueDeepLinks = byId.filter((job) => {
+      if (looksLikeGarbageListTitle(job.title)) {
+        return false;
+      }
+      try {
+        return new URL(job.href).pathname.replace(/\/$/, "") === targetPath;
+      } catch {
+        return false;
+      }
+    });
+    if (uniqueDeepLinks.length === 1) {
+      const byIdJob = uniqueDeepLinks[0]!;
+      log("LISTING_MATCH", { company, targetRole: role, title: byIdJob.title, href: byIdJob.href, reason: "url_position_id" });
+      await openChosen(page, byIdJob);
+      return {
+        title: byIdJob.title,
+        line: `listing_match=${byIdJob.title}\nlisting_reason=url_position_id=${positionId}`,
+      };
+    }
+    if (uniqueDeepLinks.length === 0 && byId.length === 0) {
+      await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => undefined);
+    }
+  }
+  if (positionId && openings.length === 0) {
+    const deepLink = page.locator(`a[href*="/positions/${positionId}"], a[href*="/jobs/${positionId}"]`).first();
+    if (await deepLink.count()) {
+      await deepLink.click({ timeout: 8000 }).catch(() => undefined);
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      return {
+        title: role,
+        line: `listing_match=${role}\nlisting_reason=clicked_position_id=${positionId}`,
+      };
+    }
+  }
+  if (openings.length === 0) {
     return null;
+  }
+  if (openings.length === 1) {
+    const only = openings[0]!;
+    const eligible = await resolveJobLocationEligible({ title: only.title, snippet: only.snippet, url: only.href });
+    if (!eligible) {
+      return {
+        title: only.title,
+        blocked: true,
+        outcome: "location_ineligible",
+        canonicalUrl: only.href,
+        line: `Matched “${only.title}” but location is outside policy (or on the exclude list). Deep link saved.`,
+      };
+    }
+    await openChosen(page, only);
+    return {
+      title: only.title,
+      line: `listing_match=${only.title}\nlisting_reason=only_opening_on_list`,
+    };
   }
   const locationChecks = await Promise.all(
     openings.map(async (job) => ({
@@ -873,11 +1030,15 @@ async function enterBestOpening(
   );
   const eligible = locationChecks.filter((row) => row.ok).map((row) => row.job);
   if (eligible.length === 0) {
+    const titled = bestTitleMatch(role, openings);
     return {
-      title: role,
+      title: titled?.title ?? role,
       blocked: true,
       outcome: "location_ineligible",
-      line: "No opening on this list matches remote or Central/Tel Aviv District location policy.",
+      canonicalUrl: titled?.href,
+      line: titled
+        ? `Matched “${titled.title}” but location is outside policy (or on the exclude list). Deep link saved.`
+        : "No opening on this list matches remote or Central/Tel Aviv District location policy.",
     };
   }
   let chosen: Awaited<ReturnType<typeof chooseOpening>>;
@@ -903,6 +1064,38 @@ async function enterBestOpening(
   };
 }
 
+async function tryGreenhouseCareersFallback(page: Page, targetUrl: string): Promise<void> {
+  if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
+    return;
+  }
+  const body = await page.locator("body").innerText().catch(() => "");
+  const onList = /showing \d+ positions/i.test(body) || /find jobs|open positions/i.test(body);
+  if (!onList && !/careers\.wix\.com/i.test(page.url())) {
+    return;
+  }
+  const fallbacks = directGreenhouseUrlsForCareersUrl(targetUrl);
+  if (fallbacks.length === 0) {
+    return;
+  }
+  const returnUrl = page.url();
+  for (const url of fallbacks) {
+    log("CAREERS_GREENHOUSE_FALLBACK", { from: page.url(), target: url });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => undefined);
+    await dismissOverlays(page);
+    const landed = page.url();
+    const html = await page.content().catch(() => "");
+    if (/error=true/i.test(landed) || /no longer available|job not found|page not found/i.test(html)) {
+      log("CAREERS_GREENHOUSE_FALLBACK_MISS", { target: url, landed });
+      await page.goto(returnUrl, { waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => undefined);
+      continue;
+    }
+    await waitForGreenhouseFrame(page);
+    if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
+      return;
+    }
+  }
+}
+
 async function pageHasResumeField(page: Page): Promise<boolean> {
   const scopes = [page, ...page.frames()];
   for (const scope of scopes) {
@@ -917,6 +1110,13 @@ async function pageHasResumeField(page: Page): Promise<boolean> {
 /** Career-site chrome (search box) is not an application form — reject before CV upload. */
 function looksLikeSiteChromeFields(fields: DetectedField[]): boolean {
   if (fields.length === 0) {
+    return true;
+  }
+  const meaningful = fields.filter((field) => {
+    const hint = `${field.label} ${field.name} ${field.id}`.replace(/\./g, "").trim();
+    return hint.length > 0;
+  });
+  if (meaningful.length === 0) {
     return true;
   }
   const hasApplySignal = fields.some((field) => {

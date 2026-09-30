@@ -20,6 +20,36 @@ test("Kfar Saba on-site role is eligible (Tel Aviv District)", () => {
   assert.equal(isDiscoveryLocationEligible("Product Manager Kfar Saba", "", "", NO_EXCLUDED), true);
 });
 
+test("PepsiCo multi-city posting with Kefar Sava Israel is eligible", () => {
+  const snippet = "Kefar Sava, Israel; Dublin 2, Ireland; Warsaw, Poland; Purchase, New York; Chicago, Illinois";
+  assert.equal(
+    isDiscoveryLocationEligible("Digital Growth & Analytics Marketing Sr. Director", snippet, "https://www.pepsicojobs.com/main/jobs/456938", NO_EXCLUDED),
+    true,
+  );
+});
+
+test("Rehovot on-site role is eligible when not on exclude list", () => {
+  assert.equal(isDiscoveryLocationEligible("Data Engineer Rehovot", "On-site in Rehovot.", "", NO_EXCLUDED), true);
+});
+
+test("Rehovot, Nes Ziona, and Holon are ineligible when admin-excluded", () => {
+  const excluded = ["רחובות", "Rehovot", "נס ציונה", "Nes Ziona", "חולון", "Holon"];
+  assert.equal(isDiscoveryLocationEligible("Engineer Rehovot", "Office in Rehovot.", "", excluded), false);
+  assert.equal(isDiscoveryLocationEligible("Analyst Nes Ziona", "On-site in Nes Ziona.", "", excluded), false);
+  assert.equal(isDiscoveryLocationEligible("Developer Holon", "Hybrid in Holon.", "", excluded), false);
+});
+
+test("US Sharon town is not treated as Israeli Sharon", () => {
+  assert.equal(isDiscoveryLocationEligible("Sales Manager", "Office in Sharon, CT", "", NO_EXCLUDED), false);
+});
+
+test("Israeli Sharon with Israel context is eligible", () => {
+  assert.equal(
+    isDiscoveryLocationEligible("PPC Lead", "Hybrid role in the Sharon area, Israel", "", NO_EXCLUDED),
+    true,
+  );
+});
+
 test("Haifa on-site without remote is not eligible", () => {
   assert.equal(isDiscoveryLocationEligible("Backend Engineer Haifa Full-time", "", "", NO_EXCLUDED), false);
 });

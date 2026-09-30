@@ -114,7 +114,7 @@ const server = http.createServer(async (req, res) => {
       recordPlatformAllocationIfNeeded();
       const body = await readBody(req) as {
         existingUrls?: string[];
-        newQueueStats?: { tech?: number; marketing?: number; total?: number; techPct?: number };
+        newQueueStats?: { tech?: number; marketing?: number; total?: number; techPct?: number; statusNew?: number };
       };
       const existingUrls = Array.isArray(body.existingUrls)
         ? body.existingUrls.filter((url) => typeof url === "string")
@@ -126,6 +126,7 @@ const server = http.createServer(async (req, res) => {
             marketing: Number(stats.marketing) || 0,
             total: Number(stats.total) || 0,
             techPct: stats.techPct,
+            statusNew: typeof stats.statusNew === "number" ? stats.statusNew : undefined,
           }
         : undefined;
       const result = await runDiscovery({ existingUrls, newQueueStats });

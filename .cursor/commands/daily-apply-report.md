@@ -22,9 +22,10 @@ Exit code **0** = confirmed submissions met `DAILY_APPLY_LIMIT`; **1** = target 
 
 ## Report to the user
 
-1. Paste or summarize the script **Summary**, **What stopped progress**, and **Suggested next steps** sections.
+1. Paste or summarize the script **Summary**, **Apply attempts**, **What stopped progress**, and **Suggested next steps** sections.
 2. Call out **confirmed submissions** vs **daily limit** first (that is the business answer).
-3. Distinguish **attempts** (`JOB_OPENED` / CVs generated) from **confirmed** (`applications.jsonl` with `confirmationDetected`).
+3. Distinguish **attempts** (worker ledger rows + per-attempt table) from **confirmed** (`confirmationDetected`).
+4. Explain **CV PDF folder count** vs ledger (extra PDFs = dry-run / manual preview / retries).
 4. Do **not** print `.env`, tokens, or `Authorization` headers.
 5. Do **not** trigger apply/discover webhooks unless the user asks.
 

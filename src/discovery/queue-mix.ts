@@ -38,12 +38,27 @@ export const DAILY_APPLY_BATCH_LIMIT = 20;
 export const DAILY_APPLY_TECH_TARGET = 13;
 export const DAILY_APPLY_MARKETING_TARGET = 7;
 
+/** Skip board scan when sheet `New` rows exceed this multiple of DAILY_APPLY_LIMIT. */
+export const DISCOVER_SKIP_NEW_MULTIPLIER = 3;
+
 export type NewQueueStats = {
   tech: number;
   marketing: number;
   total: number;
   techPct: number;
+  /** All sheet rows with Status=New (any category). */
+  statusNew?: number;
 };
+
+export function shouldSkipDiscoveryForQueueDepth(
+  statusNew: number | undefined,
+  dailyApplyLimit: number,
+): boolean {
+  if (typeof statusNew !== "number" || !Number.isFinite(statusNew)) {
+    return false;
+  }
+  return statusNew > DISCOVER_SKIP_NEW_MULTIPLIER * dailyApplyLimit;
+}
 
 export type RebalanceMode = "heavy_tech" | "moderate_tech" | "maintenance";
 

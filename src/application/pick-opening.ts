@@ -31,7 +31,25 @@ export async function listOpenings(page: Page): Promise<ListedJob[]> {
       };
     });
   });
-  return normalizeOpenings(raw, page.url());
+  const fromLinks = normalizeOpenings(raw, page.url());
+  if (fromLinks.length >= 2) {
+    return fromLinks;
+  }
+  const spaTitles = await readSpaListTitles(page);
+  if (spaTitles.length === 0) {
+    return fromLinks;
+  }
+  const seen = new Set(fromLinks.map((job) => job.title.toLowerCase()));
+  const pageHref = page.url();
+  for (const title of spaTitles) {
+    const key = title.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    fromLinks.push({ title, href: pageHref, snippet: title });
+    seen.add(key);
+  }
+  return fromLinks;
 }
 
 export async function chooseOpening(input: {
@@ -75,16 +93,48 @@ export async function chooseOpening(input: {
 }
 
 export async function openChosen(page: Page, job: ListedJob): Promise<void> {
+  const targetPath = new URL(job.href).pathname.replace(/\/$/, "");
+  const positionId = targetPath.match(/\/positions\/(\d+)/i)?.[1]
+    ?? targetPath.match(/\/jobs\/(\d+)/i)?.[1];
+  if (positionId) {
+    const byId = page.locator(`a[href*="/positions/${positionId}"], a[href*="/jobs/${positionId}"]`).first();
+    if (await byId.count()) {
+      await byId.click({ timeout: 8000 }).catch(() => undefined);
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+    }
+  }
   const link = page.locator("a[href]").filter({ hasText: job.title }).first();
   if (await link.count()) {
-    await link.click().catch(() => undefined);
+    await link.click({ timeout: 8000 }).catch(() => undefined);
     await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  } else {
+    const titleNode = page.getByText(job.title, { exact: false }).first();
+    if (await titleNode.count()) {
+      await titleNode.click({ timeout: 8000 }).catch(() => undefined);
+      await page.waitForTimeout(1500);
+    }
   }
-  const here = page.url().replace(/\/$/, "");
-  if (!here.includes(new URL(job.href).pathname.replace(/\/$/, "").split("/").slice(-2).join("/"))) {
+  const herePath = new URL(page.url()).pathname.replace(/\/$/, "");
+  if (herePath !== targetPath && !/showing \d+ positions/i.test(await page.locator("body").innerText().catch(() => ""))) {
     await page.goto(job.href, { waitUntil: "domcontentloaded" });
   }
   await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
+}
+
+/** Numeric id from careers URLs like Wix `/positions/10022791` or Greenhouse `/jobs/123`. */
+export function careersPositionId(url: string): string | null {
+  const match = url.match(/\/positions\/(\d+)/i) ?? url.match(/\/jobs\/(\d+)/i);
+  const id = match?.[1];
+  return id && /^\d+$/.test(id) ? id : null;
+}
+
+export function openingMatchesPositionId(job: ListedJob, positionId: string): boolean {
+  try {
+    const path = new URL(job.href).pathname;
+    return new RegExp(String.raw`/positions/${positionId}(?:/|$)|/jobs/${positionId}(?:/|$)`, "i").test(path);
+  } catch {
+    return false;
+  }
 }
 
 function candidateBrief(): string {
@@ -93,4 +143,38 @@ function candidateBrief(): string {
     factById("summary-marketing")?.text ?? "",
     "Location: Petah Tikva, Israel. Do not pick intern, student, or junior-only roles.",
   ].filter(Boolean).join("\n");
+}
+
+/** Wix/Thunderbolt lists often render titles as text nodes, not job deep links. */
+async function readSpaListTitles(page: Page): Promise<string[]> {
+  for (let scroll = 0; scroll < 8; scroll += 1) {
+    await page.mouse.wheel(0, 900).catch(() => undefined);
+    await page.waitForTimeout(400);
+  }
+  const loadMore = page.getByRole("button", { name: /load more/i });
+  if (await loadMore.count()) {
+    await loadMore.click({ timeout: 5000 }).catch(() => undefined);
+    await page.waitForTimeout(1200);
+  }
+  return page.evaluate(() => {
+    const text = document.body?.innerText ?? "";
+    if (!/showing \d+ positions/i.test(text)) {
+      return [];
+    }
+    const noise = /^(showing \d+ positions|tel aviv|find jobs|search|filter|load more|page down|skip to main content|wix engineering|domain registration|business email|accept|cookie)/i;
+    const lines = text.split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+    const titles: string[] = [];
+    for (const line of lines) {
+      if (line.length < 10 || line.length > 120 || noise.test(line)) {
+        continue;
+      }
+      if (!/[a-z]/i.test(line)) {
+        continue;
+      }
+      if (/(engineer|developer|manager|designer|analyst|lead|architect|researcher|scientist|marketing|product)/i.test(line)) {
+        titles.push(line);
+      }
+    }
+    return [...new Set(titles)].slice(0, 40);
+  });
 }
