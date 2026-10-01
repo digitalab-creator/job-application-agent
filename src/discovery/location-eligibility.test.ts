@@ -32,6 +32,18 @@ test("Rehovot on-site role is eligible when not on exclude list", () => {
   assert.equal(isDiscoveryLocationEligible("Data Engineer Rehovot", "On-site in Rehovot.", "", NO_EXCLUDED), true);
 });
 
+test("company careers slug without city in title needs lookup not instant reject", () => {
+  assert.equal(
+    classifyLocationRules(
+      "Senior Growth Marketing Manager",
+      "",
+      "https://perion.com/careers/senior-growth-marketing-manager/",
+      NO_EXCLUDED,
+    ),
+    "needs_lookup",
+  );
+});
+
 test("Rehovot, Nes Ziona, and Holon are ineligible when admin-excluded", () => {
   const excluded = ["רחובות", "Rehovot", "נס ציונה", "Nes Ziona", "חולון", "Holon"];
   assert.equal(isDiscoveryLocationEligible("Engineer Rehovot", "Office in Rehovot.", "", excluded), false);

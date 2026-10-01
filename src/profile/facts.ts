@@ -388,6 +388,15 @@ export const facts: Fact[] = [
     personas: ["technical", "hybrid"],
     verified: true,
   },
+  {
+    id: "work-commute-eligible-metro",
+    roleId: null,
+    text:
+      "Comfortable with hybrid or on-site schedules at offices in Israel's Central District and Tel Aviv District (Gush Dan / Sharon), including Petah Tikva, Tel Aviv, Herzliya, and Ra'anana — not offices in Haifa, Jerusalem, or other regions outside that policy.",
+    tags: ["work-location", "screening"],
+    personas: ["technical", "marketing", "hybrid", "both"],
+    verified: true,
+  },
 ];
 
 export const SKILLS = [

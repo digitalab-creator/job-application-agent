@@ -128,7 +128,8 @@ export async function openChosen(page: Page, job: ListedJob): Promise<void> {
     }
   }
   const herePath = new URL(page.url()).pathname.replace(/\/$/, "");
-  if (herePath !== targetPath && !/showing \d+ positions/i.test(await page.locator("body").innerText().catch(() => ""))) {
+  const postingPath = /\/positions\/\d+|\/jobs\/\d+/i.test(targetPath);
+  if (herePath !== targetPath && postingPath && !/showing \d+ positions/i.test(await page.locator("body").innerText().catch(() => ""))) {
     await page.goto(job.href, { waitUntil: "domcontentloaded" });
   }
   await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);

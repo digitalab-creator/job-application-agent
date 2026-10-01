@@ -27,6 +27,7 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
   const raw = await scope.evaluate(() => {
     const nodes = Array.from(document.querySelectorAll("input, textarea, select"));
     const fields: DetectedField[] = [];
+    const seenKeys = new Set<string>();
     const textFromRefIds = (refIds: string | null) => {
       if (!refIds) {
         return "";
@@ -42,6 +43,10 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
       el.setAttribute("data-agent-field", String(index));
       const type = (el.getAttribute("type") || el.tagName).toLowerCase();
       if (type === "hidden" || type === "submit" || type === "button") {
+        return;
+      }
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
         return;
       }
       const id = el.id;
@@ -62,6 +67,11 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
         raw = el.getAttribute("value") ?? "";
       }
       const label = (raw || "").replace(/\s+/g, " ").trim().slice(0, 240);
+      const dedupeKey = `${type}|${el.name || ""}|${label.slice(0, 100)}`;
+      if (seenKeys.has(dedupeKey)) {
+        return;
+      }
+      seenKeys.add(dedupeKey);
       const labelRequired = label.includes("*");
       const options = el.tagName === "SELECT"
         ? Array.from((el as unknown as HTMLSelectElement).options).map((option) => (option.textContent || "").trim()).filter(Boolean)
@@ -170,13 +180,17 @@ export async function fillFields(input: {
   ctx: FieldContext;
   persona: Persona;
   jobText: string;
-}): Promise<{ blockers: string[]; answers: AnswerRecord[] }> {
+}): Promise<{ blockers: string[]; answers: AnswerRecord[]; skipJob?: { reason: string } }> {
   const blockers: string[] = [];
   const answers: AnswerRecord[] = [];
   let phoneFilled = false;
   const platformField = input.fields.find((field) => field.type === "checkbox-group" && isPlatformQuestion(field.label, field.options));
   const platformPlan = platformField ? matchPlatforms(platformField.options, candidate.media.platforms) : null;
-  const ctx: FieldContext = { ...input.ctx, otherPlatformsText: platformPlan?.otherText ?? "" };
+  const ctx: FieldContext = {
+    ...input.ctx,
+    otherPlatformsText: platformPlan?.otherText ?? "",
+    jobText: input.jobText,
+  };
   for (const field of input.fields) {
     if (/phone/i.test(field.label) && phoneFilled) {
       continue;
@@ -184,7 +198,7 @@ export async function fillFields(input: {
     if (field.type === "file" || /recaptcha/i.test(field.name) || /recaptcha/i.test(field.label)) {
       continue;
     }
-    if (field.type === "search" && !/country/i.test(`${field.label} ${field.groupLabel}`)) {
+    if (field.type === "search" && !/country|website|portfolio|url/i.test(`${field.label} ${field.groupLabel}`)) {
       continue;
     }
     const decision = decideField({
@@ -199,6 +213,10 @@ export async function fillFields(input: {
     });
     if (decision.action === "blank" || decision.action === "upload") {
       continue;
+    }
+    if (decision.action === "skip_job") {
+      log("JOB_SKIPPED_SCREENING", { question: fieldQuestionLabel(field), reason: decision.reason });
+      return { blockers: [], answers, skipJob: { reason: decision.reason } };
     }
     if (decision.action === "block") {
       const questionLabel = fieldQuestionLabel(field);
@@ -335,17 +353,18 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
       return;
     }
   }
-  if (field.id.startsWith("question_") && /store and process my data/i.test(field.label)) {
-    const consent = scope.locator(`#${field.id}`);
-    const option = scope.locator('div[role="option"]').filter({ hasText: new RegExp(`^${value}$`, "i") }).first();
-    await consent.click({ timeout: 5000, force: true }).catch(() => undefined);
-    await consent.fill(value);
-    if (await option.count().catch(() => 0)) {
-      await option.click({ timeout: 5000 }).catch(() => undefined);
-    } else {
-      await consent.press("ArrowDown").catch(() => undefined);
-      await consent.press("Enter").catch(() => undefined);
+  if (field.id.startsWith("question_")) {
+    const questionLocator = scope.locator(`[data-agent-field="${field.index}"]`);
+    if (field.tag === "select" && field.options.length > 0) {
+      const match = field.options.find((option) => option.toLowerCase() === value.toLowerCase())
+        ?? field.options.find((option) => option.toLowerCase().includes(value.toLowerCase()));
+      if (!match) {
+        throw new Error(`No option matching ${value} for ${field.label}`);
+      }
+      await questionLocator.selectOption({ label: match });
+      return;
     }
+    await pickSearchableOption(scope, questionLocator, value);
     return;
   }
   if (field.tag === "select") {

@@ -47,11 +47,56 @@ export function greenhouseBoardUrls(url: string): string[] {
     if (!slug || slug.length < 2) {
       return [];
     }
-    return [
-      `https://job-boards.greenhouse.io/embed/job_app?for=${slug}&token=${jid}`,
-      `https://job-boards.greenhouse.io/${slug}/jobs/${jid}`,
-      `https://boards.greenhouse.io/${slug}/jobs/${jid}`,
-    ];
+    return greenhousePostUrlsForBoard(slug, jid);
+  } catch {
+    return [];
+  }
+}
+
+/** Direct Greenhouse posting URLs (embed first). Avoid boards.greenhouse.io — many boards redirect to marketing careers hubs. */
+export function greenhousePostUrlsForBoard(slug: string, jobId: string, eu = false): string[] {
+  const host = eu ? "job-boards.eu.greenhouse.io" : "job-boards.greenhouse.io";
+  return [
+    `https://${host}/embed/job_app?for=${slug}&token=${jobId}`,
+    `https://${host}/${slug}/jobs/${jobId}`,
+  ];
+}
+
+/** Parse slug + job id from Greenhouse board URLs, embed tokens, and legacy boards links. */
+export function greenhouseJobPostUrls(url: string): string[] {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const eu = host.includes(".eu.greenhouse.io") || host === "job-boards.eu.greenhouse.io";
+    let slug: string | null = null;
+    let jobId: string | null = null;
+
+    const token = parsed.searchParams.get("token");
+    const forParam = parsed.searchParams.get("for");
+    if (token && /^\d+$/.test(token) && forParam) {
+      slug = forParam.toLowerCase();
+      jobId = token;
+      return greenhousePostUrlsForBoard(slug, jobId, eu);
+    }
+
+    const pathMatch = parsed.pathname.match(/\/([^/]+)\/jobs\/(\d+)/i);
+    if (pathMatch?.[1] && pathMatch[2]) {
+      slug = pathMatch[1].toLowerCase();
+      jobId = pathMatch[2];
+      if (slug === "embed" || slug === "jobs") {
+        slug = null;
+        jobId = null;
+      } else {
+        return greenhousePostUrlsForBoard(slug, jobId, eu || /eu\.greenhouse/i.test(host));
+      }
+    }
+
+    const jid = parsed.searchParams.get("gh_jid");
+    if (jid && /^\d+$/.test(jid) && forParam) {
+      return greenhousePostUrlsForBoard(forParam.toLowerCase(), jid, eu);
+    }
+
+    return [];
   } catch {
     return [];
   }
@@ -59,7 +104,8 @@ export function greenhouseBoardUrls(url: string): string[] {
 
 export function navigationRetryUrls(url: string): string[] {
   const normalized = normalizeJobNavigationUrl(url);
+  const fromPost = greenhouseJobPostUrls(url);
   const greenhouse = greenhouseBoardUrls(url);
   const directBoard = directGreenhouseUrlsForCareersUrl(url);
-  return [...new Set([...greenhouse, url.trim(), normalized, ...directBoard].filter(Boolean))];
+  return [...new Set([...fromPost, ...greenhouse, url.trim(), normalized, ...directBoard].filter(Boolean))];
 }

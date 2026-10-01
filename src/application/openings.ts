@@ -32,6 +32,10 @@ export function normalizeOpenings(
     if (!/\/jobs\/|\/job\/|\/j\/|\/positions\//i.test(path)) {
       continue;
     }
+    // Wix location hubs like /location/tel-aviv/4687 are not job postings.
+    if (/careers\.wix\.com/i.test(target.hostname) && /\/location\/[^/]+\/\d+$/i.test(path) && !/\/positions\//i.test(path)) {
+      continue;
+    }
     const segments = path.split("/").filter(Boolean);
     const lastSegment = segments.at(-1) ?? "";
     const rawSlug = /^\d+$/.test(lastSegment)

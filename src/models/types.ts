@@ -86,6 +86,8 @@ export type ApplicationResult = {
   notes: string;
   screenshots?: string[];
   answers?: AnswerRecord[];
+  /** Copy-paste fields + CV link for Google Sheet Manual rows. */
+  manualFillGuide?: string;
   llmCostUsd?: number;
   quota?: { day: string; limit: number; counted: number; remaining: number };
   budget?: {

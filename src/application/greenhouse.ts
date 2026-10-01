@@ -1,6 +1,8 @@
 import type { Frame, Locator, Page } from "playwright";
+import type { AnswerRecord } from "../models/types.js";
 import { classifyGreenhouseSubmitText, greenhouseFrameSignals, type GreenhouseFrameSignals, type GreenhouseSubmitKind } from "./greenhouse-post-submit.js";
 import { thankYouMatch } from "./thank-you.js";
+import { candidate } from "../config/candidate.js";
 
 export type GreenhouseAfterSubmit = GreenhouseFrameSignals & {
   kind: GreenhouseSubmitKind;
@@ -27,10 +29,17 @@ export async function scrollGreenhouseFormIntoView(page: Page): Promise<void> {
   }
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function pickGreenhouseCombobox(frame: Frame, input: Locator, value: string): Promise<void> {
   await input.click({ timeout: 5000, force: true }).catch(() => undefined);
-  await input.fill(value);
-  const option = frame.locator('div[role="option"]').filter({ hasText: new RegExp(`^${value}$`, "i") }).first();
+  await input.fill("");
+  await input.fill(value, { timeout: 5000 }).catch(() => undefined);
+  const exact = frame.locator('div[role="option"]').filter({ hasText: new RegExp(`^${escapeRegExp(value)}$`, "i") }).first();
+  const partial = frame.locator('div[role="option"]').filter({ hasText: new RegExp(escapeRegExp(value.slice(0, 40)), "i") }).first();
+  const option = (await exact.count().catch(() => 0)) ? exact : partial;
   if (await option.count().catch(() => 0)) {
     await option.click({ timeout: 5000 }).catch(() => undefined);
   } else {
@@ -38,6 +47,10 @@ async function pickGreenhouseCombobox(frame: Frame, input: Locator, value: strin
     await input.press("Enter").catch(() => undefined);
   }
   await frame.waitForTimeout(400);
+}
+
+function questionNeedle(question: string): string {
+  return escapeRegExp(question.replace(/\*+$/, "").trim().slice(0, 55));
 }
 
 /** Greenhouse embed on company sites (Orca, etc.) — not the legacy `/apply?` Comeet path. */
@@ -69,10 +82,31 @@ export async function enterGreenhouseSecurityCode(page: Page, code: string): Pro
   return true;
 }
 
-export async function finalizeGreenhouseApplyForm(frame: Frame): Promise<void> {
+export async function finalizeGreenhouseApplyForm(
+  frame: Frame,
+  answers: AnswerRecord[] = [],
+  extras: { portfolioUrl?: string } = {},
+): Promise<void> {
   const country = frame.locator("#country");
   if (await country.count().catch(() => 0)) {
-    await pickGreenhouseCombobox(frame, country, "Israel");
+    await pickGreenhouseCombobox(frame, country, candidate.location.country);
+  }
+
+  const city = frame.locator("#candidate-location, input[name*='location' i], input[aria-label*='City' i]").first();
+  if (await city.count().catch(() => 0)) {
+    await pickGreenhouseCombobox(frame, city, candidate.location.city);
+  }
+
+  const portfolioUrl = extras.portfolioUrl?.trim()
+    || candidate.portfolio.build
+    || candidate.portfolio.automation;
+  const website = frame.locator(
+    'input[name="job_application[website]"], #job_application_website, input[name*="website" i], input[aria-label*="Website" i]',
+  ).first();
+  if (portfolioUrl && (await website.count().catch(() => 0))) {
+    await website.click({ timeout: 3000, force: true }).catch(() => undefined);
+    await website.fill(portfolioUrl);
+    await website.press("Tab").catch(() => undefined);
   }
 
   const consent = frame
@@ -82,6 +116,36 @@ export async function finalizeGreenhouseApplyForm(frame: Frame): Promise<void> {
     .first();
   if (await consent.count().catch(() => 0)) {
     await pickGreenhouseCombobox(frame, consent, "Yes");
+  }
+
+  for (const record of answers) {
+    const q = record.question.replace(/\*+$/, "").trim();
+    if (!q || q.length < 4) {
+      continue;
+    }
+    if (/first name|last name|preferred first|email|phone|linkedin|attach|country|location \(city\)/i.test(q)) {
+      continue;
+    }
+    const needle = questionNeedle(q);
+    const fieldBlock = frame.locator(".field, .application-field, .select__container").filter({ hasText: new RegExp(needle, "i") }).first();
+    if (!(await fieldBlock.count().catch(() => 0))) {
+      continue;
+    }
+    const combobox = fieldBlock.locator('input[role="combobox"]').first();
+    if (await combobox.count().catch(() => 0)) {
+      await pickGreenhouseCombobox(frame, combobox, record.answer);
+      continue;
+    }
+    const textarea = fieldBlock.locator("textarea").first();
+    if (await textarea.count().catch(() => 0)) {
+      await textarea.fill(record.answer);
+      continue;
+    }
+    const textInput = fieldBlock.locator('input[type="text"]:not([type="hidden"])').first();
+    if (await textInput.count().catch(() => 0)) {
+      await textInput.fill(record.answer);
+      await textInput.press("Tab").catch(() => undefined);
+    }
   }
 }
 
