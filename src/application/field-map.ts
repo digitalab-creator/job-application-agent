@@ -374,6 +374,12 @@ function chooseBucket(label: string, options: string[], type: string): FieldDeci
     }
     return fill(choice);
   }
+  if (options.length === 0 && /budget|spend|תקציב/i.test(label)) {
+    return fill(`ILS ${candidate.media.maxMonthlyBudgetIls.toLocaleString("en-US")} per month`);
+  }
+  if (options.length === 0 && /year/i.test(label) && /experience|hands-on|paid|media|acquisition|ppc/i.test(label)) {
+    return fill(String(/ppc|paid|performance|hands-on|media|acquisition/i.test(label) ? candidate.media.ppcYears : professionalYears));
+  }
   if (options.length === 0) {
     return null;
   }
@@ -387,20 +393,33 @@ function chooseBucket(label: string, options: string[], type: string): FieldDeci
   }
   if (/year/i.test(label) && /experience|ppc|ניסיון|paid|hands-on|compiler|llm|production|serving|degree|field/i.test(label)) {
     const years = /ppc|paid|performance|hands-on|media/i.test(label) ? candidate.media.ppcYears : professionalYears;
-    const choice = pickYearsOption(options, years);
+    const choice = pickYearsOption(options, years) ?? topListedOption(options);
     if (!choice) {
       return { action: "block", reason: `No experience option fits ${years} years: "${label}"` };
     }
     return { action: "fill", value: choice, source: "candidate_profile" };
   }
   if (/budget|spend|תקציב/i.test(label)) {
-    const choice = pickBudgetOption(options, candidate.media.maxMonthlyBudgetIls);
+    const choice = pickBudgetOption(options, candidate.media.maxMonthlyBudgetIls) ?? topListedOption(options);
     if (!choice) {
       return { action: "block", reason: `No budget option fits the managed monthly budget: "${label}"` };
     }
     return { action: "fill", value: choice, source: "candidate_profile" };
   }
   return null;
+}
+
+function topListedOption(options: string[]): string | null {
+  const real = options.filter((option) => !/^(select|choose|please)/i.test(option.trim()));
+  let best: { option: string; amount: number } | null = null;
+  for (const option of real) {
+    const nums = [...option.matchAll(/\d[\d,]*/g)].map((match) => Number(match[0].replace(/,/g, ""))).filter((value) => value >= 1);
+    const amount = nums.length > 0 ? Math.max(...nums) : 0;
+    if (!best || amount > best.amount) {
+      best = { option, amount };
+    }
+  }
+  return best?.option ?? null;
 }
 
 function parseExperienceThreshold(label: string): number | null {

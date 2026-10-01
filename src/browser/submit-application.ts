@@ -86,10 +86,14 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
         ngScope.$apply(() => {
           ngScope.apply?.();
         });
-        return { clicked: true, invalid: [], useDomClick: false };
       }
     }
-    return { clicked: false, invalid: [], useDomClick: true };
+    try {
+      (button as HTMLButtonElement).click();
+    } catch {
+      return { clicked: false, invalid: [], useDomClick: true };
+    }
+    return { clicked: true, invalid: [], useDomClick: false };
   }, SUBMIT_LABEL_PATTERN);
 
   if (prepared.clicked || !prepared.useDomClick) {

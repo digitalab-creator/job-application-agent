@@ -5,7 +5,7 @@ import type { Page } from "playwright";
 export async function saveScreenshot(page: Page, directory: string, name: string): Promise<string> {
   fs.mkdirSync(directory, { recursive: true });
   const filePath = path.join(directory, name);
-  await page.screenshot({ path: filePath, fullPage: true });
+  await page.screenshot({ path: filePath, fullPage: false, timeout: 4000 }).catch(() => undefined);
   return filePath;
 }
 

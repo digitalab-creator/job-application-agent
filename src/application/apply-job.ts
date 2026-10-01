@@ -2,7 +2,7 @@ import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
 import { classifyJobPage } from "../application/classify-page.js";
-import { applyFormScope, fillFields, readFields, uploadResume, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
+import { applyFormScope, fillFields, readFields, revealApplicationForm, uploadResume, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
 import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
 import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
@@ -276,6 +276,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
 
+    await revealApplicationForm(page);
     const scope = await applyFormScope(page);
     const fields = await readFields(scope);
     log("FORM_DETECTED", { fields: fields.map((field) => field.label) });
@@ -360,6 +361,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
 
     await dismissOverlays(page);
     await humanPause(page, 800, 1600);
+    const applyPost = watchApplyPost(page);
     const submitAttempt = await submitApplication(page, scope);
     log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
     if (!submitAttempt.clicked) {
@@ -485,7 +487,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     if (otpResolved) {
       return otpResolved;
     }
-    const confirmed = await detectConfirmation(page);
+    const confirmed = await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
     screenshots.push(await saveScreenshot(page, shotDir, confirmed.ok ? "confirmation.png" : "blocker.png"));
     if (!confirmed.ok) {
       return result(input, {
@@ -951,6 +953,29 @@ function bestTitleMatch(role: string, openings: { title: string; href: string }[
     return null;
   }
   return { title: best.title, href: best.href };
+}
+
+function watchApplyPost(page: Page): Promise<{ ok: boolean; phrase: string } | null> {
+  return page.waitForResponse((response) => {
+    const method = response.request().method();
+    if (method !== "POST" && method !== "PUT") {
+      return false;
+    }
+    if (response.status() >= 400) {
+      return false;
+    }
+    const url = response.url();
+    if (/analytics|segment|google-analytics|facebook|hotjar|sentry|doubleclick/i.test(url)) {
+      return false;
+    }
+    return /apply|application|submit|candidate|comeet/i.test(url);
+  }, { timeout: 25_000 }).then(async (response) => {
+    const text = await response.text().catch(() => "");
+    if (/captcha|validation error/i.test(text) && !/success|submitted|thank/i.test(text)) {
+      return null;
+    }
+    return { ok: true, phrase: `apply_post_${response.status()}` };
+  }).catch(() => null);
 }
 
 async function enterBestOpening(
