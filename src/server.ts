@@ -6,6 +6,7 @@ import { ensureExcludedCompaniesConfig, getExcludedCompanies, setExcludedCompani
 import { ensureExcludedLocationsConfig, getExcludedLocations, setExcludedLocations } from "./application/exclude-location.js";
 import { applyToJob, type ApplyInput } from "./application/apply-job.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
+import { browserApplyLockHeld, claimBrowserApply, releaseBrowserApply } from "./application/browser-apply-lock.js";
 import { claimApplyRun, releaseApplyRun } from "./application/run-lock.js";
 import { withApplySession, withHeadlessBrowser } from "./browser/session.js";
 import { removeOldScreenshots } from "./browser/screenshot.js";
@@ -19,7 +20,6 @@ import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
 import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./application/manual-fill-guide.js";
 
-let busy = false;
 ensureExcludedCompaniesConfig();
 ensureExcludedLocationsConfig();
 
@@ -165,11 +165,17 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === "POST" && req.url === "/apply") {
-      if (busy) {
-        send(res, 409, { status: "failed", submitted: false, confirmationDetected: false, notes: "Another application is already running." });
+      const browserClaim = claimBrowserApply();
+      if (!browserClaim.ok) {
+        send(res, 409, {
+          status: "failed",
+          submitted: false,
+          confirmationDetected: false,
+          blocker: "apply_in_progress",
+          notes: "Another application is already using the browser profile. Retry shortly.",
+        });
         return;
       }
-      busy = true;
       try {
         const input = parseApply(await readBody(req));
         recordPlatformAllocationIfNeeded();
@@ -239,7 +245,7 @@ const server = http.createServer(async (req, res) => {
           });
         }
       } finally {
-        busy = false;
+        releaseBrowserApply();
       }
       return;
     }
@@ -315,6 +321,7 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     browserUserDataDir: env.browserUserDataDir,
     excludedCompanies: getExcludedCompanies().length,
     excludedLocations: getExcludedLocations().length,
+    applyInProgress: browserApplyLockHeld(),
   };
 }
 
