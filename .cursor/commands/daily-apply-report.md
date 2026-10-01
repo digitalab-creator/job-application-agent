@@ -22,12 +22,13 @@ Exit code **0** = confirmed submissions met `DAILY_APPLY_LIMIT`; **1** = target 
 
 ## Report to the user
 
-1. Paste or summarize the script **Summary**, **Apply attempts**, **What stopped progress**, and **Suggested next steps** sections.
+1. Paste or summarize the script **Summary**, **Jobs tried (worker logs)**, **Apply attempts**, **What stopped progress**, and **Suggested next steps** sections.
 2. Call out **confirmed submissions** vs **daily limit** first (that is the business answer).
 3. Distinguish **attempts** (worker ledger rows + per-attempt table) from **confirmed** (`confirmationDetected`).
-4. Explain **CV PDF folder count** vs ledger (extra PDFs = dry-run / manual preview / retries).
-4. Do **not** print `.env`, tokens, or `Authorization` headers.
-5. Do **not** trigger apply/discover webhooks unless the user asks.
+4. Use **Jobs tried** for per-opening exact causes (logs); use **ledger** only for quota-counted outcomes.
+5. Explain **CV PDF folder count** vs ledger (extra PDFs = dry-run / manual preview / retries).
+6. Do **not** print `.env`, tokens, or `Authorization` headers.
+7. Do **not** trigger apply/discover webhooks unless the user asks.
 
 ## SSOT
 

@@ -1,5 +1,6 @@
 import type { Frame, Page } from "playwright";
 import { greenhouseJobAppFrame } from "../application/greenhouse.js";
+import { answerBlockedField } from "../application/answer-blocked-field.js";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
 import { isPlatformQuestion, matchPlatforms } from "../application/media-answers.js";
@@ -26,6 +27,16 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
   const raw = await scope.evaluate(() => {
     const nodes = Array.from(document.querySelectorAll("input, textarea, select"));
     const fields: DetectedField[] = [];
+    const textFromRefIds = (refIds: string | null) => {
+      if (!refIds) {
+        return "";
+      }
+      return refIds
+        .split(/\s+/)
+        .map((ref) => document.getElementById(ref)?.textContent?.replace(/\s+/g, " ").trim() ?? "")
+        .filter(Boolean)
+        .join(" ");
+    };
     nodes.forEach((node, index) => {
       const el = node as HTMLInputElement;
       el.setAttribute("data-agent-field", String(index));
@@ -37,7 +48,19 @@ export async function readFields(scope: FormScope): Promise<DetectedField[]> {
       const labelFor = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent : "";
       const wrapped = el.closest("label")?.innerText ?? "";
       const aria = el.getAttribute("aria-label") ?? "";
-      const raw = aria || labelFor || el.placeholder || el.name || wrapped;
+      const labelledBy = textFromRefIds(el.getAttribute("aria-labelledby"));
+      const describedBy = textFromRefIds(el.getAttribute("aria-describedby"));
+      const container = el.closest(".field, .application-field, .form-group, .select__container, fieldset, [data-field]");
+      const containerLabel = (container?.querySelector("label, legend, .label, .application-label, h3, h4")?.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      let raw = aria || labelledBy || labelFor || describedBy || containerLabel || el.placeholder || wrapped || el.name;
+      if (!raw && /^question_/i.test(id)) {
+        raw = container?.querySelector("label")?.textContent ?? "";
+      }
+      if (!raw && (type === "checkbox" || type === "radio")) {
+        raw = el.getAttribute("value") ?? "";
+      }
       const label = (raw || "").replace(/\s+/g, " ").trim().slice(0, 240);
       const labelRequired = label.includes("*");
       const options = el.tagName === "SELECT"
@@ -83,11 +106,16 @@ function groupRadios(fields: DetectedField[]): DetectedField[] {
     if (!first) {
       continue;
     }
+    const questionLabel = group
+      .map((field) => field.groupLabel)
+      .find((value) => value && value.length > 3)
+      ?? group.map((field) => field.label).find((value) => value && value.length > 12)
+      ?? name;
     grouped.push({
       index: first.index,
       tag: "input",
       type: "radio",
-      label: name,
+      label: questionLabel,
       name,
       id: first.id,
       required: group.some((field) => field.required),
@@ -173,8 +201,35 @@ export async function fillFields(input: {
       continue;
     }
     if (decision.action === "block") {
-      blockers.push(decision.reason);
-      log("REVIEW_REQUIRED", { question: field.label, reason: decision.reason });
+      const questionLabel = fieldQuestionLabel(field);
+      const recovered = await answerBlockedField({
+        question: questionLabel,
+        fieldType: field.tag === "textarea" ? "textarea" : field.type,
+        options: field.options,
+        persona: input.persona,
+        jobText: input.jobText,
+        company: ctx.company ?? "",
+        role: ctx.role ?? "",
+        blockReason: decision.reason,
+      });
+      if (recovered) {
+        try {
+          await writeField(input.scope, field, recovered.value);
+          answers.push({
+            question: questionLabel,
+            answer: recovered.value,
+            source: recovered.learnedFactId ? `llm_learned:${recovered.learnedFactId}` : "llm_from_supported_facts",
+          });
+          log("FIELD_FILLED", { label: questionLabel, source: "llm_blocked_field_fallback" });
+          continue;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "field_fill_failed";
+          blockers.push(`LLM answer could not be written for "${questionLabel}": ${message}`);
+        }
+      } else {
+        blockers.push(`No grounded answer (rules + LLM): ${decision.reason}`);
+        log("REVIEW_REQUIRED", { question: questionLabel, reason: decision.reason });
+      }
       continue;
     }
     if (decision.action === "llm") {
@@ -366,6 +421,13 @@ async function checkOptions(scope: FormScope, field: DetectedField, values: stri
       });
     });
   }
+}
+
+function fieldQuestionLabel(field: DetectedField): string {
+  const parts = [field.label, field.groupLabel, field.name, field.id]
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean);
+  return parts[0] ?? "required field";
 }
 
 function digitsOnly(value: string): string {
