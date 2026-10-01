@@ -2,7 +2,9 @@ import { candidate, SALARY_MAX, SALARY_MIN } from "../config/candidate.js";
 import { isShortMotivationField, screeningMotivation } from "../config/screening.js";
 import type { Persona } from "../models/types.js";
 import { roles } from "../profile/facts.js";
+import { isOfficeCommuteQuestion, officeCommuteAnswerYes } from "./office-commute.js";
 import { isPlatformQuestion, matchPlatforms, pickBudgetOption, pickYearsOption } from "./media-answers.js";
+import { matchesOfficeCommuteSkip } from "./skip-job-screening.js";
 
 export type FieldDecision =
   | { action: "fill"; value: string; source: string }
@@ -10,6 +12,7 @@ export type FieldDecision =
   | { action: "check-options"; values: string[]; source: string }
   | { action: "blank" }
   | { action: "block"; reason: string }
+  | { action: "skip_job"; reason: string }
   | { action: "upload" }
   | { action: "llm" };
 
@@ -20,6 +23,9 @@ export type FieldContext = {
   euRole: boolean;
   company?: string;
   role?: string;
+  jobUrl?: string;
+  /** Short JD / page text for location-aware screening (commute, etc.). */
+  jobText?: string;
   otherPlatformsText?: string;
 };
 
@@ -39,11 +45,22 @@ export function decideField(input: {
   const hint = resolveFieldHint(input);
   const label = hint;
   const options = input.options;
+  const screeningBlob = `${label} ${input.groupLabel ?? ""}`.trim();
+  if (matchesOfficeCommuteSkip(screeningBlob)) {
+    return {
+      action: "skip_job",
+      reason: `Screening question declined by policy: "${screeningBlob.slice(0, 120)}"`,
+    };
+  }
   if (!label && input.required) {
     return { action: "block", reason: `Required application question cannot be answered safely: ""` };
   }
   if (!label) {
     return { action: "blank" };
+  }
+  if (isOfficeCommuteQuestion(label)) {
+    const extra = [input.ctx.role, input.ctx.jobUrl, input.ctx.jobText].filter(Boolean).join(" ");
+    return yesNo(officeCommuteAnswerYes(label, extra), input.type);
   }
   if (DEMOGRAPHIC.test(label)) {
     const decline = options.find((option) => /prefer not|decline|don'?t wish|do not wish/i.test(option));
@@ -127,6 +144,17 @@ export function decideField(input: {
   }
   if (/axonius/i.test(label) && /how did you hear/i.test(label)) {
     return fill(options[0] ?? "LinkedIn");
+  }
+  if (/scale of 1-10|on a scale from 1.?10|rate your .* on a scale|how would you rate your/i.test(label)) {
+    const score = selfRatingScore(label, input.ctx.persona);
+    if (input.type === "select" || input.type === "radio") {
+      const choice = options.find((option) => new RegExp(String.raw`\b${score}\b`).test(option.trim()))
+        ?? options.find((option) => option.trim() === String(score));
+      if (choice) {
+        return fill(choice);
+      }
+    }
+    return fill(String(score));
   }
   if (isFreeText(label, input.type)) {
     return input.required || label.length > 0 ? { action: "llm" } : { action: "blank" };
@@ -253,6 +281,10 @@ function mapKnown(
   }
   if (/linkedin/i.test(label)) {
     return fill(candidate.linkedin);
+  }
+  if (/^website$/i.test(label.trim())) {
+    const url = ctx.portfolioUrl || candidate.portfolio.build;
+    return fill(url);
   }
   if (/github/i.test(label)) {
     return fill(candidate.github);
@@ -407,6 +439,18 @@ function chooseBucket(label: string, options: string[], type: string): FieldDeci
     return { action: "fill", value: choice, source: "candidate_profile" };
   }
   return null;
+}
+
+/** Self-assessed 1–10 screening (BI/SQL, analytics tools). Grounded in verified profile, not inflated. */
+function selfRatingScore(label: string, persona: Persona): number {
+  const blob = label.toLowerCase();
+  if (/sql|bi\/|analytics tools|looker|tableau|amplitude|data warehouse/i.test(blob)) {
+    return persona === "marketing" ? 7 : 8;
+  }
+  if (/python|typescript|software|engineering/i.test(blob)) {
+    return 8;
+  }
+  return persona === "marketing" ? 7 : 8;
 }
 
 function topListedOption(options: string[]): string | null {

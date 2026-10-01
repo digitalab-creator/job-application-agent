@@ -22,6 +22,11 @@ import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledg
 import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
+import {
+  declineReasonFromFieldLabels,
+  matchesOfficeCommuteSkip,
+  OFFICE_COMMUTE_SKIP_REASON,
+} from "./skip-job-screening.js";
 import { detectConfirmation, detectEmailVerification, detectLoginWall, classifyCaptchaSignal } from "./verify-submission.js";
 
 export type ApplyInput = {
@@ -163,6 +168,17 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
+    if (/error=true/i.test(page.url()) && !await pageHasResumeField(page)) {
+      log("JOB_GREENHOUSE_BOARD_ERROR", { url: page.url() });
+      return result(input, {
+        status: "closed",
+        submitted: false,
+        confirmationDetected: false,
+        canonicalJobUrl: page.url(),
+        notes: lines(["result=closed", "reason=job_removed", "Greenhouse returned error=true (posting missing or board link)."]),
+        screenshots,
+      });
+    }
     if (!await resolveJobLocationEligible({ title: activeRole, snippet: bodyText, url: page.url() })) {
       log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url() });
       return result(input, {
@@ -216,6 +232,95 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
 
     const persona = choosePersonaFromText(activeRole, input.job.category ?? "", bodyText);
     const salaryMonthly = chooseSalary(activeRole, persona);
+
+    if (matchesOfficeCommuteSkip(bodyText)) {
+      log("JOB_SKIPPED_SCREENING", { company: input.job.company, reason: "office_commute_in_posting" });
+      return result(input, {
+        status: "not_relevant",
+        submitted: false,
+        confirmationDetected: false,
+        persona,
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=not_relevant",
+          "reason=office_commute_policy",
+          OFFICE_COMMUTE_SKIP_REASON,
+          "Nothing was submitted.",
+        ]),
+        screenshots,
+      });
+    }
+
+    await dismissOverlays(page);
+    await revealApplyForm(page);
+    await dismissOverlays(page);
+    await page.evaluate(() => {
+      document.querySelector("#application-form, .application--form, iframe[src*='greenhouse']")?.scrollIntoView({ block: "center" });
+    }).catch(() => undefined);
+    const preCaptchaSignal = await classifyCaptchaSignal(page);
+    log("CAPTCHA_SIGNAL", {
+      company: input.job.company,
+      ats: atsLabel(page.url()),
+      stage: "pre_submit",
+      signal: preCaptchaSignal,
+    });
+    if (await detectLoginWall(page)) {
+      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      rememberManualApply(input, {
+        blocker: "login_required",
+        canonicalJobUrl: page.url(),
+      });
+      return result(input, {
+        status: "manual_required",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "login_required",
+        persona,
+        notes: lines([
+          "result=manual_required",
+          "blocker=login_required",
+          "Apply opened an account / email login gate (often iCIMS). Account creation is not handled in this version.",
+        ]),
+        screenshots,
+      });
+    }
+
+    await revealApplicationForm(page);
+    const scope = await applyFormScope(page);
+    const fields = await readFields(scope);
+    log("FORM_DETECTED", { fields: fields.map((field) => field.label) });
+    const fieldLabels = fields.map((field) => `${field.label} ${field.groupLabel ?? ""}`.trim());
+    const screeningSkip = declineReasonFromFieldLabels(fieldLabels);
+    if (screeningSkip) {
+      log("JOB_SKIPPED_SCREENING", { company: input.job.company, reason: "office_commute_on_form" });
+      return result(input, {
+        status: "not_relevant",
+        submitted: false,
+        confirmationDetected: false,
+        persona,
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=not_relevant",
+          "reason=office_commute_policy",
+          screeningSkip,
+          "Nothing was submitted.",
+        ]),
+        screenshots,
+      });
+    }
+    if (fields.length === 0 || looksLikeSiteChromeFields(fields)) {
+      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "form_not_detected",
+        persona,
+        notes: lines(["result=review", "blocker=form_not_detected"]),
+        screenshots,
+      });
+    }
+
     let cv;
     try {
       cv = await prepareCv({ ...input, job: { ...input.job, role: activeRole } }, persona, bodyText, day, jobSlug);
@@ -240,60 +345,6 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
     log("CV_SELECTED", { persona, wording: cv.wording, source: cv.cvSource, path: cv.cvPath });
 
-    await dismissOverlays(page);
-    await revealApplyForm(page);
-    await dismissOverlays(page);
-    await page.evaluate(() => {
-      document.querySelector("#application-form, .application--form, iframe[src*='greenhouse']")?.scrollIntoView({ block: "center" });
-    }).catch(() => undefined);
-    const preCaptchaSignal = await classifyCaptchaSignal(page);
-    log("CAPTCHA_SIGNAL", {
-      company: input.job.company,
-      ats: atsLabel(page.url()),
-      stage: "pre_submit",
-      signal: preCaptchaSignal,
-    });
-    if (await detectLoginWall(page)) {
-      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
-      rememberManualApply(input, {
-        blocker: "login_required",
-        cvPath: cv.cvPath,
-        canonicalJobUrl: page.url(),
-      });
-      return result(input, {
-        status: "manual_required",
-        submitted: false,
-        confirmationDetected: false,
-        blocker: "login_required",
-        persona,
-        ...cv.publicFields,
-        notes: lines([
-          "result=manual_required",
-          "blocker=login_required",
-          "Apply opened an account / email login gate (often iCIMS). Account creation is not handled in this version.",
-        ]),
-        screenshots,
-      });
-    }
-
-    await revealApplicationForm(page);
-    const scope = await applyFormScope(page);
-    const fields = await readFields(scope);
-    log("FORM_DETECTED", { fields: fields.map((field) => field.label) });
-    if (fields.length === 0 || looksLikeSiteChromeFields(fields)) {
-      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
-      return result(input, {
-        status: "review",
-        submitted: false,
-        confirmationDetected: false,
-        blocker: "form_not_detected",
-        persona,
-        ...cv.publicFields,
-        notes: lines(["result=review", "blocker=form_not_detected"]),
-        screenshots,
-      });
-    }
-
     const filled = await fillFields({
       scope,
       fields,
@@ -305,14 +356,34 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         euRole: /europe|eu\b|poland/i.test(bodyText),
         company: input.job.company,
         role: activeRole,
+        jobUrl: page.url(),
+        jobText: jobBrief(bodyText),
       },
       jobText: jobBrief(bodyText),
     });
+    if (filled.skipJob) {
+      log("JOB_SKIPPED_SCREENING", { company: input.job.company, reason: "office_commute_while_filling" });
+      return result(input, {
+        status: "not_relevant",
+        submitted: false,
+        confirmationDetected: false,
+        persona,
+        ...cv.publicFields,
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=not_relevant",
+          "reason=office_commute_policy",
+          filled.skipJob.reason,
+          "Nothing was submitted.",
+        ]),
+        screenshots,
+      });
+    }
     const uploaded = await uploadResume(page, cv.cvPath);
     const greenhouseFrame = greenhouseJobAppFrame(page);
     if (greenhouseFrame) {
       await dismissOverlays(page);
-      await finalizeGreenhouseApplyForm(greenhouseFrame).catch((error) => {
+      await finalizeGreenhouseApplyForm(greenhouseFrame, filled.answers, { portfolioUrl: cv.portfolioUrl }).catch((error) => {
         log("GREENHOUSE_FINALIZE_FAILED", { message: error instanceof Error ? error.message : "finalize_failed" });
       });
     }
@@ -361,6 +432,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
 
     await dismissOverlays(page);
     await humanPause(page, 800, 1600);
+    const ghBeforeSubmit = greenhouseJobAppFrame(page);
+    if (ghBeforeSubmit) {
+      await finalizeGreenhouseApplyForm(ghBeforeSubmit, filled.answers, { portfolioUrl: cv.portfolioUrl }).catch((error) => {
+        log("GREENHOUSE_FINALIZE_FAILED", { message: error instanceof Error ? error.message : "finalize_presubmit_failed", stage: "pre_submit" });
+      });
+    }
     const applyPost = watchApplyPost(page);
     const submitAttempt = await submitApplication(page, scope);
     log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
@@ -393,6 +470,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       }
     }
     const greenhouseAfter = greenhouseJobAppFrame(page) ? await inspectGreenhouseAfterSubmit(page) : null;
+    let preConfirmed: { ok: boolean; phrase: string } | null = null;
     if (greenhouseAfter) {
       log("GREENHOUSE_AFTER_SUBMIT", {
         kind: greenhouseAfter.kind,
@@ -403,44 +481,54 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       await scrollGreenhouseFormIntoView(page);
     }
     if (greenhouseAfter?.kind === "form_still_open" || greenhouseAfter?.kind === "validation") {
-      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
-      const validation = greenhouseAfter.kind === "validation";
-      const why = greenhouseAfter.recaptcha === "challenge"
-        ? "Greenhouse showed a visible reCAPTCHA challenge, so the application was not accepted."
-        : validation
-          ? "Greenhouse kept the form open and showed a validation error. The application was not accepted."
-          : "The Submit application button is still on the form. The click did not leave the application form.";
-      const blocker = greenhouseAfter.recaptcha === "challenge" ? "captcha" : validation ? "form_validation" : "submit_not_accepted";
-      if (blocker === "captcha") {
-        rememberManualApply(input, {
-          blocker: "captcha",
-          cvPath: cv.cvPath,
-          captchaSignal: "active_challenge",
-          stage: "post_submit",
+      preConfirmed = await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
+      if (!preConfirmed?.ok) {
+        screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+        const validation = greenhouseAfter.kind === "validation";
+        const invisibleCaptcha = greenhouseAfter.recaptcha === "invisible" || greenhouseAfter.recaptcha === "challenge";
+        const why = greenhouseAfter.recaptcha === "challenge"
+          ? "Greenhouse showed a visible reCAPTCHA challenge, so the application was not accepted."
+          : validation
+            ? "Greenhouse kept the form open and showed a validation error. The application was not accepted."
+            : invisibleCaptcha
+              ? "Submit was clicked but Greenhouse did not show confirmation (often invisible reCAPTCHA on Similarweb embeds)."
+              : "The Submit application button is still on the form. The click did not leave the application form.";
+        const blocker = greenhouseAfter.recaptcha === "challenge" || (greenhouseAfter.kind === "form_still_open" && invisibleCaptcha)
+          ? "captcha"
+          : validation
+            ? "form_validation"
+            : "submit_not_accepted";
+        if (blocker === "captcha") {
+          rememberManualApply(input, {
+            blocker: "captcha",
+            cvPath: cv.cvPath,
+            captchaSignal: greenhouseAfter.recaptcha === "challenge" ? "active_challenge" : "passive_widget",
+            stage: "post_submit",
+            answers: filled.answers,
+            canonicalJobUrl: page.url(),
+          });
+        }
+        return result(input, {
+          status: blocker === "captcha" ? "manual_required" : "review",
+          submitted: false,
+          confirmationDetected: false,
+          blocker,
+          persona,
+          ...cv.publicFields,
           answers: filled.answers,
           canonicalJobUrl: page.url(),
+          notes: lines([
+            `result=${blocker === "captcha" ? "manual_required" : "review"}`,
+            `blocker=${blocker}`,
+            `greenhouse_kind=${greenhouseAfter.kind}`,
+            `recaptcha=${greenhouseAfter.recaptcha}`,
+            `cheq_invalid=${greenhouseAfter.cheqInvalid}`,
+            `greenhouse_excerpt=${greenhouseAfter.excerpt}`,
+            why,
+          ]),
+          screenshots,
         });
       }
-      return result(input, {
-        status: blocker === "captcha" ? "manual_required" : "review",
-        submitted: false,
-        confirmationDetected: false,
-        blocker,
-        persona,
-        ...cv.publicFields,
-        answers: filled.answers,
-        canonicalJobUrl: page.url(),
-        notes: lines([
-          `result=${blocker === "captcha" ? "manual_required" : "review"}`,
-          `blocker=${blocker}`,
-          `greenhouse_kind=${greenhouseAfter.kind}`,
-          `recaptcha=${greenhouseAfter.recaptcha}`,
-          `cheq_invalid=${greenhouseAfter.cheqInvalid}`,
-          `greenhouse_excerpt=${greenhouseAfter.excerpt}`,
-          why,
-        ]),
-        screenshots,
-      });
     }
     const postCaptchaSignal = await classifyCaptchaSignal(page);
     log("CAPTCHA_SIGNAL", {
@@ -487,7 +575,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     if (otpResolved) {
       return otpResolved;
     }
-    const confirmed = await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
+    const confirmed = preConfirmed?.ok
+      ? preConfirmed
+      : await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
     screenshots.push(await saveScreenshot(page, shotDir, confirmed.ok ? "confirmation.png" : "blocker.png"));
     if (!confirmed.ok) {
       return result(input, {
@@ -599,6 +689,10 @@ async function openJob(page: Page, url: string): Promise<void> {
           await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
           if (/greenhouse\.io/i.test(target) && !/greenhouse\.io/i.test(page.url())) {
             log("NAVIGATION_LEFT_GREENHOUSE", { target, landed: page.url() });
+            continue;
+          }
+          if (/error=true/i.test(page.url()) || /\/embed\/job_board\b/i.test(page.url())) {
+            log("NAVIGATION_GREENHOUSE_ERROR", { target, landed: page.url() });
             continue;
           }
           await dismissOverlays(page);
@@ -986,6 +1080,21 @@ async function enterBestOpening(
 ): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" | "location_ineligible"; canonicalUrl?: string } | null> {
   if (await pageHasResumeField(page)) {
     return null;
+  }
+  const positionIdFromTarget = careersPositionId(targetUrl);
+  const greenhouseDirect = directGreenhouseUrlsForCareersUrl(targetUrl);
+  if (positionIdFromTarget && greenhouseDirect.length > 0) {
+    for (const directUrl of greenhouseDirect) {
+      log("LISTING_GREENHOUSE_DIRECT", { company, positionId: positionIdFromTarget, url: directUrl });
+      await page.goto(directUrl, { waitUntil: "domcontentloaded", timeout: 20_000 }).catch(() => undefined);
+      await dismissOverlays(page);
+      if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
+        return {
+          title: role,
+          line: `listing_match=${role}\nlisting_reason=greenhouse_direct=${positionIdFromTarget}`,
+        };
+      }
+    }
   }
   const openings = await listOpenings(page);
   const positionId = careersPositionId(targetUrl);

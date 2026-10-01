@@ -21,6 +21,12 @@ test("classifyGreenhouseSubmitText sees a thank-you as confirmed", () => {
   assert.equal(classifyGreenhouseSubmitText("Thanks for applying to Orca Security"), "confirmed");
 });
 
+test("job description requirements do not fake a validation error when submit is still visible", () => {
+  const jd =
+    "Data Engineer Tel Aviv Apply Similarweb is growing. Bachelor degree is required for this role. Submit application First Name";
+  assert.equal(classifyGreenhouseSubmitText(jd), "form_still_open");
+});
+
 test("greenhouseFrameSignals marks invisible recaptcha and CHEQ", () => {
   const signals = greenhouseFrameSignals([
     "https://www.recaptcha.net/recaptcha/enterprise/anchor?size=invisible",

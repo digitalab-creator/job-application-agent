@@ -7,6 +7,9 @@ export type GreenhouseFrameSignals = {
   cheqInvalid: boolean;
 };
 
+const FORM_ERROR_LINE =
+  /(?:^|\*)(?:[^.\n]{0,90})(?:is required|please complete|invalid phone|enter a valid|too short|too long|this field is required)/i;
+
 /** What the Greenhouse embed is showing after a submit click. */
 export function classifyGreenhouseSubmitText(text: string): GreenhouseSubmitKind {
   if (thankYouMatch(text)) {
@@ -15,11 +18,19 @@ export function classifyGreenhouseSubmitText(text: string): GreenhouseSubmitKind
   if (/security code|verification code was sent|enter the \d+-character code|confirm you'?re a human/i.test(text)) {
     return "email_verification";
   }
-  if (/too short|too long|is required|please complete|invalid phone|enter a valid|this field is required/i.test(text)) {
+  const hasSubmitButton = /submit application/i.test(text);
+  const errorLines = text
+    .split(/\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length > 0 && line.length < 160 && FORM_ERROR_LINE.test(line));
+  if (errorLines.length > 0) {
     return "validation";
   }
-  if (/submit application/i.test(text)) {
+  if (hasSubmitButton) {
     return "form_still_open";
+  }
+  if (/too short|too long|please complete|invalid phone|enter a valid|this field is required/i.test(text)) {
+    return "validation";
   }
   return "unknown";
 }

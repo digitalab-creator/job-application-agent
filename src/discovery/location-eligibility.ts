@@ -261,10 +261,35 @@ export function classifyLocationRules(
   if (isOtherIsraelRegionOnly(title, snippet, url)) {
     return "ineligible";
   }
+  if (looksLikeSingleCompanyJobPosting(url)) {
+    return "needs_lookup";
+  }
+  if (/greenhouse\.io/i.test(url) && /\/jobs\/\d+|embed\/job_app|token=\d+/i.test(url)) {
+    return "needs_lookup";
+  }
   if (isIsraelLocationUncertain(title, snippet, url)) {
     return "needs_lookup";
   }
   return "ineligible";
+}
+
+/** One job on a company careers site — location is usually in the body, not the sheet title. */
+function looksLikeSingleCompanyJobPosting(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (/greenhouse\.io/i.test(parsed.hostname)) {
+      return false;
+    }
+    if (!/\/careers\/[^/?#]+/i.test(parsed.pathname)) {
+      return false;
+    }
+    if (/\/careers\/?$/i.test(parsed.pathname.replace(/\/$/, ""))) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function isDiscoveryLocationEligible(

@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { chromium } from "playwright";
 import { ensureExcludedCompaniesConfig, getExcludedCompanies, setExcludedCompanies } from "./application/exclude-company.js";
 import { ensureExcludedLocationsConfig, getExcludedLocations, setExcludedLocations } from "./application/exclude-location.js";
@@ -15,6 +17,7 @@ import { runDiscovery } from "./discovery/run-discovery.js";
 import { recordExternalSpend, todayCostSummary, withJobCost } from "./llm/cost-ledger.js";
 import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
+import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./application/manual-fill-guide.js";
 
 let busy = false;
 ensureExcludedCompaniesConfig();
@@ -142,6 +145,25 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, releaseApplyRun());
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/generated-cv/")) {
+      if (!authorized(req)) {
+        send(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const rel = decodeURIComponent(req.url.slice("/generated-cv/".length).split("?")[0] ?? "");
+      const safe = path.normalize(rel).replace(/^(\.\.(\/|\\|$))+/, "");
+      const filePath = path.join(env.generatedCvDir, safe);
+      if (!filePath.startsWith(path.resolve(env.generatedCvDir)) || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        send(res, 404, { error: "not_found" });
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${path.basename(filePath)}"`,
+      });
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
     if (req.method === "POST" && req.url === "/apply") {
       if (busy) {
         send(res, 409, { status: "failed", submitted: false, confirmationDetected: false, notes: "Another application is already running." });
@@ -191,6 +213,7 @@ const server = http.createServer(async (req, res) => {
           const quota = quotaSnapshot();
           const budget = budgetSnapshot();
           const outcome = tracked.result;
+          attachManualFillGuide(outcome);
           outcome.llmCostUsd = tracked.usd;
           outcome.quota = quota;
           outcome.budget = compactBudget(budget);
@@ -293,6 +316,34 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     excludedCompanies: getExcludedCompanies().length,
     excludedLocations: getExcludedLocations().length,
   };
+}
+
+function attachManualFillGuide(outcome: ApplicationResult): void {
+  if (shouldPromoteToManualSheet(outcome) && outcome.status === "review") {
+    outcome.status = "manual_required";
+  }
+  const needsPack = outcome.status === "manual_required" || shouldPromoteToManualSheet(outcome);
+  if (!needsPack) {
+    return;
+  }
+  const cvRel = outcome.cvPath?.includes(env.generatedCvDir)
+    ? outcome.cvPath.replace(`${env.generatedCvDir}/`, "")
+    : outcome.cvPath?.replace(/^\/app\/generated-cv\//, "");
+  const cvDownloadUrl = cvRel
+    ? (env.applyPublicBaseUrl
+      ? `${env.applyPublicBaseUrl}/generated-cv/${cvRel}`
+      : `http://127.0.0.1:3099/generated-cv/${cvRel} (Authorization: Bearer APPLY_API_TOKEN)`)
+    : undefined;
+  const pack = buildSheetManualNotes({
+    applyUrl: outcome.canonicalJobUrl ?? outcome.jobUrl,
+    blocker: outcome.blocker,
+    cvPath: outcome.cvPath,
+    cvDownloadUrl,
+    answers: outcome.answers,
+  });
+  outcome.manualFillGuide = pack;
+  const baseNotes = (outcome.notes || "").split("\n\nMANUAL_FILL")[0]?.split("\n\nresult=manual_fill")[0]?.trim() ?? outcome.notes;
+  outcome.notes = [baseNotes, pack].filter(Boolean).join("\n\n");
 }
 
 function authorized(req: http.IncomingMessage): boolean {

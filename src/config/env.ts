@@ -16,6 +16,8 @@ function optional(name: string, fallback: string): string {
 export const env = {
   port: Number(optional("PORT", "3000")),
   applyApiToken: required("APPLY_API_TOKEN"),
+  /** Optional public base (e.g. https://jobs.example.com) for CV links in sheet Manual notes. */
+  applyPublicBaseUrl: optional("APPLY_PUBLIC_BASE_URL", "").replace(/\/$/, ""),
   technicalCvPath: required("TECHNICAL_CV_PATH"),
   marketingCvPath: required("MARKETING_CV_PATH"),
   llmBaseUrl: optional("LLM_BASE_URL", "https://api.openai.com/v1").replace(/\/$/, ""),

@@ -13,6 +13,13 @@ export const candidate = {
     city: "Petah Tikva",
     country: "Israel",
   },
+  /**
+   * Hybrid / on-site commute screening (Greenhouse etc.). Answered Yes only for offices
+   * in our pursue geography — see location-eligibility (Central + Tel Aviv District metro).
+   */
+  workLocation: {
+    willingToCommuteToEligibleOffices: true,
+  },
   linkedin: "https://www.linkedin.com/in/redacted/",
   github: "https://github.com/digitalab-creator",
   portfolio: {

@@ -48,10 +48,24 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
       });
     }
 
+    const isVisibleField = (field: HTMLInputElement) => {
+      const style = window.getComputedStyle(field);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+        return false;
+      }
+      if (field.getAttribute("aria-hidden") === "true") {
+        return false;
+      }
+      return true;
+    };
+
     const invalid = Array.from(document.querySelectorAll("input, textarea, select"))
       .filter((element) => {
         const field = element as HTMLInputElement;
         if (field.disabled || field.type === "hidden" || field.type === "file" || field.type === "checkbox" || field.type === "radio") {
+          return false;
+        }
+        if (!isVisibleField(field)) {
           return false;
         }
         if (field.value.trim().length > 0) {

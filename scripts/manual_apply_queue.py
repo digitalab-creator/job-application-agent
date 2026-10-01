@@ -66,7 +66,8 @@ def is_manual_queue_row(row: dict) -> bool:
     if blocker == "login_required":
         return True
     if blocker == "captcha":
-        return row.get("captchaSignal") == "active_challenge"
+        signal = str(row.get("captchaSignal") or "")
+        return signal in ("active_challenge", "passive_widget") or not signal
     return False
 
 

@@ -274,3 +274,43 @@ test("how did you hear prefers LinkedIn option", () => {
     assert.equal(decision.value, "LinkedIn");
   }
 });
+
+test("Tel Aviv office commute several days per week answers Yes", () => {
+  const decision = decideField({
+    label: "Are you comfortable commuting to our Tel Aviv office location three days a week?",
+    required: true,
+    type: "select",
+    options: ["Yes", "No"],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "Yes");
+  }
+});
+
+test("Haifa office commute skips the job", () => {
+  const decision = decideField({
+    label: "Are you comfortable commuting to our Haifa office three days a week?",
+    required: true,
+    type: "select",
+    options: ["Yes", "No"],
+    ctx,
+  });
+  assert.equal(decision.action, "skip_job");
+});
+
+test("BI analytics 1-10 scale uses grounded self rating", () => {
+  const decision = decideField({
+    label:
+      "On a scale of 1-10, 10 being expert level, how would you rate your BI/analytics tools (Looker, Tableau, Amplitude, etc.) and SQL skills?*",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.match(decision.value, /^[78]$/);
+  }
+});
