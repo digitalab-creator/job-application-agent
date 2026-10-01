@@ -1,5 +1,5 @@
 import { candidate } from "../config/candidate.js";
-import { facts } from "../profile/facts.js";
+import { verifiedFactsForPersona } from "../profile/verified-facts.js";
 import { completeJson } from "../llm/client.js";
 import { log } from "../logging/logger.js";
 import type { Persona } from "../models/types.js";
@@ -26,7 +26,7 @@ export async function answerFreeText(input: {
   company: string;
   role: string;
 }): Promise<{ value: string; factIds: string[] } | null> {
-  const allowed = facts.filter((fact) => fact.personas.includes(input.persona) || fact.personas.includes("both"));
+  const allowed = verifiedFactsForPersona(input.persona);
   const payload = {
     question: input.question,
     company: input.company,

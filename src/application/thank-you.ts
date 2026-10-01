@@ -16,6 +16,8 @@ const THANK_YOU_RULES: RegExp[] = [
   /your submission was successful/i,
   /the form was sent successfully/i,
   /we (have |'ve )?received your (message|submission)/i,
+  /your application was sent/i,
+  /application sent successfully/i,
   /thanks for applying/i,
   /thank you for applying to/i,
   /you have already applied/i,

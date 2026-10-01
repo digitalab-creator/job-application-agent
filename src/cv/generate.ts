@@ -143,7 +143,8 @@ async function tryTailored(
   }
   const unsupported = await auditDocument(doc, model);
   if (unsupported.length > 0) {
-    log("CV_AUDIT_WARN", { model, attempt, unsupported: unsupported.slice(0, 8) });
+    log("CV_REJECTED", { reason: "audit", model, attempt, unsupported: unsupported.slice(0, 8) });
+    return null;
   }
   log("CV_GENERATED", {
     wording: "llm",

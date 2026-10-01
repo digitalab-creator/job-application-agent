@@ -2,6 +2,7 @@ import type { Page } from "playwright";
 import { captchaSignalFromFrameUrls, type CaptchaSignal } from "./captcha-signal.js";
 import { detectGreenhouseConfirmation } from "./greenhouse.js";
 import { looksLikeLoginWall } from "./login-wall.js";
+import { detectComeetConfirmation } from "./ats-confirmation.js";
 import { thankYouMatch } from "./thank-you.js";
 
 export type { CaptchaSignal } from "./captcha-signal.js";
@@ -67,7 +68,15 @@ export async function detectLoginWall(page: Page): Promise<boolean> {
 }
 
 export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  const comeetJob = /comeet\.com/i.test(page.url());
+  const attempts = comeetJob ? 20 : 12;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (comeetJob) {
+      const comeet = await detectComeetConfirmation(page);
+      if (comeet.ok) {
+        return comeet;
+      }
+    }
     const greenhouse = await detectGreenhouseConfirmation(page);
     if (greenhouse.ok) {
       return greenhouse;

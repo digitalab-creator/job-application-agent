@@ -1,9 +1,10 @@
 import { candidate } from "../config/candidate.js";
 import type { Fact, RoleRecord } from "../models/types.js";
+import { learnedFactById, learnedFacts } from "./learned-facts.js";
 
 const budgetMillions = candidate.media.maxMonthlyBudgetIls / 1_000_000;
 const budgetLabel = Number.isInteger(budgetMillions) ? String(budgetMillions) : String(budgetMillions);
-const mediaHandsOnText = `About ${candidate.media.ppcYears} years of hands-on PPC experience. Managed media budgets of up to ILS ${budgetLabel} million (${candidate.media.maxMonthlyBudgetIls}) per month. Hands-on platforms: ${candidate.media.platforms.join(", ")}.`;
+const mediaHandsOnText = `About ${candidate.media.ppcYears} years of hands-on PPC experience. Managed media budgets of up to ILS ${budgetLabel} million (${candidate.media.maxMonthlyBudgetIls}) per month. Hands-on platforms: ${candidate.media.platforms.join(", ")}. Primary paid media focus: ${candidate.media.primaryPaidMediaFocus}.`;
 
 /**
  * CV lines are copied from the two baseline CVs.
@@ -94,7 +95,7 @@ export const facts: Fact[] = [
   {
     id: "summary-marketing",
     roleId: null,
-    text: "Hands-on Performance Marketing and Technical Growth Lead with 10+ years of experience managing paid acquisition across Google, Meta, TikTok and Microsoft. Managed budgets ranging from SMB accounts to portfolios exceeding ILS 2M per month, combining campaign strategy with measurement, conversion optimization and automation. Built internal optimization systems and AI-assisted workflows that improved decision-making, reduced operational workload and contributed to performance gains of up to 3x lower cost per conversion.",
+    text: `Hands-on Performance Marketing and Technical Growth Lead with 10+ years of experience managing paid acquisition across Google, Meta, TikTok and Microsoft. Managed budgets ranging from SMB accounts to portfolios up to ILS ${candidate.media.maxMonthlyBudgetIls.toLocaleString("en-US")} per month, combining campaign strategy with measurement, conversion optimization and automation. Built internal optimization systems and AI-assisted workflows that improved decision-making, reduced operational workload and contributed to performance gains of up to 3x lower cost per conversion.`,
     tags: ["summary", "ppc", "measurement"],
     personas: ["marketing", "hybrid"],
     verified: true,
@@ -129,6 +130,22 @@ export const facts: Fact[] = [
     text: mediaHandsOnText,
     tags: ["years", "ppc", "platforms"],
     personas: ["marketing", "hybrid", "both"],
+    verified: true,
+  },
+  {
+    id: "screening-motivation-technical",
+    roleId: null,
+    text: candidate.screening.motivationTechnical,
+    tags: ["screening", "motivation"],
+    personas: ["technical", "hybrid"],
+    verified: true,
+  },
+  {
+    id: "screening-motivation-marketing",
+    roleId: null,
+    text: candidate.screening.motivationMarketing,
+    tags: ["screening", "motivation"],
+    personas: ["marketing", "hybrid"],
     verified: true,
   },
   {
@@ -428,8 +445,12 @@ export const HEADLINES = {
   "marketing-full": "Performance Marketing & Technical Growth Lead | PPC, Measurement & AI Automation",
 } as const;
 
+export function allFacts(): Fact[] {
+  return [...facts, ...learnedFacts()];
+}
+
 export function factById(id: string): Fact | undefined {
-  return facts.find((fact) => fact.id === id);
+  return facts.find((fact) => fact.id === id) ?? learnedFactById(id);
 }
 
 export function roleById(id: string): RoleRecord | undefined {

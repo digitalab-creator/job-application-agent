@@ -196,6 +196,71 @@ test("LLM experience yes/no uses verified years", () => {
   }
 });
 
+test("Guidde-style UA years and budget fill as text when there are no dropdown options", () => {
+  const years = decideField({
+    label:
+      "How many years of hands-on experience do you have managing user acquisition campaigns end-to-end (Search, Performance Max, Display, YouTube)?*",
+    required: true,
+    type: "text",
+    options: [],
+    ctx: { ...ctx, persona: "marketing" },
+  });
+  assert.equal(years.action, "fill");
+  if (years.action === "fill") {
+    assert.equal(years.value, "12");
+  }
+
+  const budget = decideField({
+    label: "What is the largest monthly paid media budget you've managed independently?*",
+    required: true,
+    type: "text",
+    options: [],
+    ctx: { ...ctx, persona: "marketing" },
+  });
+  assert.equal(budget.action, "fill");
+  if (budget.action === "fill") {
+    assert.match(budget.value, /1,500,000/);
+  }
+});
+
+test("primary paid media focus and human-reason use verified screening profile", () => {
+  const focus = decideField({
+    label: "Which best describes your primary paid media focus?*",
+    required: true,
+    type: "select",
+    options: ["Brand awareness", "Full-funnel growth", "Enterprise B2B only"],
+    ctx: { ...ctx, persona: "marketing" },
+  });
+  assert.equal(focus.action, "fill");
+  if (focus.action === "fill") {
+    assert.equal(focus.value, "Full-funnel growth");
+  }
+
+  const reasonTech = decideField({
+    label: "human-reason",
+    required: true,
+    type: "textarea",
+    options: [],
+    ctx,
+  });
+  assert.equal(reasonTech.action, "fill");
+  if (reasonTech.action === "fill") {
+    assert.match(reasonTech.value, /Applied AI engineer/);
+  }
+
+  const reasonMkt = decideField({
+    label: "human-reason",
+    required: true,
+    type: "textarea",
+    options: [],
+    ctx: { ...ctx, persona: "marketing" },
+  });
+  assert.equal(reasonMkt.action, "fill");
+  if (reasonMkt.action === "fill") {
+    assert.match(reasonMkt.value, /Performance marketing/);
+  }
+});
+
 test("how did you hear prefers LinkedIn option", () => {
   const decision = decideField({
     label: "How did you hear about this job?",

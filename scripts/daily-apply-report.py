@@ -401,6 +401,140 @@ def review_questions(events: list[dict]) -> list[str]:
     return out
 
 
+LOG_OUTCOME_WHY: dict[str, str] = {
+    "confirmed": "Submission confirmed on site.",
+    "navigation_failed": BLOCKER_WHY["navigation_failed"],
+    "location_ineligible": "Job location / eligibility rules rejected this opening.",
+    "careers_page": BLOCKER_WHY["careers_page"],
+    "bad_job_url": "Sheet URL opened a board error page, not a single job posting.",
+    "review_required": "Required screening question blocked (missing fact or empty field label).",
+    "request_failed": "Worker error during apply (often screenshot timeout or n8n callback).",
+    "no_confirmation": "Submit clicked but no confirmation signal (timeout or silent failure).",
+    "captcha": BLOCKER_WHY["captcha"],
+    "unconfirmed_page": "Job page could not be verified as the intended posting.",
+    "unknown": "Opened in browser but no terminal outcome in logs.",
+}
+
+
+@dataclass
+class JobLogAttempt:
+    company: str
+    role: str
+    url: str
+    outcome: str
+    cause: str
+    review_questions: list[str]
+
+
+def _first_line(msg: str, limit: int = 140) -> str:
+    text = str(msg or "").strip().split("\n", 1)[0]
+    return text[:limit] if text else ""
+
+
+def job_attempts_from_events(events: list[dict]) -> list[JobLogAttempt]:
+    """One row per JOB_OPENED, with the best terminal cause from following log events."""
+    sessions: list[dict] = []
+    current: dict | None = None
+    for ev in events:
+        name = str(ev.get("event", ""))
+        if name == "JOB_OPENED":
+            current = {
+                "company": str(ev.get("company", "?")),
+                "role": str(ev.get("role", "?")),
+                "url": str(ev.get("url", "")),
+                "evs": [],
+            }
+            sessions.append(current)
+            continue
+        if current is not None:
+            current["evs"].append(ev)
+
+    attempts: list[JobLogAttempt] = []
+    for session in sessions:
+        evs = session["evs"]
+        reviews: list[str] = []
+        outcome = "unknown"
+        cause = LOG_OUTCOME_WHY["unknown"]
+        request_msg = ""
+
+        for ev in evs:
+            name = str(ev.get("event", ""))
+            if name == "SUBMISSION_CONFIRMED":
+                outcome = "confirmed"
+                cause = LOG_OUTCOME_WHY["confirmed"]
+            elif name == "JOB_NAVIGATION_FAILED":
+                outcome = "navigation_failed"
+                cause = BLOCKER_WHY["navigation_failed"]
+            elif name == "JOB_LOCATION_INELIGIBLE":
+                outcome = "location_ineligible"
+                cause = LOG_OUTCOME_WHY["location_ineligible"]
+            elif name == "JOB_PAGE_UNCONFIRMED":
+                outcome = "unconfirmed_page"
+                cause = LOG_OUTCOME_WHY["unconfirmed_page"]
+            elif name == "REVIEW_REQUIRED":
+                q = str(ev.get("question", "")).strip()
+                reason = str(ev.get("reason", "")).strip()
+                if q:
+                    reviews.append(q[:200])
+                elif reason:
+                    reviews.append(reason[:200])
+                if outcome not in ("confirmed",):
+                    outcome = "review_required"
+                    detail = q or _first_line(reason)
+                    cause = (
+                        f"Screening blocked: {detail}"
+                        if detail
+                        else LOG_OUTCOME_WHY["review_required"]
+                    )
+            elif name == "REQUEST_FAILED":
+                request_msg = _first_line(str(ev.get("message", "")))
+                if outcome != "confirmed":
+                    outcome = "request_failed"
+                    cause = request_msg or LOG_OUTCOME_WHY["request_failed"]
+            elif name == "CAPTCHA_SIGNAL":
+                signal = str(ev.get("signal", ""))
+                if signal not in ("none", "passive_widget", "") and outcome != "confirmed":
+                    outcome = "captcha"
+                    cause = BLOCKER_WHY["captcha"]
+
+        submitted = any(str(ev.get("event")) == "SUBMIT_CLICKED" for ev in evs)
+        confirmed = any(str(ev.get("event")) == "SUBMISSION_CONFIRMED" for ev in evs)
+        if submitted and not confirmed and outcome == "unknown":
+            outcome = "no_confirmation"
+            cause = LOG_OUTCOME_WHY["no_confirmation"]
+
+        url = session["url"]
+        if outcome == "unknown":
+            form_fields: list[str] = []
+            for ev in evs:
+                if ev.get("event") == "FORM_DETECTED":
+                    form_fields = [str(f) for f in (ev.get("fields") or [])]
+            if form_fields and {"Search", "Office", "Career Page Department"}.intersection(form_fields):
+                outcome = "careers_page"
+                cause = BLOCKER_WHY["careers_page"]
+            elif "error=true" in url.lower():
+                outcome = "bad_job_url"
+                cause = LOG_OUTCOME_WHY["bad_job_url"]
+
+        if outcome == "review_required" and reviews:
+            unique = list(dict.fromkeys(reviews))
+            cause = "; ".join(unique[:3])
+            if len(unique) > 3:
+                cause += f" (+{len(unique) - 3} more)"
+
+        attempts.append(
+            JobLogAttempt(
+                company=session["company"],
+                role=session["role"],
+                url=url,
+                outcome=outcome,
+                cause=cause.replace("|", "/"),
+                review_questions=reviews,
+            )
+        )
+    return attempts
+
+
 def manual_queue_module():
     import importlib.util
 
@@ -529,6 +663,20 @@ def print_report(day: str | None = None) -> int:
         for r in apply_runs:
             print(f"- Apply: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}")
     print()
+
+    log_jobs = job_attempts_from_events(events)
+    print("## Jobs tried (worker logs — exact failure per opening)")
+    if not log_jobs:
+        print("- No `JOB_OPENED` events in today's docker logs.")
+    else:
+        print("| # | Outcome | Company | Role | Exact cause |")
+        print("|---|---------|---------|------|-------------|")
+        for i, row in enumerate(log_jobs, start=1):
+            company = row.company[:26]
+            role = row.role[:36]
+            why = row.cause.replace("|", "/")[:160]
+            print(f"| {i} | `{row.outcome}` | {company} | {role} | {why} |")
+        print()
 
     print("## Apply attempts (worker ledger, chronological)")
     if not attempts:

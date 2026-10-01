@@ -1,4 +1,5 @@
 import { candidate, SALARY_MAX, SALARY_MIN } from "../config/candidate.js";
+import { isShortMotivationField, screeningMotivation } from "../config/screening.js";
 import type { Persona } from "../models/types.js";
 import { roles } from "../profile/facts.js";
 import { isPlatformQuestion, matchPlatforms, pickBudgetOption, pickYearsOption } from "./media-answers.js";
@@ -174,8 +175,11 @@ function resolveFieldHint(input: {
   if (/hubspot__estimated_monthly_orders|estimated_monthly_orders/i.test(blob)) {
     return "estimated monthly orders";
   }
-  if (/privacy|consent|agree/i.test(name + id)) {
+  if (/privacy|consent|agree|self[- ]?identification|eeo|voluntary/i.test(name + id + group)) {
     return "privacy policy consent";
+  }
+  if (/^question_/i.test(id)) {
+    return group || "application question";
   }
   if (/cards\[/.test(name) && /field0/i.test(name)) {
     return "full name";
@@ -293,11 +297,14 @@ function mapKnown(
     }
     return fill(extra);
   }
-  if (/years of (experience|software|professional)|שנות ניסיון/i.test(label)) {
-    if (/ppc|paid|performance|hands-on|media/i.test(label) || ctx.persona === "marketing") {
+  if (/years of .*(experience|software|professional)|years of hands-on|שנות ניסיון/i.test(label)) {
+    if (/ppc|paid|performance|hands-on|media|user acquisition/i.test(label) || ctx.persona === "marketing") {
       return fill(`${candidate.media.ppcYears} years`);
     }
     return fill("5+ years");
+  }
+  if (isShortMotivationField(label, blob) && type !== "file") {
+    return fill(screeningMotivation(ctx.persona));
   }
   if (/hebrew/i.test(label) && /language|proficiency|level/i.test(label)) {
     return fill("Native");
@@ -334,10 +341,42 @@ function yesNo(yes: boolean, type: string): FieldDecision {
 }
 
 function chooseBucket(label: string, options: string[], type: string): FieldDecision | null {
+  const professionalYears = candidate.media.ppcYears;
+  const freeTextYears = /year/i.test(label)
+    && /experience|ppc|paid|performance|hands-on|media|user acquisition|ניסיון/i.test(label);
+  const freeTextBudget = /budget|spend|תקציב/i.test(label);
+  if (options.length === 0 && (type === "text" || type === "number" || type === "textarea")) {
+    if (freeTextYears) {
+      const years = /ppc|paid|performance|hands-on|media|user acquisition/i.test(label)
+        ? candidate.media.ppcYears
+        : professionalYears;
+      return fill(String(years));
+    }
+    if (freeTextBudget) {
+      return fill(`ILS ${candidate.media.maxMonthlyBudgetIls.toLocaleString("en-US")} per month`);
+    }
+  }
+  if (/primary paid media focus|paid media focus/i.test(label)) {
+    if (options.length === 0) {
+      return fill(candidate.media.primaryPaidMediaFocus);
+    }
+    const focus = candidate.media.primaryPaidMediaFocus.toLowerCase();
+    const choice = options.find((option) => {
+      const text = option.toLowerCase();
+      if (/full.?funnel|full stack growth/i.test(focus)) {
+        return /full.?funnel|growth|acquisition.*cro|cro.*analytics/i.test(text);
+      }
+      return text.includes(focus) || focus.includes(text);
+    })
+      ?? options.find((option) => /growth|performance|acquisition/i.test(option));
+    if (!choice) {
+      return { action: "block", reason: `No paid-media focus option matches profile: "${label}"` };
+    }
+    return fill(choice);
+  }
   if (options.length === 0) {
     return null;
   }
-  const professionalYears = candidate.media.ppcYears;
   if (/do you have|have you/i.test(label) && options.some((option) => /^yes$/i.test(option.trim()))) {
     const threshold = parseExperienceThreshold(label);
     if (threshold !== null) {

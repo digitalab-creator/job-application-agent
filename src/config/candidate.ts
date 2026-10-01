@@ -50,6 +50,8 @@ export const candidate = {
   media: {
     ppcYears: 12,
     maxMonthlyBudgetIls: 1_500_000,
+    /** Maps to “primary paid media focus” style dropdowns; forms read this, not ad-hoc facts. */
+    primaryPaidMediaFocus: "Full-funnel growth (acquisition, CRO, and analytics)",
     platforms: [
       "Google",
       "Meta",
@@ -64,7 +66,18 @@ export const candidate = {
       "Microsoft Ads",
     ],
   },
+  /** Motivation snippets for opaque ATS fields (e.g. SmartRecruiters “human-reason”). Persona picks the line. */
+  screening: {
+    motivationTechnical:
+      "Applied AI engineer and product builder (RAG, automation, production systems); excited to ship growth-facing product and experiments at scale.",
+    motivationMarketing:
+      "Performance marketing and full-funnel growth lead (10+ years paid media); I combine acquisition, measurement, and CRO with technical automation.",
+    motivationHybrid:
+      "Applied AI product builder with 10+ years in performance marketing; pursuing roles that combine shipping product, experiments, and acquisition.",
+  },
 } as const;
+
+export type PersonaMotivation = keyof typeof candidate.screening;
 
 export const SALARY_MIN = candidate.salaryExpectation.minimum;
 export const SALARY_MAX = candidate.salaryExpectation.maximum;
