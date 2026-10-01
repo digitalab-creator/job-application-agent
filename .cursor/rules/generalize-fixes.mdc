@@ -1,0 +1,15 @@
+---
+description: Apply-agent fixes must work across career sites, not one ATS or company.
+globs:
+  - src/application/**
+  - src/browser/**
+alwaysApply: true
+---
+
+# Fixes must travel
+
+When a form, navigation, upload, or confirmation bug shows up on one site, fix the **shared behavior** (searchable dropdowns, board pages, file inputs, post-submit success). Do not add a company-name or single-host branch unless the protocol itself is different and the same code path cannot serve the others.
+
+A careers **board or location list** is not a failure. Pick a location-eligible opening that matches the candidate's verified skills and continue the apply. Exact title match is preferred; a credible skill match is still an apply.
+
+Do not mark an application failed because a screenshot or a non-essential widget timed out.

@@ -323,15 +323,7 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
   }
   if (field.id === "country" || (/country/i.test(field.label) && !/phone.code|country_phone/i.test(fieldBlob))) {
     const country = field.id === "country" ? scope.locator("#country") : locator;
-    await country.click({ timeout: 5000 }).catch(() => undefined);
-    await country.fill(value);
-    const option = scope.getByRole("option", { name: new RegExp(value, "i") }).first();
-    if (await option.count().catch(() => 0)) {
-      await option.click({ timeout: 3000 }).catch(() => undefined);
-    } else {
-      await country.press("Enter").catch(() => undefined);
-    }
-    await scope.waitForTimeout(600).catch(() => undefined);
+    await pickSearchableOption(scope, country, value);
     return;
   }
   if (/phone/i.test(field.label) || field.id === "phone" || field.type === "tel") {
@@ -423,6 +415,22 @@ async function checkOptions(scope: FormScope, field: DetectedField, values: stri
   }
 }
 
+/** Searchable country/city widgets (Greenhouse, Lever, Ashby, custom React selects). Never block on a hung .fill(). */
+async function pickSearchableOption(scope: FormScope, input: ReturnType<FormScope["locator"]>, value: string): Promise<void> {
+  await input.click({ timeout: 3000, force: true }).catch(() => undefined);
+  await input.fill(value, { timeout: 2500 }).catch(async () => {
+    await input.pressSequentially(value, { delay: 30, timeout: 2500 }).catch(() => undefined);
+  });
+  const option = scope.locator('[role="option"], li[role="option"], .select__option').filter({ hasText: new RegExp(value, "i") }).first();
+  if (await option.count().catch(() => 0)) {
+    await option.click({ timeout: 3000, force: true }).catch(() => undefined);
+  } else {
+    await input.press("ArrowDown").catch(() => undefined);
+    await input.press("Enter").catch(() => undefined);
+  }
+  await scope.waitForTimeout(400).catch(() => undefined);
+}
+
 function fieldQuestionLabel(field: DetectedField): string {
   const parts = [field.label, field.groupLabel, field.name, field.id]
     .map((part) => (part ?? "").trim())
@@ -462,8 +470,41 @@ export async function waitForResumeUploadTarget(page: Page, timeoutMs = 20_000):
   return false;
 }
 
+export async function revealApplicationForm(page: Page): Promise<void> {
+  if (await pageHasAnyResumeField(page)) {
+    return;
+  }
+  const scopes: FormScope[] = [page, ...page.frames()];
+  for (const scope of scopes) {
+    const control = scope.getByRole("link", { name: /^(apply now|apply for this job|apply|i'm interested|i am interested)$/i }).first();
+    const button = scope.getByRole("button", { name: /^(apply now|apply|i'm interested)$/i }).first();
+    const target = (await control.count().catch(() => 0)) ? control : button;
+    if (await target.count().catch(() => 0)) {
+      await target.click({ timeout: 5000 }).catch(() => undefined);
+      await page.waitForTimeout(1200);
+      if (await pageHasAnyResumeField(page)) {
+        return;
+      }
+    }
+    const attach = scope.getByText(/^(attach|upload)\b/i).first();
+    if (await attach.count().catch(() => 0)) {
+      await attach.click({ timeout: 3000 }).catch(() => undefined);
+    }
+  }
+}
+
+async function pageHasAnyResumeField(page: Page): Promise<boolean> {
+  for (const scope of [page, ...page.frames()]) {
+    if ((await scope.locator('input[type="file"]').count().catch(() => 0)) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function uploadResume(page: Page, cvPath: string): Promise<boolean> {
-  await waitForResumeUploadTarget(page).catch(() => undefined);
+  await revealApplicationForm(page);
+  await waitForResumeUploadTarget(page, 25_000).catch(() => undefined);
   const fileName = cvPath.split("/").pop() || "cv.pdf";
   const scopes: FormScope[] = [page, ...page.frames()];
   const ranked: Array<{ scope: FormScope; index: number; rank: number }> = [];
