@@ -49,6 +49,20 @@ test("Greenhouse privacy combobox picks Yes", () => {
   }
 });
 
+test("Greenhouse third-party consent combobox picks Confirm", () => {
+  const decision = decideField({
+    label: "By submitting your application you consent to us sharing your information with a third party supporting us in this hiring process*",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "Confirm");
+  }
+});
+
 test("location-based questions use verified city and country", () => {
   const decision = decideField({
     label: "Where are you currently based?",

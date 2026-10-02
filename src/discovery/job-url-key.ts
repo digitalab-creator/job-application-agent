@@ -1,8 +1,15 @@
-/** Stable cache key for a job posting URL (pathname, no trailing slash). */
+import { greenhouseJobId } from "../application/openings.js";
+
+/**
+ * Stable cache key for a job posting URL (pathname, no trailing slash).
+ * Company-site Greenhouse links keep the job id (`?gh_jid=`) because many postings share one path.
+ */
 export function uniqueKeyForUrl(url: string): string {
   try {
     const parsed = new URL(url);
-    return parsed.pathname.replace(/\/$/, "").toLowerCase();
+    const path = parsed.pathname.replace(/\/$/, "").toLowerCase();
+    const ghJid = greenhouseJobId(parsed);
+    return ghJid ? `${path}?gh_jid=${ghJid}` : path;
   } catch {
     return url.toLowerCase();
   }

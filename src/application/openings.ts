@@ -22,15 +22,23 @@ export function normalizeOpenings(
     }
     const path = target.pathname.replace(/\/$/, "");
     const here = page.pathname.replace(/\/$/, "");
-    if (path === here) {
-      continue;
-    }
-    // Drop board/root links when we are already on a deeper posting (Comeet, etc.).
-    if (here.startsWith(`${path}/`)) {
-      continue;
-    }
-    if (!/\/jobs\/|\/job\/|\/j\/|\/positions\//i.test(path)) {
-      continue;
+    // Greenhouse-on-company-site links (e.g. /job-description/?gh_jid=123): the job id lives in the query string.
+    const ghJid = greenhouseJobId(target);
+    if (ghJid) {
+      if (ghJid === greenhouseJobId(page)) {
+        continue;
+      }
+    } else {
+      if (path === here) {
+        continue;
+      }
+      // Drop board/root links when we are already on a deeper posting (Comeet, etc.).
+      if (here.startsWith(`${path}/`)) {
+        continue;
+      }
+      if (!/\/jobs\/|\/job\/|\/j\/|\/positions\//i.test(path)) {
+        continue;
+      }
     }
     // Wix location hubs like /location/tel-aviv/4687 are not job postings.
     if (/careers\.wix\.com/i.test(target.hostname) && /\/location\/[^/]+\/\d+$/i.test(path) && !/\/positions\//i.test(path)) {
@@ -42,19 +50,22 @@ export function normalizeOpenings(
       ? (segments.at(-2) ?? lastSegment)
       : (segments.at(-2) ?? lastSegment);
     const slug = rawSlug.toLowerCase();
-    if (!slug || slug === "none" || slug === "---" || slug === "-") {
+    if (!ghJid && (!slug || slug === "none" || slug === "---" || slug === "-")) {
       continue;
     }
-    if (slug === "positions" && !/^\d+$/.test(lastSegment)) {
+    if (!ghJid && slug === "positions" && !/^\d+$/.test(lastSegment)) {
       continue;
     }
-    if (seen.has(path)) {
+    // Same path + different gh_jid are different jobs, so the id is part of the identity.
+    const identity = ghJid ? `${path}?gh_jid=${ghJid}` : path;
+    if (seen.has(identity)) {
       continue;
     }
-    seen.add(path);
+    seen.add(identity);
     jobs.push({
       title: cleanTitle(item.title, rawSlug),
-      href: `${target.origin}${path}`,
+      // gh_jid links keep their original pathname (trailing slash) because WordPress sites redirect-loop without it.
+      href: ghJid ? `${target.origin}${target.pathname}?gh_jid=${ghJid}` : `${target.origin}${path}`,
       snippet: item.snippet.replace(/\s+/g, " ").trim().slice(0, 240),
     });
     if (jobs.length >= 40) {
@@ -62,6 +73,12 @@ export function normalizeOpenings(
     }
   }
   return jobs;
+}
+
+/** Numeric Greenhouse job id from `?gh_jid=`, or null. */
+export function greenhouseJobId(url: URL): string | null {
+  const jid = url.searchParams.get("gh_jid");
+  return jid && /^\d+$/.test(jid) ? jid : null;
 }
 
 function cleanTitle(title: string, slug: string): string {

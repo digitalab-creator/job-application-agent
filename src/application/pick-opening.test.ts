@@ -13,6 +13,17 @@ test("a Comeet company board keeps specific jobs and drops the board link", () =
   assert.equal(jobs[0]?.title, "Data Science Team Lead");
 });
 
+test("company-site Greenhouse links keep each gh_jid as a separate job", () => {
+  const jobs = normalizeOpenings([
+    { title: "Enterprise Account Manager", href: "https://www.riskified.com/job-description/?gh_jid=8831790002", snippet: "Lisbon" },
+    { title: "Enterprise Account Manager", href: "https://www.riskified.com/job-description/?gh_jid=8805197002", snippet: "Tel Aviv" },
+    { title: "Enterprise Account Manager", href: "https://www.riskified.com/job-description/?gh_jid=8805197002", snippet: "duplicate" },
+    { title: "Open roles", href: "https://www.riskified.com/careers/#positions", snippet: "" },
+  ], "https://www.riskified.com/careers/");
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[1]?.href, "https://www.riskified.com/job-description/?gh_jid=8805197002");
+});
+
 test("Wix sibling position links stay visible from a position URL that renders the list", () => {
   const jobs = normalizeOpenings([
     { title: "Full Stack AI Engineer", href: "https://careers.wix.com/location/tel-aviv/positions/10022791", snippet: "Tel Aviv" },
