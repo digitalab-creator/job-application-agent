@@ -1097,6 +1097,7 @@ async function enterBestOpening(
     }
   }
   const openings = await listOpenings(page);
+  log("LISTING_OPENINGS_FOUND", { company, targetRole: role, count: openings.length, url: page.url() });
   const positionId = careersPositionId(targetUrl);
   if (positionId && openings.length > 0) {
     const byId = openings.filter((job) => openingMatchesPositionId(job, positionId));

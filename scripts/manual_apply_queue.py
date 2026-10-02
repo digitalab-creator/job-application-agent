@@ -17,7 +17,7 @@ OUT_DIR = ROOT / "data/manual-queue"
 TZ = ZoneInfo("Asia/Jerusalem")
 
 REASON_LABEL = {
-    "captcha": "CAPTCHA (visible challenge)",
+    "captcha": "CAPTCHA (manual browser required)",
     "login_required": "Login / account gate",
 }
 

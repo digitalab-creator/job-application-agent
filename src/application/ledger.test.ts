@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isTerminalManualBlocker, type LedgerEntry } from "./ledger-policy.js";
 
-test("passive captcha ledger rows are not terminal", () => {
+test("passive captcha ledger rows are terminal", () => {
   const row: LedgerEntry = {
     url: "https://example.com/jobs/1",
     company: "Acme",
@@ -12,10 +12,10 @@ test("passive captcha ledger rows are not terminal", () => {
     blocker: "captcha",
     captchaSignal: "passive_widget",
   };
-  assert.equal(isTerminalManualBlocker(row), false);
+  assert.equal(isTerminalManualBlocker(row), true);
 });
 
-test("legacy captcha rows without captchaSignal are not terminal", () => {
+test("legacy captcha rows without captchaSignal are terminal", () => {
   const row: LedgerEntry = {
     url: "https://example.com/jobs/1",
     company: "Acme",
@@ -24,7 +24,7 @@ test("legacy captcha rows without captchaSignal are not terminal", () => {
     at: new Date().toISOString(),
     blocker: "captcha",
   };
-  assert.equal(isTerminalManualBlocker(row), false);
+  assert.equal(isTerminalManualBlocker(row), true);
 });
 
 test("active_challenge captcha rows are terminal", () => {

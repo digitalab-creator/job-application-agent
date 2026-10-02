@@ -16,6 +16,13 @@ test("location cache key prefers job URL pathname", () => {
   );
 });
 
+test("location cache key keeps gh_jid so postings sharing one path stay separate", () => {
+  const lisbon = locationCacheKey("https://www.riskified.com/job-description/?gh_jid=8831790002");
+  const telAviv = locationCacheKey("https://www.riskified.com/job-description/?gh_jid=8805197002");
+  assert.equal(telAviv, "/job-description?gh_jid=8805197002");
+  assert.notEqual(lisbon, telAviv);
+});
+
 test("cached verdict round-trips on disk by job URL key", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loc-cache-"));
   const filePath = path.join(dir, "location-verdicts.json");

@@ -6,7 +6,7 @@ import { factById } from "../profile/facts.js";
 import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
 import { acceptOpeningChoice } from "./opening-choice.js";
 import { bestSkillOpening } from "./skill-opening.js";
-import { normalizeOpenings, type ListedJob } from "./openings.js";
+import { greenhouseJobId, normalizeOpenings, type ListedJob } from "./openings.js";
 
 export type { ListedJob } from "./openings.js";
 export { normalizeOpenings } from "./openings.js";
@@ -21,21 +21,42 @@ When the exact title is missing, pick the strongest skill match. Do not return n
 When fit is "good", index must be one of the listed openings. When fit is "none", index must be -1.
 Do not invent a job that is not in the list.`;
 
-export async function listOpenings(page: Page): Promise<ListedJob[]> {
-  const raw = await page.evaluate(() => {
+/** Max wait for JS-rendered job lists (e.g. Greenhouse widgets on company sites) that appear after domcontentloaded. */
+const LATE_LIST_WAIT_MS = 8_000;
+
+async function readAnchorCandidates(page: Page): Promise<Array<{ title: string; href: string; snippet: string }>> {
+  return page.evaluate(() => {
     const anchors = Array.from(document.querySelectorAll("a[href]"));
     return anchors.map((anchor) => {
       const card = anchor.closest("li, article, tr, [class*='position'], [class*='job']");
       return {
-        title: (anchor.textContent || anchor.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim(),
+        // Prefer a dedicated title element so department/location text does not pollute the title.
+        title: (anchor.querySelector("[class*='title']")?.textContent || anchor.textContent || anchor.getAttribute("aria-label") || "")
+          .replace(/\s+/g, " ").trim(),
         href: (anchor as HTMLAnchorElement).href,
         snippet: (card?.textContent || anchor.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240),
       };
     });
   });
-  const fromLinks = normalizeOpenings(raw, page.url());
+}
+
+export async function listOpenings(page: Page): Promise<ListedJob[]> {
+  let fromLinks = normalizeOpenings(await readAnchorCandidates(page), page.url());
   if (fromLinks.length >= 2) {
     return fromLinks;
+  }
+  // The list may still be rendering client-side. Wait for several job-like links, then read again.
+  const lateRendered = await page.waitForFunction(
+    () => document.querySelectorAll("a[href*='gh_jid='], a[href*='/jobs/'], a[href*='/positions/']").length >= 2,
+    undefined,
+    { timeout: LATE_LIST_WAIT_MS },
+  ).then(() => true).catch(() => false);
+  if (lateRendered) {
+    fromLinks = normalizeOpenings(await readAnchorCandidates(page), page.url());
+    log("LISTING_LATE_RENDER", { url: page.url(), count: fromLinks.length });
+    if (fromLinks.length >= 2) {
+      return fromLinks;
+    }
   }
   const spaTitles = await readSpaListTitles(page);
   if (spaTitles.length === 0) {
@@ -106,6 +127,12 @@ export async function chooseOpening(input: {
 }
 
 export async function openChosen(page: Page, job: ListedJob): Promise<void> {
+  // gh_jid links are exact deep links; several postings can share one title (e.g. Tel Aviv vs Lisbon), so skip title clicks.
+  if (greenhouseJobId(new URL(job.href))) {
+    await page.goto(job.href, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
+    return;
+  }
   const targetPath = new URL(job.href).pathname.replace(/\/$/, "");
   const positionId = targetPath.match(/\/positions\/(\d+)/i)?.[1]
     ?? targetPath.match(/\/jobs\/(\d+)/i)?.[1];

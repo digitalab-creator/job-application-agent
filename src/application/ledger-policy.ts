@@ -8,7 +8,7 @@ export type LedgerEntry = {
   at: string;
   cvPath?: string;
   blocker?: string;
-  /** Only `active_challenge` is terminal for captcha; legacy rows without this field are not terminal. */
+  /** Any explicit captcha blocker is terminal; the human queue owns the next attempt. */
   captchaSignal?: "passive_widget" | "active_challenge";
   stage?: "pre_submit" | "post_submit";
   canonicalJobUrl?: string;
@@ -23,7 +23,7 @@ export function isTerminalManualBlocker(entry: LedgerEntry): boolean {
     return true;
   }
   if (entry.blocker === "captcha") {
-    return entry.captchaSignal === "active_challenge";
+    return true;
   }
   return false;
 }

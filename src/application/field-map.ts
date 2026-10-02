@@ -121,6 +121,10 @@ export function decideField(input: {
   if ((input.type === "text" || input.type === "search") && /store and process my data|privacy policy|terms and conditions/i.test(label)) {
     return fill("Yes");
   }
+  // Greenhouse react-select whose only option is "Confirm" (consent to share data with a hiring-process third party).
+  if ((input.type === "text" || input.type === "search") && /consent to us sharing your information with a third party/i.test(label)) {
+    return fill("Confirm");
+  }
   if (DEGREE.test(label)) {
     return input.required
       ? { action: "block", reason: `Required application question cannot be answered safely: "${label}"` }
