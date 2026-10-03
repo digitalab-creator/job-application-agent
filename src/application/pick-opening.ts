@@ -6,10 +6,16 @@ import { factById } from "../profile/facts.js";
 import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
 import { acceptOpeningChoice } from "./opening-choice.js";
 import { bestSkillOpening } from "./skill-opening.js";
-import { greenhouseJobId, normalizeOpenings, type ListedJob } from "./openings.js";
+import {
+  careersPositionId,
+  greenhouseJobId,
+  normalizeOpenings,
+  openingMatchesPositionId,
+  type ListedJob,
+} from "./openings.js";
 
 export type { ListedJob } from "./openings.js";
-export { normalizeOpenings } from "./openings.js";
+export { careersPositionId, normalizeOpenings, openingMatchesPositionId } from "./openings.js";
 export { bestSkillOpening } from "./skill-opening.js";
 
 const SYSTEM = `You decide whether one opening on a company careers list is a good match for this candidate.
@@ -128,16 +134,21 @@ export async function chooseOpening(input: {
 
 export async function openChosen(page: Page, job: ListedJob): Promise<void> {
   // gh_jid links are exact deep links; several postings can share one title (e.g. Tel Aviv vs Lisbon), so skip title clicks.
-  if (greenhouseJobId(new URL(job.href))) {
+  const jobUrl = new URL(job.href);
+  if (greenhouseJobId(jobUrl)) {
     await page.goto(job.href, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
     return;
   }
-  const targetPath = new URL(job.href).pathname.replace(/\/$/, "");
-  const positionId = targetPath.match(/\/positions\/(\d+)/i)?.[1]
-    ?? targetPath.match(/\/jobs\/(\d+)/i)?.[1];
+  const targetPath = jobUrl.pathname.replace(/\/$/, "");
+  const positionId = jobUrl.searchParams.get("positionId")
+    ?? targetPath.match(/\/positions\/(\d+)/i)?.[1]
+    ?? targetPath.match(/\/jobs\/(\d+)/i)?.[1]
+    ?? targetPath.match(/\/position-(\d+)$/i)?.[1];
   if (positionId) {
-    const byId = page.locator(`a[href*="/positions/${positionId}"], a[href*="/jobs/${positionId}"]`).first();
+    const byId = page.locator(
+      `a[href*="positionId=${positionId}"], a[href*="/positions/${positionId}"], a[href*="/jobs/${positionId}"], a[href*="/position-${positionId}"]`,
+    ).first();
     if (await byId.count()) {
       await byId.click({ timeout: 8000 }).catch(() => undefined);
       await page.waitForLoadState("domcontentloaded").catch(() => undefined);
@@ -155,27 +166,13 @@ export async function openChosen(page: Page, job: ListedJob): Promise<void> {
     }
   }
   const herePath = new URL(page.url()).pathname.replace(/\/$/, "");
-  const postingPath = /\/positions\/\d+|\/jobs\/\d+/i.test(targetPath);
+  const postingPath = Boolean(positionId) || /\/positions\/\d+|\/jobs\/\d+|\/position-\d+$/i.test(targetPath);
   if (herePath !== targetPath && postingPath && !/showing \d+ positions/i.test(await page.locator("body").innerText().catch(() => ""))) {
+    await page.goto(job.href, { waitUntil: "domcontentloaded" });
+  } else if (positionId && new URL(page.url()).searchParams.get("positionId") !== positionId && postingPath) {
     await page.goto(job.href, { waitUntil: "domcontentloaded" });
   }
   await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
-}
-
-/** Numeric id from careers URLs like Wix `/positions/10022791` or Greenhouse `/jobs/123`. */
-export function careersPositionId(url: string): string | null {
-  const match = url.match(/\/positions\/(\d+)/i) ?? url.match(/\/jobs\/(\d+)/i);
-  const id = match?.[1];
-  return id && /^\d+$/.test(id) ? id : null;
-}
-
-export function openingMatchesPositionId(job: ListedJob, positionId: string): boolean {
-  try {
-    const path = new URL(job.href).pathname;
-    return new RegExp(String.raw`/positions/${positionId}(?:/|$)|/jobs/${positionId}(?:/|$)`, "i").test(path);
-  } catch {
-    return false;
-  }
 }
 
 function candidateBrief(): string {
