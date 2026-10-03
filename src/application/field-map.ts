@@ -250,7 +250,7 @@ function mapKnown(
   if (/full name/i.test(label) && !/first|last/i.test(label)) {
     return fill(candidate.fullName);
   }
-  if (/e-?mail|אימייל|דוא"ל/i.test(label)) {
+  if (/e-?mail|אימייל|מייל|דוא"ל/i.test(label)) {
     return fill(candidate.email);
   }
   if (/phone|mobile|טלפון|נייד/i.test(label) && !/country phone code|phone_code|dial/i.test(blob)) {

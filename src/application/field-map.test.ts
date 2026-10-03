@@ -78,6 +78,21 @@ test("location-based questions use verified city and country", () => {
   }
 });
 
+test("Hebrew email label uses the candidate profile", () => {
+  const decision = decideField({
+    label: "מייל",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "fill");
+  if (decision.action === "fill") {
+    assert.equal(decision.value, "redacted@example.com");
+    assert.equal(decision.source, "candidate_profile");
+  }
+});
+
 test("Hunt PPC years, budget, platforms, and about-yourself are answered from the profile", () => {
   const years = decideField({
     label: "Years of hands-on PPC experience*",

@@ -22,6 +22,8 @@ const DEFAULT_SEED = [
   "Nes-Ziona",
   "חולון",
   "Holon",
+  "נתניה",
+  "Netanya",
 ];
 
 export function parseExcludedLocationsText(raw: string): string[] {
