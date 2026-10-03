@@ -3,6 +3,7 @@ import { candidate } from "../config/candidate.js";
 import { completeJson } from "../llm/client.js";
 import { log } from "../logging/logger.js";
 import { unsupportedAnswer } from "../cv/validate.js";
+import { personaDefaults } from "../cv/persona.js";
 import type { Persona } from "../models/types.js";
 import { learnedAnswerForQuestion, questionFactId, upsertLearnedFact } from "../profile/learned-facts.js";
 import { verifiedFactsForPersona } from "../profile/verified-facts.js";
@@ -15,6 +16,7 @@ const schema = z.object({
 });
 
 const SYSTEM = `You answer ONE job-application screening question using ONLY the candidate's verified facts and confirmedMedia.
+The approvedSkills list is also verified evidence for this persona. You may answer Yes when the question asks about a listed skill.
 If the facts do not support a truthful answer, return {"answer":"","factIds":[]}.
 When options are provided, answer MUST be exactly one of those option strings (copy verbatim).
 For years, monthly budget, and platforms use confirmedMedia and fact media-hands-on only. Never use a 2M budget.
@@ -27,8 +29,9 @@ function mayPersistLearnedAnswer(input: {
   options: string[];
   factIds: string[];
   persona: Persona;
+  approvedSkills: readonly string[];
 }): boolean {
-  const errors = unsupportedAnswer(input.answer, input.factIds, input.persona);
+  const errors = unsupportedAnswer(input.answer, input.factIds, input.persona, input.approvedSkills);
   if (errors.length > 0) {
     return false;
   }
@@ -61,6 +64,7 @@ export async function answerBlockedField(input: {
   }
 
   const allowed = verifiedFactsForPersona(input.persona);
+  const approvedSkills = personaDefaults[input.persona].skills;
   const payload = {
     question,
     fieldType: input.fieldType,
@@ -76,6 +80,7 @@ export async function answerBlockedField(input: {
       platforms: candidate.media.platforms,
       primaryPaidMediaFocus: candidate.media.primaryPaidMediaFocus,
     },
+    approvedSkills,
     facts: allowed.map((fact) => ({ id: fact.id, text: fact.text })),
   };
   let raw: unknown;
@@ -86,7 +91,11 @@ export async function answerBlockedField(input: {
     return null;
   }
   const parsed = schema.safeParse(raw);
-  if (!parsed.success || !parsed.data.answer.trim()) {
+  if (!parsed.success) {
+    log("LLM_BLOCKED_FIELD_INVALID", { question });
+    return null;
+  }
+  if (!parsed.data.answer.trim()) {
     log("LLM_BLOCKED_FIELD_EMPTY", { question });
     return null;
   }
@@ -109,14 +118,20 @@ export async function answerBlockedField(input: {
     log("LLM_BLOCKED_FIELD_REJECTED", { reason: "no_fact_ids", question });
     return null;
   }
-  const errors = unsupportedAnswer(answer, parsed.data.factIds, input.persona);
+  const errors = unsupportedAnswer(answer, parsed.data.factIds, input.persona, approvedSkills);
   if (errors.length > 0) {
     log("LLM_BLOCKED_FIELD_REJECTED", { reason: errors.join("; "), question });
     return null;
   }
   let learnedFactId: string | undefined;
   const persist = parsed.data.storeAsFact === true
-    && mayPersistLearnedAnswer({ answer, options: input.options, factIds: parsed.data.factIds, persona: input.persona });
+    && mayPersistLearnedAnswer({
+      answer,
+      options: input.options,
+      factIds: parsed.data.factIds,
+      persona: input.persona,
+      approvedSkills,
+    });
   if (persist && question.length > 0) {
     learnedFactId = questionFactId(question, input.persona);
     upsertLearnedFact({

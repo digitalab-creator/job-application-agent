@@ -51,6 +51,17 @@ test("Rehovot, Nes Ziona, and Holon are ineligible when admin-excluded", () => {
   assert.equal(isDiscoveryLocationEligible("Developer Holon", "Hybrid in Holon.", "", excluded), false);
 });
 
+test("Netanya is ineligible when admin-excluded", () => {
+  assert.equal(
+    isDiscoveryLocationEligible("AI Engineer Netanya", "On-site in Netanya.", "", ["Netanya"]),
+    false,
+  );
+  assert.equal(
+    isDiscoveryLocationEligible("מהנדס AI", "משרה בנתניה.", "", ["נתניה"]),
+    false,
+  );
+});
+
 test("US Sharon town is not treated as Israeli Sharon", () => {
   assert.equal(isDiscoveryLocationEligible("Sales Manager", "Office in Sharon, CT", "", NO_EXCLUDED), false);
 });

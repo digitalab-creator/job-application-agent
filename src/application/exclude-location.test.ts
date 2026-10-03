@@ -18,6 +18,8 @@ test("parseExcludedLocationsText splits commas and newlines", () => {
 test("textMatchesExcludedLocation finds Hebrew and Latin spellings", () => {
   assert.equal(textMatchesExcludedLocation("משרה ברעננה", ["רעננה"]), true);
   assert.equal(textMatchesExcludedLocation("Office in Ra'anana", ["Raanana"]), true);
+  assert.equal(textMatchesExcludedLocation("משרה בנתניה", ["נתניה"]), true);
+  assert.equal(textMatchesExcludedLocation("Office in Netanya", ["Netanya"]), true);
   assert.equal(textMatchesExcludedLocation("Tel Aviv", ["רעננה"]), false);
 });
 

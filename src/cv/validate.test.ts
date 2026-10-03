@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildVerbatim } from "./verbatim.js";
-import { validateCv } from "./validate.js";
+import { unsupportedAnswer, validateCv } from "./validate.js";
 
 test("verbatim technical CV passes the truth gates", () => {
   const doc = buildVerbatim("technical");
@@ -55,4 +55,16 @@ test("a bullet with no fact id is rejected", () => {
   role.bullets[0] = { factIds: [], text: "Built a platform." };
   const result = validateCv(doc, "technical");
   assert.equal(result.ok, false);
+});
+
+test("approved persona skills can support screening answers", () => {
+  const answer = "Yes, I have hands-on experience with Python.";
+  assert.deepEqual(
+    unsupportedAnswer(answer, ["summary-technical"], "technical"),
+    ["answer mentions Python, which is not in the cited facts."],
+  );
+  assert.deepEqual(
+    unsupportedAnswer(answer, ["summary-technical"], "technical", ["Python"]),
+    [],
+  );
 });

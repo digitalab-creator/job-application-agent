@@ -475,9 +475,9 @@ def job_attempts_from_events(events: list[dict]) -> list[JobLogAttempt]:
                 q = str(ev.get("question", "")).strip()
                 reason = str(ev.get("reason", "")).strip()
                 if q:
-                    reviews.append(q[:200])
+                    reviews.append(q)
                 elif reason:
-                    reviews.append(reason[:200])
+                    reviews.append(reason)
                 if outcome not in ("confirmed",):
                     outcome = "review_required"
                     detail = q or _first_line(reason)
@@ -533,6 +533,24 @@ def job_attempts_from_events(events: list[dict]) -> list[JobLogAttempt]:
             )
         )
     return attempts
+
+
+def print_unanswered_questions(log_jobs: list[JobLogAttempt]) -> None:
+    unanswered = [
+        row
+        for row in log_jobs
+        if row.outcome == "review_required" and row.review_questions
+    ]
+    if not unanswered:
+        return
+
+    print("## Unanswered screening questions")
+    print("These questions blocked automated submission and need an answer before retrying:")
+    for row in unanswered:
+        print(f"- **{row.company} — {row.role}**")
+        for question in dict.fromkeys(row.review_questions):
+            print(f"  - {question.replace(chr(10), ' ').strip()}")
+    print()
 
 
 def manual_queue_module():
@@ -677,6 +695,8 @@ def print_report(day: str | None = None) -> int:
             why = row.cause.replace("|", "/")[:160]
             print(f"| {i} | `{row.outcome}` | {company} | {role} | {why} |")
         print()
+
+    print_unanswered_questions(log_jobs)
 
     print("## Apply attempts (worker ledger, chronological)")
     if not attempts:

@@ -159,9 +159,14 @@ export function validateCv(doc: CvDocument, persona: Persona): ValidationResult 
   return { ok: errors.length === 0, errors, factIds: [...factIds] };
 }
 
-export function unsupportedAnswer(text: string, citedIds: string[], persona: Persona): string[] {
+export function unsupportedAnswer(
+  text: string,
+  citedIds: string[],
+  persona: Persona,
+  approvedSkills: readonly string[] = [],
+): string[] {
   const errors: string[] = [];
-  checkProse(text, citedIds, persona, "any", "answer", errors, new Set());
+  checkProse(text, citedIds, persona, "any", "answer", errors, new Set(), approvedSkills);
   return errors;
 }
 
@@ -173,6 +178,7 @@ function checkProse(
   label: string,
   errors: string[],
   factIds: Set<string>,
+  approvedSkills: readonly string[] = [],
 ): void {
   if (citedIds.length === 0) {
     errors.push(`${label} has no fact ids.`);
@@ -204,7 +210,11 @@ function checkProse(
     }
   }
   for (const term of GUARDED_TERMS) {
-    if (mentions(text, term) && !mentions(supportText, term)) {
+    if (
+      mentions(text, term)
+      && !mentions(supportText, term)
+      && !approvedSkills.some((skill) => mentions(skill, term))
+    ) {
       errors.push(`${label} mentions ${term}, which is not in the cited facts.`);
     }
   }
