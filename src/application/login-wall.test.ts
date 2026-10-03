@@ -27,6 +27,19 @@ test("iCIMS email gate with login URL is a login wall", () => {
   );
 });
 
+test("Hebrew login modal with email and password is a login wall", () => {
+  assert.equal(
+    looksLikeLoginWall({
+      url: "https://www.drushim.co.il/job/38354486/c0ea0b76/",
+      text: "התחבר / הרשם\nמייל\nסיסמה",
+      hasPassword: true,
+      hasEmail: true,
+      hasResumeFile: false,
+    }),
+    true,
+  );
+});
+
 test("normal apply form with email and resume is not a login wall", () => {
   assert.equal(
     looksLikeLoginWall({

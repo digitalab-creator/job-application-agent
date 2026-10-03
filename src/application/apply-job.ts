@@ -309,6 +309,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     if (fields.length === 0 || looksLikeSiteChromeFields(fields)) {
+      log("FORM_NOT_DETECTED", {
+        url: page.url(),
+        pageStatus,
+        fieldCount: fields.length,
+        fields: fields.map((field) => field.label).filter(Boolean).slice(0, 20),
+      });
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       return result(input, {
         status: "review",
@@ -316,7 +322,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         confirmationDetected: false,
         blocker: "form_not_detected",
         persona,
-        notes: lines(["result=review", "blocker=form_not_detected"]),
+        notes: lines([
+          "result=review",
+          "blocker=form_not_detected",
+          `page_status=${pageStatus}`,
+          `field_count=${fields.length}`,
+          `page_url=${page.url()}`,
+        ]),
         screenshots,
       });
     }

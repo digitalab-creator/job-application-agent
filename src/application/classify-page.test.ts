@@ -31,3 +31,13 @@ test("a removed posting is closed", () => {
   });
   assert.equal(status, "CLOSED");
 });
+
+test("an explicit 404 stays closed even when the old role is still mentioned", () => {
+  const status = classifyJobPage({
+    url: "https://example.com/jobs/404",
+    title: "Senior AI Engineer - Page not found",
+    text: "The Senior AI Engineer position could not be found. 404.",
+    role: "Senior AI Engineer",
+  });
+  assert.equal(status, "NOT_FOUND");
+});

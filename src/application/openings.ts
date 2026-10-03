@@ -36,7 +36,13 @@ export function normalizeOpenings(
       if (here.startsWith(`${path}/`)) {
         continue;
       }
-      if (!/\/jobs\/|\/job\/|\/j\/|\/positions\//i.test(path)) {
+      const hasPositionQuery = Boolean(jobIdentifierQuery(target));
+      const looksLikeJobPath =
+        /\/jobs?\/|\/j\/|\/positions\//i.test(path)
+        || /\/career\/.+/i.test(path)
+        || /\/careers\/position-\d+$/i.test(path)
+        || /\/jobslobby\/.+\/\d+$/i.test(path);
+      if (!looksLikeJobPath && !hasPositionQuery) {
         continue;
       }
     }
@@ -57,7 +63,8 @@ export function normalizeOpenings(
       continue;
     }
     // Same path + different gh_jid are different jobs, so the id is part of the identity.
-    const identity = ghJid ? `${path}?gh_jid=${ghJid}` : path;
+    const jobQuery = jobIdentifierQuery(target);
+    const identity = ghJid ? `${path}?gh_jid=${ghJid}` : `${path}${jobQuery}`;
     if (seen.has(identity)) {
       continue;
     }
@@ -65,7 +72,9 @@ export function normalizeOpenings(
     jobs.push({
       title: cleanTitle(item.title, rawSlug),
       // gh_jid links keep their original pathname (trailing slash) because WordPress sites redirect-loop without it.
-      href: ghJid ? `${target.origin}${target.pathname}?gh_jid=${ghJid}` : `${target.origin}${path}`,
+      href: ghJid
+        ? `${target.origin}${target.pathname}?gh_jid=${ghJid}`
+        : `${target.origin}${path}${jobQuery}`,
       snippet: item.snippet.replace(/\s+/g, " ").trim().slice(0, 240),
     });
     if (jobs.length >= 40) {
@@ -79,6 +88,45 @@ export function normalizeOpenings(
 export function greenhouseJobId(url: URL): string | null {
   const jid = url.searchParams.get("gh_jid");
   return jid && /^\d+$/.test(jid) ? jid : null;
+}
+
+export function careersPositionId(url: string): string | null {
+  const match = url.match(/\/positions\/(\d+)/i)
+    ?? url.match(/\/jobs\/(\d+)/i)
+    ?? url.match(/\/position-(\d+)/i);
+  const id = match?.[1];
+  if (id && /^\d+$/.test(id)) {
+    return id;
+  }
+  try {
+    const queryId = new URL(url).searchParams.get("positionId");
+    return queryId && /^\d+$/.test(queryId) ? queryId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function openingMatchesPositionId(job: ListedJob, positionId: string): boolean {
+  try {
+    const parsed = new URL(job.href);
+    if (parsed.searchParams.get("positionId") === positionId) {
+      return true;
+    }
+    return new RegExp(String.raw`/positions/${positionId}(?:/|$)|/jobs/${positionId}(?:/|$)|/position-${positionId}(?:/|$)`, "i")
+      .test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function jobIdentifierQuery(url: URL): string {
+  for (const key of ["positionId", "jobId", "jobNum", "num"]) {
+    const value = url.searchParams.get(key);
+    if (value && /^\d+$/.test(value)) {
+      return `?${key}=${value}`;
+    }
+  }
+  return "";
 }
 
 function cleanTitle(title: string, slug: string): string {

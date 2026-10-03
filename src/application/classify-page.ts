@@ -11,13 +11,13 @@ export function classifyJobPage(input: {
   role: string;
 }): JobPageStatus {
   const blob = `${input.title}\n${input.text}`;
-  if (/hello-theme|\/themes\/|\/plugins\//i.test(input.url) && !roleMentioned(input.role, blob)) {
+  if (/hello-theme|\/themes\/|\/plugins\//i.test(input.url)) {
     return "NOT_FOUND";
   }
-  if (/error=true/i.test(input.url) && !roleMentioned(input.role, blob)) {
+  if (/error=true/i.test(input.url)) {
     return "NOT_FOUND";
   }
-  if (NOT_FOUND.test(blob) && !roleMentioned(input.role, blob)) {
+  if (NOT_FOUND.test(blob)) {
     return "NOT_FOUND";
   }
   if (CLOSED.test(blob)) {

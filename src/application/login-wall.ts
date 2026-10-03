@@ -12,7 +12,7 @@ export function looksLikeLoginWall(input: {
 }): boolean {
   const title = input.title ?? "";
   const blob = `${title}\n${input.text}`;
-  const loginCopy = /sign in|log[\s-]?in|create an account|create your account|enter your information|candidate (login|portal)|welcome page/i.test(blob)
+  const loginCopy = /sign in|log[\s-]?in|create an account|create your account|enter your information|candidate (login|portal)|welcome page|התחבר|התחברות|הרשם|הרשמה|כניסה/i.test(blob)
     || /\blogin\b/i.test(title)
     || /\/jobs\/[^/]+\/login\b/i.test(input.url)
     || /[?&]login=/i.test(input.url);

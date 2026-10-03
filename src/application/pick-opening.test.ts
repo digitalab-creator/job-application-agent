@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeOpenings } from "./openings.js";
+import { careersPositionId, normalizeOpenings, openingMatchesPositionId } from "./openings.js";
 
 test("a Comeet company board keeps specific jobs and drops the board link", () => {
   const jobs = normalizeOpenings([
@@ -32,4 +32,39 @@ test("Wix sibling position links stay visible from a position URL that renders t
   ], "https://careers.wix.com/location/tel-aviv/positions/10022791");
   assert.equal(jobs.length, 1);
   assert.ok(jobs[0]?.href.includes("10022800"));
+});
+
+test("Dialog positionId links keep the query that identifies each opening", () => {
+  const jobs = normalizeOpenings([
+    { title: "Senior Backend Engineer", href: "https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95000", snippet: "Tel Aviv" },
+    { title: "AI Engineer", href: "https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95001", snippet: "Tel Aviv" },
+  ], "https://www.dialog.co.il/high-tech/searchresults/?page=10");
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[0]?.href, "https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95000");
+  assert.equal(jobs[1]?.href, "https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95001");
+});
+
+test("Comblack and GotFriends detail links are valid openings", () => {
+  const comblackJobs = normalizeOpenings([
+    { title: "Generative AI Engineer", href: "https://comblack.co.il/careers/position-24387/", snippet: "AI Agents" },
+  ], "https://comblack.co.il/area/gush-dan/");
+  assert.equal(comblackJobs.length, 1);
+
+  const gotFriendsJobs = normalizeOpenings([
+    { title: "LLM Engineer", href: "https://www.gotfriends.co.il/jobslobby/ai/llm-engineer/151469/", snippet: "LLM role" },
+  ], "https://www.gotfriends.co.il/jobslobby/ai/");
+  assert.equal(gotFriendsJobs.length, 1);
+});
+
+test("position identifiers work in paths and query strings", () => {
+  assert.equal(careersPositionId("https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95000"), "95000");
+  assert.equal(careersPositionId("https://comblack.co.il/careers/position-24387/"), "24387");
+  assert.equal(
+    openingMatchesPositionId({
+      title: "Senior Backend Engineer",
+      href: "https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95000",
+      snippet: "",
+    }, "95000"),
+    true,
+  );
 });
