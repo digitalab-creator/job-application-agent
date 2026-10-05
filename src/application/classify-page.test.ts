@@ -41,3 +41,13 @@ test("an explicit 404 stays closed even when the old role is still mentioned", (
   });
   assert.equal(status, "NOT_FOUND");
 });
+
+test("a removed role with a usable current-opening list is recoverable", () => {
+  const status = classifyJobPage({
+    url: "https://company.example/careers",
+    title: "Careers",
+    text: "The position has been closed. Search jobs and view current openings.",
+    role: "Senior AI Engineer",
+  });
+  assert.equal(status, "CAREERS_PAGE");
+});

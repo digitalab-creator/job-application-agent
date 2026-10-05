@@ -11,9 +11,9 @@ import { submitApplication } from "../browser/submit-application.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { saveScreenshot } from "../browser/screenshot.js";
 import { buildCvDocument, CvGenerationError, writeCvPdf } from "../cv/generate.js";
-import { choosePersonaFromText } from "../cv/persona-from-text.js";
 import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
+import { evaluateCvRelevance, validateCvQuality, validatePdfArtifact, type CvRelevanceResult } from "../cv/relevance.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
 import type { LedgerEntry } from "./ledger.js";
@@ -22,14 +22,27 @@ import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledg
 import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
+import { analyzeFullJobFit } from "./job-fit-llm.js";
 import {
   declineReasonFromFieldLabels,
   matchesOfficeCommuteSkip,
   OFFICE_COMMUTE_SKIP_REASON,
 } from "./skip-job-screening.js";
 import { detectConfirmation, detectEmailVerification, detectLoginWall, classifyCaptchaSignal } from "./verify-submission.js";
+import { newAttemptId } from "./attempt-ledger.js";
+import { parseHttpUrl } from "./automatable-url.js";
+import type { AttemptPipeline } from "../models/types.js";
+import { applicationStateFromEvidence } from "./application-state.js";
 
 export type ApplyInput = {
+  attemptId?: string;
+  startedAt?: string;
+  pipeline?: AttemptPipeline;
+  recoveredFrom?: {
+    originalRole: string;
+    originalUrl: string;
+    replacementRole: string;
+  };
   row?: number;
   submit: boolean;
   ignoreLedger?: boolean;
@@ -44,11 +57,41 @@ export type ApplyInput = {
 };
 
 export async function applyToJob(context: BrowserContext, input: ApplyInput): Promise<ApplicationResult> {
-  const started = new Date().toISOString();
+  const started = input.startedAt ?? new Date().toISOString();
+  const attemptId = input.attemptId ?? newAttemptId();
+  const pipeline = input.pipeline ?? {
+    urlValidated: false,
+    opened: false,
+    recovered: false,
+    fitPassed: false,
+    cvGenerated: false,
+    cvQualityPassed: false,
+    submitted: false,
+    confirmed: false,
+  };
+  input = { ...input, attemptId, startedAt: started, pipeline };
   const day = todayJerusalem();
   const jobSlug = slug(`${input.job.company}-${input.job.role}`);
   const shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
   const screenshots: string[] = [];
+  const parsedUrl = parseHttpUrl(input.job.url);
+  if (!parsedUrl) {
+    log("INVALID_JOB_URL", { url: input.job.url });
+    return result(input, {
+      status: "invalid_url",
+      terminalOutcome: "invalid_url",
+      submitted: false,
+      confirmationDetected: false,
+      blocker: "invalid_url",
+      notes: lines([
+        "result=invalid_url",
+        "The job URL is not a valid HTTP(S) URL. Nothing was opened.",
+      ]),
+      screenshots,
+    });
+  }
+  input.job.url = parsedUrl.toString();
+  pipeline.urlValidated = true;
   if (isExcludedApplyTarget(input.job.company, input.job.url)) {
     log("COMPANY_EXCLUDED", { company: input.job.company, url: input.job.url });
     return result(input, {
@@ -100,6 +143,14 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     try {
       await openJob(page, input.job.url);
       listingNote = await enterBestOpening(page, input.job.role, input.job.company, input.job.url);
+      if (listingNote?.recovered) {
+        input.recoveredFrom = {
+          originalRole: input.job.role,
+          originalUrl: input.job.url,
+          replacementRole: listingNote.title,
+        };
+        pipeline.recovered = true;
+      }
       await ensurePositionDetailPage(page, input.job.role, input.job.url);
       await tryGreenhouseCareersFallback(page, input.job.url);
     } catch (error) {
@@ -120,7 +171,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    log("JOB_OPENED", { url: page.url(), company: input.job.company, role: input.job.role });
+    log("JOB_OPENED", {
+      url: page.url(),
+      company: input.job.company,
+      role: input.job.role,
+      state: applicationStateFromEvidence({}),
+    });
+    pipeline.opened = true;
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
     if (listingNote?.blocked) {
       if (listingNote.outcome === "location_ineligible") {
@@ -138,7 +195,8 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         status: skipped ? "not_relevant" : "review",
         submitted: false,
         confirmationDetected: false,
-        blocker: "no_matching_opening",
+        terminalOutcome: skipped ? "no_suitable_replacement" : undefined,
+        blocker: skipped ? "no_suitable_replacement" : "no_matching_opening",
         canonicalJobUrl: page.url(),
         notes: lines([
           skipped ? "result=not_relevant" : "result=review",
@@ -149,9 +207,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    const bodyText = await page.locator("body").innerText();
-    const activeRole = listingNote?.title ?? input.job.role;
-    const pageStatus = classifyJobPage({
+    let bodyText = await page.locator("body").innerText();
+    let activeRole = listingNote?.title ?? input.job.role;
+    let pageStatus = classifyJobPage({
       url: page.url(),
       title: await page.title(),
       text: bodyText,
@@ -196,15 +254,17 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
     if (pageStatus === "CAREERS_PAGE") {
       await tryGreenhouseCareersFallback(page, input.job.url);
-      const afterFallback = classifyJobPage({
+      bodyText = await page.locator("body").innerText();
+      pageStatus = classifyJobPage({
         url: page.url(),
         title: await page.title(),
-        text: await page.locator("body").innerText(),
+        text: bodyText,
         role: activeRole,
       });
-      if (afterFallback === "CAREERS_PAGE" && !(await pageHasResumeField(page)) && !(await pageHasApplyEmailField(page))) {
+      if (pageStatus === "CAREERS_PAGE" && !(await pageHasResumeField(page)) && !(await pageHasApplyEmailField(page))) {
         return result(input, {
           status: "review",
+          terminalOutcome: "no_suitable_replacement",
           submitted: false,
           confirmationDetected: false,
           blocker: "careers_page",
@@ -230,7 +290,62 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
 
-    const persona = choosePersonaFromText(activeRole, input.job.category ?? "", bodyText);
+    let fit;
+    try {
+      fit = await analyzeFullJobFit({
+        role: activeRole,
+        company: input.job.company,
+        jobText: bodyText,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "full_job_fit_failed";
+      log("JOB_FIT_FAILED", { message, role: activeRole, url: page.url() });
+      return result(input, {
+        status: "review",
+        terminalOutcome: "request_failed",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "full_job_fit_failed",
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=review",
+          "blocker=full_job_fit_failed",
+          message,
+          "The complete job description could not be validated, so no application was sent.",
+        ]),
+        screenshots,
+      });
+    }
+    log("JOB_FIT_EVALUATED", {
+      role: activeRole,
+      score: fit.fitScore,
+      decision: fit.decision,
+      missingMustHaves: fit.missingMustHaves,
+      risks: fit.risks,
+    });
+    if (fit.decision !== "apply" || !fit.persona) {
+      const replacementRejected = Boolean(input.recoveredFrom);
+      return result(input, {
+        status: "not_relevant",
+        terminalOutcome: replacementRejected ? "no_suitable_replacement" : "not_relevant",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: replacementRejected ? "no_suitable_replacement" : "full_job_fit_failed",
+        canonicalJobUrl: page.url(),
+        notes: lines([
+          "result=not_relevant",
+          "reason=full_job_fit_failed",
+          `fit_score=${fit.fitScore}`,
+          `missing_must_haves=${fit.missingMustHaves.join(", ") || "none"}`,
+          `risks=${fit.risks.join(", ") || "none"}`,
+          fit.reason,
+          "No application was sent because the complete job description did not pass the candidate-fit gate.",
+        ]),
+        screenshots,
+      });
+    }
+    pipeline.fitPassed = true;
+    const persona = fit.persona;
     const salaryMonthly = chooseSalary(activeRole, persona);
 
     if (matchesOfficeCommuteSkip(bodyText)) {
@@ -288,6 +403,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     await revealApplicationForm(page);
     const scope = await applyFormScope(page);
     const fields = await readFields(scope);
+    log("APPLICATION_STATE", { state: applicationStateFromEvidence({ formDetected: fields.length > 0 }), fields: fields.length });
     log("FORM_DETECTED", { fields: fields.map((field) => field.label) });
     const fieldLabels = fields.map((field) => `${field.label} ${field.groupLabel ?? ""}`.trim());
     const screeningSkip = declineReasonFromFieldLabels(fieldLabels);
@@ -335,7 +451,14 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
 
     let cv;
     try {
-      cv = await prepareCv({ ...input, job: { ...input.job, role: activeRole } }, persona, bodyText, day, jobSlug);
+      cv = await prepareCv(
+        { ...input, job: { ...input.job, role: activeRole } },
+        persona,
+        bodyText,
+        fit.requirements,
+        day,
+        jobSlug,
+      );
     } catch (error) {
       const reason = error instanceof CvGenerationError ? error.message : "cv_generation_failed";
       log("CV_REJECTED", { reason, fatal: true });
@@ -451,8 +574,69 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     const applyPost = watchApplyPost(page);
-    const submitAttempt = await submitApplication(page, scope);
+    let activeScope = scope;
+    let submitAttempt = await submitApplication(page, activeScope);
     log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
+    log("APPLICATION_STATE", {
+      state: applicationStateFromEvidence({ submitted: submitAttempt.clicked && submitAttempt.advanced !== true, nextStep: submitAttempt.advanced === true }),
+    });
+    for (let step = 1; submitAttempt.clicked && submitAttempt.advanced === true && step <= 4; step += 1) {
+      await page.waitForTimeout(800);
+      activeScope = await applyFormScope(page);
+      const stepFields = await readFields(activeScope);
+      const stepFilled = await fillFields({
+        scope: activeScope,
+        fields: stepFields,
+        persona,
+        ctx: {
+          persona,
+          salaryMonthly,
+          portfolioUrl: cv.portfolioUrl,
+          euRole: /europe|eu\b|poland/i.test(bodyText),
+          company: input.job.company,
+          role: activeRole,
+          jobUrl: page.url(),
+          jobText: jobBrief(bodyText),
+        },
+        jobText: jobBrief(bodyText),
+      });
+      if (stepFilled.skipJob || stepFilled.blockers.length > 0) {
+        return result(input, {
+          status: stepFilled.skipJob ? "not_relevant" : "review",
+          submitted: false,
+          confirmationDetected: false,
+          blocker: stepFilled.skipJob ? undefined : "missing_fact",
+          persona,
+          ...cv.publicFields,
+          answers: [...filled.answers, ...stepFilled.answers],
+          canonicalJobUrl: page.url(),
+          notes: lines([
+            stepFilled.skipJob ? "result=not_relevant" : "result=review",
+            stepFilled.skipJob ? "reason=office_commute_policy" : "blocker=missing_fact",
+            ...(stepFilled.skipJob ? [stepFilled.skipJob.reason] : stepFilled.blockers),
+          ]),
+          screenshots,
+        });
+      }
+      await uploadResume(page, cv.cvPath);
+      submitAttempt = await submitApplication(page, activeScope);
+      log("APPLICATION_STEP_ADVANCED", { step, clicked: submitAttempt.clicked, advanced: submitAttempt.advanced === true });
+    }
+    if (submitAttempt.advanced === true) {
+      screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "form_validation",
+        persona,
+        ...cv.publicFields,
+        answers: filled.answers,
+        canonicalJobUrl: page.url(),
+        notes: lines(["result=review", "blocker=form_validation", "multi_step_limit=4", "The application had more steps than the safe generic traversal limit."]),
+        screenshots,
+      });
+    }
     if (!submitAttempt.clicked) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       return result(input, {
@@ -473,6 +657,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
+    pipeline.submitted = true;
     await page.waitForLoadState("domcontentloaded").catch(() => undefined);
     await page.waitForTimeout(8000);
     for (const frame of page.frames()) {
@@ -606,16 +791,26 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     log("SUBMISSION_CONFIRMED", { company: input.job.company, role: input.job.role });
+    pipeline.confirmed = true;
     const appliedAt = new Date().toISOString();
-    rememberSubmission({
-      url: input.job.url,
-      company: input.job.company,
-      role: input.job.role,
-      confirmationDetected: true,
-      at: appliedAt,
-      cvPath: cv.cvPath,
-    });
-    writeAudit(day, jobSlug, { started, input, persona, cv, answers: filled.answers, appliedAt });
+    try {
+      rememberSubmission({
+        url: input.job.url,
+        company: input.job.company,
+        role: activeRole,
+        confirmationDetected: true,
+        at: appliedAt,
+        cvPath: cv.cvPath,
+        canonicalJobUrl: page.url(),
+      });
+    } catch (error) {
+      log("CONFIRMED_LEDGER_WRITE_FAILED", { message: error instanceof Error ? error.message : "ledger_write_failed" });
+    }
+    try {
+      writeAudit(day, jobSlug, { started, input, persona, cv, answers: filled.answers, appliedAt });
+    } catch (error) {
+      log("CONFIRMED_AUDIT_WRITE_FAILED", { message: error instanceof Error ? error.message : "audit_write_failed" });
+    }
     return result(input, {
       status: "applied",
       submitted: true,
@@ -647,42 +842,87 @@ async function prepareCv(
   input: ApplyInput,
   persona: Persona,
   jobText: string,
+  requirements: import("./job-fit.js").JobRequirements,
   day: string,
   jobSlug: string,
 ): Promise<{
   cvPath: string;
   cvSource: CvSource;
   wording: "llm";
-  publicFields: Pick<ApplicationResult, "cvUsed" | "cvSource" | "cvWording" | "cvPath" | "factIds" | "ats">;
+  publicFields: Pick<ApplicationResult, "cvUsed" | "cvSource" | "cvWording" | "cvPath" | "cvRelevanceScore" | "factIds" | "ats">;
   portfolioUrl: string;
+  relevance: CvRelevanceResult;
 }> {
   const outputPath = `${env.generatedCvDir}/${day}/${jobSlug}-redacted-candidate.pdf`;
-  const built = await buildCvDocument({
-    persona,
-    role: input.job.role,
-    company: input.job.company,
-    jobText,
-  });
-  const validation = validateCv(built.doc, persona);
-  if (!validation.ok) {
-    throw new CvGenerationError(validation.errors.join("; "));
-  }
-  await withHeadlessBrowser((browser) => writeCvPdf(browser, built.doc, persona, outputPath));
-  const cvUsed = built.doc.headlineId === "marketing-full" ? "marketing" : "technical";
-  return {
-    cvPath: outputPath,
-    cvSource: "generated",
-    wording: "llm",
-    portfolioUrl: portfolioUrlForDoc(built.doc, persona),
-    publicFields: {
-      cvUsed,
-      cvSource: "generated",
-      cvWording: "llm",
+  let feedback = "";
+  let lastFailure = "CV did not pass quality gates.";
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const built = await buildCvDocument({
+      persona,
+      role: input.job.role,
+      company: input.job.company,
+      jobText,
+      feedback,
+    });
+    const validation = validateCv(built.doc, persona);
+    if (!validation.ok) {
+      lastFailure = validation.errors.join("; ");
+      feedback = `Truth gate failed: ${lastFailure}. Fix only those issues.`;
+      continue;
+    }
+    if (input.pipeline) {
+      input.pipeline.cvGenerated = true;
+    }
+    const structural = validateCvQuality(built.doc, persona);
+    const relevance = evaluateCvRelevance(built.doc, requirements, persona);
+    log("CV_QUALITY_EVALUATED", {
+      relevanceScore: relevance.relevanceScore,
+      mustHaveCoverage: relevance.mustHaveCoverage,
+      preferredCoverage: relevance.preferredCoverage,
+      responsibilityCoverage: relevance.responsibilityCoverage,
+      decision: relevance.decision,
+      structural: structural.issues,
+      attempt,
+    });
+    if (!structural.ok || relevance.decision !== "pass") {
+      lastFailure = [...structural.issues, ...relevance.importantMissingTerms].join("; ");
+      feedback = [
+        "Candidate fit is valid, but the CV is not yet strong enough for this job.",
+        `Important missing terms: ${relevance.importantMissingTerms.join(", ") || "none"}.`,
+        `Weak sections: ${[...structural.issues, ...relevance.weakSections].join(", ") || "none"}.`,
+        "Reprioritize only verified facts and approved skills; do not fabricate missing experience.",
+      ].join(" ");
+      continue;
+    }
+    if (input.pipeline) {
+      input.pipeline.cvQualityPassed = true;
+    }
+    await withHeadlessBrowser((browser) => writeCvPdf(browser, built.doc, persona, outputPath));
+    const pdfQuality = validatePdfArtifact(outputPath);
+    if (!pdfQuality.ok) {
+      lastFailure = pdfQuality.issues.join("; ");
+      feedback = `Rendered PDF quality failed: ${lastFailure}. Keep the CV concise and readable.`;
+      continue;
+    }
+    const cvUsed = built.doc.headlineId === "marketing-full" ? "marketing" : "technical";
+    return {
       cvPath: outputPath,
-      factIds: validation.factIds,
-      ats: atsLabel(input.job.url),
-    },
-  };
+      cvSource: "generated",
+      wording: "llm",
+      relevance,
+      portfolioUrl: portfolioUrlForDoc(built.doc, persona),
+      publicFields: {
+        cvUsed,
+        cvSource: "generated",
+        cvWording: "llm",
+        cvPath: outputPath,
+        cvRelevanceScore: relevance.relevanceScore,
+        factIds: validation.factIds,
+        ats: atsLabel(input.job.url),
+      },
+    };
+  }
+  throw new CvGenerationError(`CV failed relevance or rendered-quality gates: ${lastFailure}`);
 }
 
 async function humanPause(page: Page, minMs: number, maxMs: number): Promise<void> {
@@ -699,13 +939,20 @@ async function openJob(page: Page, url: string): Promise<void> {
         try {
           await page.goto(target, { waitUntil });
           await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
-          if (/greenhouse\.io/i.test(target) && !/greenhouse\.io/i.test(page.url())) {
-            log("NAVIGATION_LEFT_GREENHOUSE", { target, landed: page.url() });
-            continue;
-          }
           if (/error=true/i.test(page.url()) || /\/embed\/job_board\b/i.test(page.url())) {
             log("NAVIGATION_GREENHOUSE_ERROR", { target, landed: page.url() });
             continue;
+          }
+          if (/greenhouse\.io/i.test(target) && !/greenhouse\.io/i.test(page.url())) {
+            if (!/^https?:\/\//i.test(page.url())) {
+              log("NAVIGATION_LEFT_GREENHOUSE", { target, landed: page.url() });
+              continue;
+            }
+            // Greenhouse sends removed postings to the company careers page. That is a job LIST, not a dead end:
+            // keep it as the landing page so enterBestOpening() can pick a matching opening.
+            log("NAVIGATION_GREENHOUSE_REDIRECTED_TO_CAREERS", { target, landed: page.url() });
+            await dismissOverlays(page);
+            return;
           }
           await dismissOverlays(page);
           return;
@@ -838,11 +1085,13 @@ async function revealApplyForm(page: Page): Promise<void> {
   const apply = page.getByRole("button", { name: applyLabel }).or(page.getByRole("link", { name: applyLabel })).first();
   if (await apply.count()) {
     const beforeUrl = page.url();
+    const beforePages = new Set(page.context().pages());
     const href = await apply.getAttribute("href").catch(() => null);
     await Promise.all([
       page.waitForURL((url) => url.href !== beforeUrl, { timeout: 15_000 }).catch(() => undefined),
       apply.click({ timeout: 5000 }).catch(() => undefined),
     ]);
+    await adoptPopup(page, beforePages);
     // Career sites sometimes swallow the click (sticky cookie layer). Follow the Apply href.
     if (href && /^https?:\/\//i.test(href) && page.url() === beforeUrl) {
       await page.goto(href, { waitUntil: "domcontentloaded" }).catch(() => undefined);
@@ -852,6 +1101,7 @@ async function revealApplyForm(page: Page): Promise<void> {
     await waitForGreenhouseFrame(page);
     return;
   }
+  const beforePages = new Set(page.context().pages());
   const clicked = await page.evaluate(() => {
     const rule = /apply|הגש|מועמדות/i;
     const node = Array.from(document.querySelectorAll("a, button")).find((element) => rule.test((element.textContent || "").replace(/\s+/g, " ")));
@@ -862,10 +1112,26 @@ async function revealApplyForm(page: Page): Promise<void> {
     return true;
   }).catch(() => false);
   if (clicked) {
+    await adoptPopup(page, beforePages);
     await waitForApplyEntry(page, 15_000);
   }
   await waitForGreenhouseFrame(page);
   await waitForResumeUploadTarget(page, 20_000).catch(() => undefined);
+}
+
+async function adoptPopup(page: Page, beforePages: Set<Page>): Promise<void> {
+  const popup = page.context().pages().find((candidate) => !beforePages.has(candidate) && candidate !== page);
+  if (!popup) {
+    return;
+  }
+  await popup.waitForLoadState("domcontentloaded").catch(() => undefined);
+  const popupUrl = popup.url();
+  if (/^https?:\/\//i.test(popupUrl)) {
+    await page.goto(popupUrl, { waitUntil: "domcontentloaded" }).catch((error) => {
+      log("APPLICATION_POPUP_ADOPT_FAILED", { popupUrl, message: error instanceof Error ? error.message : "navigation_failed" });
+    });
+  }
+  await popup.close().catch(() => undefined);
 }
 
 async function waitForGreenhouseFrame(page: Page): Promise<void> {
@@ -1027,7 +1293,13 @@ function rememberManualApply(
 }
 
 function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): ApplicationResult {
-  return { jobUrl: input.job.url, ...extra };
+  return {
+    jobUrl: input.job.url,
+    attemptId: input.attemptId,
+    pipeline: input.pipeline,
+    recoveredFrom: input.recoveredFrom,
+    ...extra,
+  };
 }
 
 function lines(parts: string[]): string {
@@ -1089,7 +1361,7 @@ async function enterBestOpening(
   role: string,
   company: string,
   targetUrl: string,
-): Promise<{ title: string; line: string; blocked?: boolean; outcome?: "not_relevant" | "review" | "location_ineligible"; canonicalUrl?: string } | null> {
+): Promise<{ title: string; line: string; blocked?: boolean; recovered?: boolean; outcome?: "not_relevant" | "review" | "location_ineligible"; canonicalUrl?: string } | null> {
   if (await pageHasResumeField(page)) {
     return null;
   }
@@ -1103,6 +1375,7 @@ async function enterBestOpening(
       if (await pageHasResumeField(page) || await pageHasApplyEmailField(page)) {
         return {
           title: role,
+          recovered: true,
           line: `listing_match=${role}\nlisting_reason=greenhouse_direct=${positionIdFromTarget}`,
         };
       }
@@ -1130,6 +1403,7 @@ async function enterBestOpening(
       await openChosen(page, byIdJob);
       return {
         title: byIdJob.title,
+        recovered: true,
         line: `listing_match=${byIdJob.title}\nlisting_reason=url_position_id=${positionId}`,
       };
     }
@@ -1166,6 +1440,7 @@ async function enterBestOpening(
     await openChosen(page, only);
     return {
       title: only.title,
+      recovered: true,
       line: `listing_match=${only.title}\nlisting_reason=only_opening_on_list`,
     };
   }
@@ -1207,6 +1482,7 @@ async function enterBestOpening(
   await openChosen(page, chosen.job);
   return {
     title: chosen.job.title,
+    recovered: true,
     line: `listing_match=${chosen.job.title}\nlisting_reason=${chosen.reason}`,
   };
 }

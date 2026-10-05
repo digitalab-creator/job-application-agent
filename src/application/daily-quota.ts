@@ -6,7 +6,13 @@ export type QuotaSnapshot = {
   limit: number;
   counted: number;
   remaining: number;
+  maxAttempts: number;
+  attempted: number;
+  attemptsRemaining: number;
+  discoverySkipThreshold: number;
 };
+
+export const DISCOVERY_SKIP_NEW_MULTIPLIER = 3;
 
 type QuotaRow = {
   day: string;
@@ -28,19 +34,34 @@ export function dailyApplyLimit(): number {
   return Math.floor(parsed);
 }
 
+export function dailyApplyMaxAttempts(): number {
+  const parsed = Number(process.env.DAILY_APPLY_MAX_ATTEMPTS ?? "40");
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 40;
+  }
+  return Math.floor(parsed);
+}
+
 export function quotaSnapshot(): QuotaSnapshot {
   const limit = dailyApplyLimit();
   const counted = countedToday();
+  const maxAttempts = dailyApplyMaxAttempts();
+  const attempted = attemptedToday();
   return {
     day: jerusalemDay(),
     limit,
     counted,
     remaining: Math.max(0, limit - counted),
+    maxAttempts,
+    attempted,
+    attemptsRemaining: Math.max(0, maxAttempts - attempted),
+    discoverySkipThreshold: DISCOVERY_SKIP_NEW_MULTIPLIER * limit,
   };
 }
 
 export function quotaIsOpen(): boolean {
-  return quotaSnapshot().remaining > 0;
+  const snapshot = quotaSnapshot();
+  return snapshot.remaining > 0 && snapshot.attemptsRemaining > 0;
 }
 
 export function rememberQuotaUse(input: { url: string; status: string }): void {
@@ -95,6 +116,28 @@ function confirmedUrlsToday(day: string): string[] {
     }
   }
   return urls;
+}
+
+function attemptedToday(): number {
+  const filePath = process.env.APPLY_ATTEMPTS_PATH?.trim() || "/app/data/ledger/apply-attempts.jsonl";
+  if (!fs.existsSync(filePath)) {
+    return 0;
+  }
+  const seen = new Set<string>();
+  for (const line of fs.readFileSync(filePath, "utf8").split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+    try {
+      const row = JSON.parse(line) as { attemptId?: string; finishedAt?: string };
+      if (row.attemptId && row.finishedAt && jerusalemDay(new Date(row.finishedAt)) === jerusalemDay()) {
+        seen.add(row.attemptId);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return seen.size;
 }
 
 function readQuotaRows(): QuotaRow[] {

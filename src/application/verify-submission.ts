@@ -69,6 +69,7 @@ export async function detectLoginWall(page: Page): Promise<boolean> {
 
 export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {
   const comeetJob = /comeet\.com/i.test(page.url());
+  const initialUrl = page.url();
   const attempts = comeetJob ? 20 : 12;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (comeetJob) {
@@ -83,7 +84,7 @@ export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phr
     }
     const fraction = attempt / 11;
     await page.evaluate((y) => window.scrollTo(0, document.body.scrollHeight * y), fraction).catch(() => undefined);
-    const phrase = await confirmationPhrase(page);
+    const phrase = await confirmationPhrase(page, initialUrl);
     if (phrase) {
       return { ok: true, phrase };
     }
@@ -92,7 +93,7 @@ export async function detectConfirmation(page: Page): Promise<{ ok: boolean; phr
   return { ok: false, phrase: "" };
 }
 
-async function confirmationPhrase(page: Page): Promise<string | null> {
+async function confirmationPhrase(page: Page, initialUrl: string): Promise<string | null> {
   const chunks: string[] = [page.url()];
   chunks.push(await page.locator("body").innerText().catch(() => ""));
   for (const frame of page.frames()) {
@@ -100,7 +101,20 @@ async function confirmationPhrase(page: Page): Promise<string | null> {
   }
   const heading = await page.locator("h1, h2, [role='alert'], [class*='thank'], [class*='success'], .elementor-message-success").allInnerTexts().catch(() => []);
   chunks.push(...heading);
-  return thankYouMatch(chunks.join("\n"), page.url());
+  const text = chunks.join("\n");
+  const phrase = thankYouMatch(text, page.url());
+  if (phrase) {
+    return phrase;
+  }
+  const formControls = await page.locator("input[type='file'], button, input[type='submit']").count().catch(() => 0);
+  if (
+    page.url() !== initialUrl
+    && formControls === 0
+    && /application|submitted|received|success|thank/i.test(text)
+  ) {
+    return "generic_submission_state";
+  }
+  return null;
 }
 
 async function collectFrameAndIframeUrls(page: Page): Promise<string[]> {

@@ -7,21 +7,25 @@ export type SkillListedJob = {
 const SKILL = /engineer|developer|growth|marketing|\bai\b|backend|fullstack|full-stack|product|data|automation|ppc|applied/gi;
 const REJECT = /intern|student|junior\b|receptionist|legal counsel/i;
 
-/** When the exact title is gone, keep the opening that overlaps the candidate's work. */
-export function bestSkillOpening(openings: SkillListedJob[]): SkillListedJob | null {
-  let best: { job: SkillListedJob; score: number } | null = null;
+/**
+ * Cheap shortlist only. The result must be opened and passed through the full
+ * job-fit gate before it can influence an application.
+ */
+export function shortlistSkillOpenings(openings: SkillListedJob[], limit = 5): SkillListedJob[] {
+  const ranked: Array<{ job: SkillListedJob; score: number }> = [];
   for (const job of openings) {
     const text = `${job.title} ${job.snippet}`;
-    if (REJECT.test(text)) {
+    if (REJECT.test(text.toLowerCase())) {
       continue;
     }
     const score = text.match(SKILL)?.length ?? 0;
     if (score === 0) {
       continue;
     }
-    if (!best || score > best.score) {
-      best = { job, score };
-    }
+    ranked.push({ job, score });
   }
-  return best?.job ?? null;
+  return ranked
+    .sort((left, right) => right.score - left.score)
+    .slice(0, limit)
+    .map((item) => item.job);
 }

@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / ".env"
 LEDGER = ROOT / "data/ledger/applications.jsonl"
+ATTEMPTS_LEDGER = ROOT / "data/ledger/apply-attempts.jsonl"
 QUOTA_LEDGER = ROOT / "data/ledger/daily-quota.jsonl"
 HEALTH_URL = "http://127.0.0.1:3099/health"
 WORKER_BASE = "http://127.0.0.1:3099"
@@ -41,6 +42,11 @@ BLOCKER_WHY: dict[str, str] = {
     "already_submitted": "Duplicate URL — already in ledger.",
     "careers_page": "Landed on generic careers hub, not a single job.",
     "no_matching_opening": "Multiple listings; worker could not pick a match.",
+    "no_suitable_replacement": "Original opening was missing and no independently good replacement passed the fit gate.",
+    "full_job_fit_failed": "Complete job description failed the candidate-fit gate.",
+    "invalid_url": "URL was malformed or not HTTP(S); browser was not called.",
+    "quota_reached": "Confirmed quota or safety attempt cap was reached.",
+    "budget_reached": "Monthly LLM budget was exhausted before this opening.",
     "dry_run": "Intentional preview (`submit: false`) — not a failed apply.",
 }
 
@@ -247,28 +253,32 @@ def row_on_day(at: str, day: str) -> bool:
 
 def confirmed_today(day: str) -> list[dict]:
     out: list[dict] = []
-    for row in read_jsonl(LEDGER):
-        if not row.get("confirmationDetected"):
+    for row in attempts_today(day):
+        if row.get("outcome") != "applied" and not row.get("confirmationDetected"):
             continue
-        if row_on_day(str(row.get("at", "")), day):
-            out.append(row)
+        out.append(row)
     return out
 
 
 def attempts_today(day: str) -> list[dict]:
-    out: list[dict] = []
-    for row in read_jsonl(LEDGER):
-        if not row_on_day(str(row.get("at", "")), day):
-            continue
-        out.append(row)
+    source = read_jsonl(ATTEMPTS_LEDGER)
+    if source:
+        out = [
+            row for row in source
+            if row_on_day(str(row.get("finishedAt", "")), day)
+        ]
+        out.sort(key=lambda r: str(r.get("finishedAt", "")))
+        return out
+    # Keep historical reports useful before the attempt ledger was deployed.
+    out = [row for row in read_jsonl(LEDGER) if row_on_day(str(row.get("at", "")), day)]
     out.sort(key=lambda r: str(r.get("at", "")))
     return out
 
 
 def attempt_outcome_label(row: dict) -> str:
-    if row.get("confirmationDetected"):
+    if row.get("outcome") == "applied" or row.get("confirmationDetected"):
         return "confirmed"
-    blocker = str(row.get("blocker") or "").strip()
+    blocker = str(row.get("outcome") or row.get("blocker") or "").strip()
     if blocker:
         return blocker
     return "no_confirmation"
@@ -571,9 +581,7 @@ def print_manual_queue_block(day: str) -> None:
     if not items:
         return
     mod.print_markdown(items)
-    out = mod.OUT_DIR / f"{day}.html"
-    mod.write_html(items, out)
-    print(f"Manual queue tabs page: `{out}` (open in browser — **Open application** on each card)\n")
+    print(f"Manual queue source already exists for `{day}`; report remains read-only.\n")
 
 
 def print_report(day: str | None = None) -> int:
@@ -603,21 +611,54 @@ def print_report(day: str | None = None) -> int:
     ledger_attempts = len(attempts)
     request_failed = event_names.get("REQUEST_FAILED", 0)
     review_events = event_names.get("REVIEW_REQUIRED", 0)
+    opened_attempts = sum(1 for row in attempts if row.get("pipeline", {}).get("opened"))
+    fit_passed = sum(1 for row in attempts if row.get("pipeline", {}).get("fitPassed"))
+    fit_skipped = sum(
+        1 for row in attempts
+        if row.get("outcome") in {"not_relevant", "location_ineligible", "no_suitable_replacement"}
+    )
+    cv_generated = sum(1 for row in attempts if row.get("pipeline", {}).get("cvGenerated"))
+    cv_quality_passed = sum(1 for row in attempts if row.get("pipeline", {}).get("cvQualityPassed"))
+    submitted = sum(1 for row in attempts if row.get("pipeline", {}).get("submitted"))
+    manual = sum(1 for row in attempts if row.get("outcome") == "manual_required")
+    technical_failures = sum(
+        1 for row in attempts
+        if row.get("outcome") in {
+            "navigation_failed",
+            "form_not_detected",
+            "form_validation",
+            "cv_generation_failed",
+            "confirmation_not_detected",
+            "request_failed",
+        }
+    )
 
     apply_runs = [r for r in n8n_runs_today(day) if r.workflow_id == APPLY_WF_ID]
     discover_runs = [r for r in n8n_runs_today(day) if r.workflow_id == DISCOVER_WF_ID]
 
     queue = sheet_queue_snapshot()
-    discover_depth_threshold = limit * DISCOVER_SKIP_NEW_MULTIPLIER
+    discover_depth_threshold = int(
+        quota.get("discoverySkipThreshold")
+        if quota and quota.get("discoverySkipThreshold") is not None
+        else limit * 3
+    )
     sheet_new = queue["status_new"] if queue else None
     discover_should_skip = (
         isinstance(sheet_new, int) and sheet_new > discover_depth_threshold
     )
 
     met_target = len(confirmed) >= limit
+    eligible_attempts = len(attempts)
+
+    def rate(numerator: int, denominator: int) -> str:
+        return f"{(numerator / denominator * 100):.1f}%" if denominator else "n/a"
 
     print(f"# Daily apply report — {day}")
     print(f"_Generated {now}_\n")
+    print(
+        f"**{len(confirmed)}/{limit} confirmed from {eligible_attempts} eligible attempts. "
+        f"{max(0, limit - len(confirmed))} remaining.**\n"
+    )
 
     print("## Summary")
     print(f"| Metric | Value |")
@@ -625,12 +666,28 @@ def print_report(day: str | None = None) -> int:
     print(f"| Daily limit | {limit} |")
     print(f"| **Confirmed submissions** | **{len(confirmed)}** |")
     print(f"| Quota counted (worker) | {counted} / {limit} ({remaining} remaining) |")
-    print(f"| Worker ledger attempts | {ledger_attempts} |")
+    print(f"| Worker attempts with terminal outcomes | {ledger_attempts} |")
     print(f"| Jobs opened (docker logs) | {job_opened} |")
     print(f"| CV PDFs in today's folder | {cv_count} ({cv_linked} tied to ledger, {cv_orphan} extra previews/retries) |")
     print(f"| n8n Pick Jobs (latest run) | {queue['pick_jobs_output'] if queue else '—'} |")
     print(f"| Worker container | {'up' if container_running() else 'down/missing'} |")
     print(f"| Met {limit}-apply target? | **{'yes' if met_target else 'no'}** |")
+    print()
+
+    print("## Quality funnel")
+    print(f"- Raw New queue: **{queue['status_new'] if queue else '—'}**")
+    print(f"- Jobs prefiltered: **{queue['pick_jobs_output'] if queue else '—'}**")
+    print(f"- Jobs opened: **{opened_attempts}**")
+    print(f"- Full-JD fit passed: **{fit_passed}**; skipped: **{fit_skipped}**")
+    print(f"- CV generated: **{cv_generated}**; CV quality passed: **{cv_quality_passed}**")
+    print(f"- Submitted: **{submitted}**; confirmed: **{len(confirmed)}**")
+    print(f"- Manual: **{manual}**; technical failures: **{technical_failures}**")
+    print(
+        f"- Rates: full JD → fit **{rate(fit_passed, opened_attempts)}**; "
+        f"fit → CV pass **{rate(cv_quality_passed, fit_passed)}**; "
+        f"CV pass → submit **{rate(submitted, cv_quality_passed)}**; "
+        f"submit → confirm **{rate(len(confirmed), submitted)}**"
+    )
     print()
 
     if queue:

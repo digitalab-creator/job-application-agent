@@ -1,5 +1,4 @@
 import type { Frame, Page } from "playwright";
-import { greenhouseJobAppFrame } from "../application/greenhouse.js";
 import { answerBlockedField } from "../application/answer-blocked-field.js";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
@@ -558,27 +557,53 @@ export async function uploadResume(page: Page, cvPath: string): Promise<boolean>
 }
 
 export async function richestFormScope(page: Page): Promise<FormScope> {
-  let best: FormScope = page;
-  let bestCount = await page.locator("input, textarea, select").count();
-  for (const frame of page.frames()) {
-    const count = await frame.locator("input, textarea, select").count().catch(() => 0);
-    if (count > bestCount) {
-      best = frame;
-      bestCount = count;
-    }
-  }
-  return best;
+  const scopes: FormScope[] = [page, ...page.frames()];
+  const ranked = await Promise.all(scopes.map(async (scope, index) => ({
+    scope,
+    index,
+    score: await applicationFormScore(scope),
+  })));
+  ranked.sort((left, right) => right.score - left.score || left.index - right.index);
+  return ranked[0]?.scope ?? page;
 }
 
-/** Prefer Greenhouse embed over parent-page cookie banners and newsletter fields. */
+/** Rank by application semantics, not merely by the number of inputs. */
 export async function applyFormScope(page: Page): Promise<FormScope> {
-  const greenhouse = greenhouseJobAppFrame(page);
-  if (greenhouse) {
-    const resumeInputs = await greenhouse.locator('input[type="file"]').count().catch(() => 0);
-    const emailInputs = await greenhouse.locator('input[type="email"]').count().catch(() => 0);
-    if (resumeInputs > 0 || emailInputs > 0) {
-      return greenhouse;
-    }
-  }
   return richestFormScope(page);
+}
+
+async function applicationFormScore(scope: FormScope): Promise<number> {
+  return scope.evaluate(() => {
+    const visible = (element: Element): boolean => {
+      const style = window.getComputedStyle(element);
+      return style.display !== "none"
+        && style.visibility !== "hidden"
+        && style.opacity !== "0"
+        && element.getAttribute("aria-hidden") !== "true";
+    };
+    const controls = Array.from(document.querySelectorAll("input, textarea, select")).filter(visible);
+    const text = controls.map((control) => {
+      const element = control as HTMLInputElement;
+      return [
+        element.type,
+        element.name,
+        element.id,
+        element.getAttribute("aria-label") ?? "",
+        element.getAttribute("placeholder") ?? "",
+        element.closest("label")?.textContent ?? "",
+      ].join(" ");
+    }).join(" ").toLowerCase();
+    const body = (document.body?.innerText ?? "").toLowerCase();
+    let score = 0;
+    if (/\bresume\b|\bcv\b|curriculum/.test(text)) score += 10;
+    if (controls.some((control) => (control as HTMLInputElement).type === "file")) score += 9;
+    if (controls.some((control) => (control as HTMLInputElement).type === "email") || /\bemail\b/.test(text)) score += 7;
+    if (/\bfirst.?name\b|\blast.?name\b|\bfull.?name\b/.test(text)) score += 6;
+    if (/\bphone\b|\bmobile\b|\btelephone\b/.test(text)) score += 5;
+    if (/linkedin|portfolio|github/.test(text)) score += 4;
+    if (controls.some((control) => control.tagName.toLowerCase() === "textarea") || /question|experience|cover letter/.test(text)) score += 3;
+    if (/\bapply\b|\bsubmit\b|application/.test(body)) score += 2;
+    if (/\bsearch\b|\bnewsletter\b|\bsubscribe\b|\blogin\b|\bsign in\b/.test(text) && score < 12) score -= 8;
+    return score + Math.min(controls.length, 10) / 10;
+  }).catch(() => 0);
 }

@@ -41,8 +41,9 @@ export function normalizeOpenings(
         /\/jobs?\/|\/j\/|\/positions\//i.test(path)
         || /\/career\/.+/i.test(path)
         || /\/careers\/position-\d+$/i.test(path)
+        || isCompanyGreenhousePostingPath(path)
         || /\/jobslobby\/.+\/\d+$/i.test(path);
-      if (!looksLikeJobPath && !hasPositionQuery) {
+      if (!looksLikeJobPath && !hasPositionQuery && !looksLikeOpeningTitle(item.title)) {
         continue;
       }
     }
@@ -82,6 +83,11 @@ export function normalizeOpenings(
     }
   }
   return jobs;
+}
+
+/** Company-hosted Greenhouse posting page, e.g. `/careers/gid-7633905` (Yotpo). */
+export function isCompanyGreenhousePostingPath(path: string): boolean {
+  return /\/careers\/gid-\d+\/?$/i.test(path);
 }
 
 /** Numeric Greenhouse job id from `?gh_jid=`, or null. */
@@ -135,6 +141,18 @@ function cleanTitle(title: string, slug: string): string {
     return cleaned;
   }
   return slug.replace(/--+/g, " ").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function looksLikeOpeningTitle(title: string): boolean {
+  const cleaned = title.replace(/\s+/g, " ").trim();
+  if (cleaned.length < 6 || cleaned.length > 120) {
+    return false;
+  }
+  if (/^(about|careers?|contact|home|privacy|terms|search|login|sign in|subscribe|learn more|view all jobs?)$/i.test(cleaned)) {
+    return false;
+  }
+  return /engineer|developer|architect|manager|director|lead|analyst|scientist|designer|marketing|growth|product|data|operations|specialist|consultant|recruit|sales|ai\b|backend|frontend|full[- ]?stack/i.test(cleaned)
+    || /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,5}\b/.test(cleaned);
 }
 
 function safeUrl(value: string): URL | null {

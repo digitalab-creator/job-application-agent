@@ -17,9 +17,23 @@ export function alreadySubmitted(url: string): boolean {
 /** Prior confirmed send, or a terminal manual blocker (captcha / login). */
 export function priorTerminalEntry(url: string): LedgerEntry | undefined {
   return readLedger()
-    .filter((entry) => entry.url === url)
+    .filter((entry) => sameJobUrl(url, entry.url) || (entry.canonicalJobUrl ? sameJobUrl(url, entry.canonicalJobUrl) : false))
     .reverse()
     .find((entry) => entry.confirmationDetected || isTerminalManualBlocker(entry));
+}
+
+function sameJobUrl(left: string, right: string): boolean {
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    a.hash = "";
+    b.hash = "";
+    a.pathname = a.pathname.replace(/\/+$/, "") || "/";
+    b.pathname = b.pathname.replace(/\/+$/, "") || "/";
+    return a.toString() === b.toString();
+  } catch {
+    return left.trim() === right.trim();
+  }
 }
 
 export function rememberSubmission(entry: LedgerEntry): void {

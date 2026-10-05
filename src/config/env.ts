@@ -28,6 +28,7 @@ export const env = {
   screenshotDir: optional("SCREENSHOT_DIR", "/app/screenshots"),
   auditDir: optional("AUDIT_DIR", "/app/audit"),
   ledgerPath: optional("LEDGER_PATH", "/app/data/ledger/applications.jsonl"),
+  applyAttemptsPath: optional("APPLY_ATTEMPTS_PATH", "/app/data/ledger/apply-attempts.jsonl"),
   navigationTimeoutMs: 30_000,
   actionTimeoutMs: 10_000,
   jobTimeoutMs: 8 * 60_000,

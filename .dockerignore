@@ -5,4 +5,7 @@ generated-cv
 screenshots
 audit
 data/ledger
+data/browser-profile
+data/manual-queue
+data/cache
 .git
