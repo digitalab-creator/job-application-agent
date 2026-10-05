@@ -6,6 +6,7 @@ import type { FormScope } from "./form-filler.js";
 export type SubmitAttempt = {
   clicked: boolean;
   invalid: string[];
+  advanced?: boolean;
 };
 
 /**
@@ -14,8 +15,7 @@ export type SubmitAttempt = {
  * Other sites, including Elementor career forms, use a normal Apply button.
  */
 export async function submitApplication(page: Page, scope: FormScope): Promise<SubmitAttempt> {
-  const frame = greenhouseJobAppFrame(page) ?? page.frames().find((item) => item.url().includes("/apply?"));
-  const target: FormScope = frame ?? scope;
+  const target: FormScope = await preferredSubmitScope(page, scope);
   const prepared = await target.evaluate((pattern) => {
     const rule = new RegExp(pattern, "i");
     const angular = (window as unknown as {
@@ -86,6 +86,14 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
       return rule.test(label);
     });
     if (!button) {
+      const next = Array.from(document.querySelectorAll("button, a")).find((element) => {
+        const label = (element.textContent || (element as HTMLInputElement).value || "").replace(/\s+/g, " ").trim();
+        return /^(next|continue|save and continue|continue application)$/i.test(label);
+      });
+      if (next && invalid.length === 0) {
+        (next as HTMLElement).click();
+        return { clicked: true, invalid: [], advanced: true, useDomClick: false };
+      }
       return { clicked: false, invalid: invalid.length > 0 ? invalid : ["submit_button_missing"], useDomClick: false };
     }
     if ((button as HTMLButtonElement).disabled) {
@@ -107,11 +115,11 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
     } catch {
       return { clicked: false, invalid: [], useDomClick: true };
     }
-    return { clicked: true, invalid: [], useDomClick: false };
+    return { clicked: true, invalid: [], advanced: false, useDomClick: false };
   }, SUBMIT_LABEL_PATTERN);
 
   if (prepared.clicked || !prepared.useDomClick) {
-    return { clicked: prepared.clicked, invalid: prepared.invalid };
+    return { clicked: prepared.clicked, invalid: prepared.invalid, advanced: prepared.advanced };
   }
   const button = target.getByRole("button", { name: new RegExp(SUBMIT_LABEL_PATTERN, "i") }).first();
   try {
@@ -119,5 +127,25 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
   } catch {
     return { clicked: false, invalid: ["submit_button_missing"] };
   }
-  return { clicked: true, invalid: [] };
+  return { clicked: true, invalid: [], advanced: false };
+}
+
+async function preferredSubmitScope(page: Page, scope: FormScope): Promise<FormScope> {
+  if (await hasSubmitOrNext(scope)) {
+    return scope;
+  }
+  const greenhouse = greenhouseJobAppFrame(page);
+  if (greenhouse && await hasSubmitOrNext(greenhouse)) {
+    return greenhouse;
+  }
+  const applyFrame = page.frames().find((item) => item.url().includes("/apply?"));
+  return applyFrame && await hasSubmitOrNext(applyFrame) ? applyFrame : scope;
+}
+
+async function hasSubmitOrNext(scope: FormScope): Promise<boolean> {
+  return scope.locator("button, input[type='submit'], a").evaluateAll((elements) => elements.some((element) => {
+    const label = (element.textContent || (element as HTMLInputElement).value || "").replace(/\s+/g, " ").trim();
+    return new RegExp(SUBMIT_LABEL_PATTERN, "i").test(label)
+      || /^(next|continue|save and continue|continue application)$/i.test(label);
+  })).catch(() => false);
 }

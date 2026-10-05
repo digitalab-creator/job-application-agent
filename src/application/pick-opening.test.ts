@@ -56,6 +56,17 @@ test("Comblack and GotFriends detail links are valid openings", () => {
   assert.equal(gotFriendsJobs.length, 1);
 });
 
+test("company-hosted Greenhouse gid links on a careers list are separate openings", () => {
+  const jobs = normalizeOpenings([
+    { title: "Senior Product Manager", href: "https://www.yotpo.com/careers/gid-7633905/", snippet: "Tel-Aviv, IL Senior Product Manager" },
+    { title: "Director of Data", href: "https://www.yotpo.com/careers/gid-8211515/", snippet: "Tel-Aviv, IL Director of Data" },
+    { title: "Careers", href: "https://www.yotpo.com/careers/", snippet: "Careers" },
+  ], "https://www.yotpo.com/careers/");
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[0]?.title, "Senior Product Manager");
+  assert.equal(jobs[0]?.href, "https://www.yotpo.com/careers/gid-7633905");
+});
+
 test("position identifiers work in paths and query strings", () => {
   assert.equal(careersPositionId("https://www.dialog.co.il/high-tech/jobs/jobpage?positionId=95000"), "95000");
   assert.equal(careersPositionId("https://comblack.co.il/careers/position-24387/"), "24387");

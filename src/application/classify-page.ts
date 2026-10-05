@@ -14,6 +14,12 @@ export function classifyJobPage(input: {
   if (/hello-theme|\/themes\/|\/plugins\//i.test(input.url)) {
     return "NOT_FOUND";
   }
+  const looksLikeRemovedPosting = NOT_FOUND.test(blob) || CLOSED.test(blob);
+  const hasCareersRecoveryEvidence = CAREERS.test(blob)
+    || /current openings|search jobs|job opportunities|find a job/i.test(blob);
+  if (looksLikeRemovedPosting && hasCareersRecoveryEvidence) {
+    return "CAREERS_PAGE";
+  }
   if (/error=true/i.test(input.url)) {
     return "NOT_FOUND";
   }

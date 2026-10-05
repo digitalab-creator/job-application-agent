@@ -1,4 +1,5 @@
 import { isDiscoveryLocationEligible } from "./location-eligibility.js";
+import { DISCOVERY_SKIP_NEW_MULTIPLIER as DISCOVERY_SKIP_MULTIPLIER } from "../application/daily-quota.js";
 import type { ScoredDiscoveryJob } from "./score-jobs.js";
 
 export type QueueSide = "tech" | "marketing" | "other";
@@ -39,7 +40,7 @@ export const DAILY_APPLY_TECH_TARGET = 13;
 export const DAILY_APPLY_MARKETING_TARGET = 7;
 
 /** Skip board scan when sheet `New` rows exceed this multiple of DAILY_APPLY_LIMIT. */
-export const DISCOVER_SKIP_NEW_MULTIPLIER = 3;
+export const DISCOVER_SKIP_NEW_MULTIPLIER = DISCOVERY_SKIP_MULTIPLIER;
 
 export type NewQueueStats = {
   tech: number;

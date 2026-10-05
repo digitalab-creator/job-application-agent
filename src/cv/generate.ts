@@ -58,6 +58,7 @@ export async function buildCvDocument(input: {
   role: string;
   company: string;
   jobText: string;
+  feedback?: string;
 }): Promise<{ doc: CvDocument; wording: "llm" }> {
   const doc = await generateTailoredCv(input);
   if (!doc) {
@@ -71,11 +72,12 @@ async function generateTailoredCv(input: {
   role: string;
   company: string;
   jobText: string;
+  feedback?: string;
 }): Promise<CvDocument | null> {
   const models = uniqueModels([env.llmCvModel, env.llmModel, "gpt-5.6-sol"]);
   for (const model of models) {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const doc = await tryTailored(input, model, attempt);
+    const doc = await tryTailored(input, model, attempt);
       if (doc) {
         return doc;
       }
@@ -85,7 +87,7 @@ async function generateTailoredCv(input: {
 }
 
 async function tryTailored(
-  input: { persona: Persona; role: string; company: string; jobText: string },
+  input: { persona: Persona; role: string; company: string; jobText: string; feedback?: string },
   model: string,
   attempt: number,
 ): Promise<CvDocument | null> {
@@ -102,6 +104,7 @@ async function tryTailored(
     headlineId: defaults.headlineId,
     jobDescription: input.jobText.slice(0, 7000),
     emphasis,
+    qualityFeedback: input.feedback ?? "",
     roles: roles.map((role) => ({
       id: role.id,
       company: role.company,

@@ -5,6 +5,7 @@ import { chromium } from "playwright";
 import { ensureExcludedCompaniesConfig, getExcludedCompanies, setExcludedCompanies } from "./application/exclude-company.js";
 import { ensureExcludedLocationsConfig, getExcludedLocations, setExcludedLocations } from "./application/exclude-location.js";
 import { applyToJob, type ApplyInput } from "./application/apply-job.js";
+import { attemptRecordFromResult, newAttemptId, rememberAttemptOutcome } from "./application/attempt-ledger.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
 import { browserApplyLockHeld, claimBrowserApply, releaseBrowserApply } from "./application/browser-apply-lock.js";
 import { claimApplyRun, releaseApplyRun } from "./application/run-lock.js";
@@ -16,7 +17,7 @@ import { choosePersonaFromText } from "./cv/persona-from-text.js";
 import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "./budget/monthly-budget.js";
 import { runDiscovery } from "./discovery/run-discovery.js";
 import { recordExternalSpend, todayCostSummary, withJobCost } from "./llm/cost-ledger.js";
-import { log } from "./logging/logger.js";
+import { log, withLogContext } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
 import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./application/manual-fill-guide.js";
 
@@ -178,14 +179,19 @@ const server = http.createServer(async (req, res) => {
       }
       try {
         const input = parseApply(await readBody(req));
+        input.attemptId = newAttemptId();
+        input.startedAt = new Date().toISOString();
         recordPlatformAllocationIfNeeded();
         if (!budgetIsOpen()) {
           const budget = budgetSnapshot();
-          send(res, 200, {
+          const outcome: ApplicationResult = {
+            attemptId: input.attemptId,
             status: "budget_reached",
             jobUrl: input.job.url,
             submitted: false,
             confirmationDetected: false,
+            terminalOutcome: "budget_reached",
+            pipeline: emptyPipeline(),
             llmCostUsd: 0,
             budget: compactBudget(budget),
             notes: [
@@ -193,28 +199,41 @@ const server = http.createServer(async (req, res) => {
               `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
               "The shared monthly budget is exhausted. This job was not opened.",
             ].join("\n"),
-          });
+          };
+          rememberAttempt(input, outcome);
+          send(res, 200, outcome);
           return;
         }
         if (!quotaIsOpen()) {
           const quota = quotaSnapshot();
-          send(res, 200, {
+          const outcome: ApplicationResult = {
+            attemptId: input.attemptId,
             status: "quota_reached",
             jobUrl: input.job.url,
             submitted: false,
             confirmationDetected: false,
+            terminalOutcome: "quota_reached",
+            pipeline: emptyPipeline(),
             llmCostUsd: 0,
             quota,
             notes: [
               "result=quota_reached",
               `daily_quota=${quota.counted}/${quota.limit}`,
-              "The daily limit is already used. This job was not opened.",
+              `daily_attempts=${quota.attempted}/${quota.maxAttempts}`,
+              quota.remaining === 0
+                ? "The confirmed daily limit is already used. This job was not opened."
+                : "The daily safety attempt cap is already used. This job was not opened.",
             ].join("\n"),
-          });
+          };
+          rememberAttempt(input, outcome);
+          send(res, 200, outcome);
           return;
         }
         try {
-          const tracked = await withJobCost(input.job.url, () => withApplySession((context) => applyToJob(context, input)));
+          const tracked = await withJobCost(
+            input.job.url,
+            () => withLogContext({ attemptId: input.attemptId! }, () => withApplySession((context) => applyToJob(context, input))),
+          );
           rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
           const quota = quotaSnapshot();
           const budget = budgetSnapshot();
@@ -230,19 +249,25 @@ const server = http.createServer(async (req, res) => {
             `daily_quota=${quota.counted}/${quota.limit}`,
             `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
           ].filter(Boolean).join("\n");
+          rememberAttempt(input, outcome);
           send(res, 200, outcome);
         } catch (error) {
           const message = error instanceof Error ? error.message : "request_failed";
           log("REQUEST_FAILED", { message });
-          rememberQuotaUse({ url: input.job.url, status: "review" });
-          send(res, 200, {
+          const outcome: ApplicationResult = {
+            attemptId: input.attemptId,
             status: "review",
             jobUrl: input.job.url,
             submitted: false,
             confirmationDetected: false,
+            terminalOutcome: "request_failed",
+            pipeline: input.pipeline ?? emptyPipeline(),
             blocker: "navigation_failed",
             notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
-          });
+          };
+          rememberQuotaUse({ url: input.job.url, status: outcome.status });
+          rememberAttempt(input, outcome);
+          send(res, 200, outcome);
         }
       } finally {
         releaseBrowserApply();
@@ -255,6 +280,9 @@ const server = http.createServer(async (req, res) => {
       const previewExtras = rawBody as ApplyInput & { jobText?: string };
       const preview = await withHeadlessBrowser(async (browser) => {
         const persona = choosePersonaFromText(input.job.role, input.job.category ?? "", input.job.role);
+        if (!persona) {
+          throw new Error("The preview role is ambiguous; provide jobText with enough requirements to choose a persona.");
+        }
         const jobText = typeof previewExtras.jobText === "string" ? previewExtras.jobText : input.job.role;
         const built = await buildCvDocument({
           persona,
@@ -366,14 +394,48 @@ function parseApply(body: unknown): ApplyInput {
   if (!job?.url || !job.role || !job.company) {
     throw new Error("job.url, job.role, and job.company are required.");
   }
-  if (!/^https?:\/\//i.test(job.url)) {
-    throw new Error("job.url must be an http(s) URL.");
+  if (typeof job.url !== "string") {
+    throw new Error("job.url must be a string.");
   }
   return {
     row: record.row,
     submit: record.submit === true,
     ignoreLedger: record.ignoreLedger === true,
     job,
+  };
+}
+
+function rememberAttempt(input: ApplyInput, outcome: ApplicationResult): void {
+  if (!input.attemptId || !input.startedAt) {
+    return;
+  }
+  try {
+    rememberAttemptOutcome(attemptRecordFromResult({
+      attemptId: input.attemptId,
+      startedAt: input.startedAt,
+      company: input.job.company,
+      role: input.job.role,
+      url: input.job.url,
+    }, outcome));
+  } catch (error) {
+    log("ATTEMPT_LEDGER_WRITE_FAILED", {
+      attemptId: input.attemptId,
+      message: error instanceof Error ? error.message : "attempt_ledger_write_failed",
+      outcome: outcome.terminalOutcome ?? outcome.status,
+    });
+  }
+}
+
+function emptyPipeline(): NonNullable<ApplicationResult["pipeline"]> {
+  return {
+    urlValidated: false,
+    opened: false,
+    recovered: false,
+    fitPassed: false,
+    cvGenerated: false,
+    cvQualityPassed: false,
+    submitted: false,
+    confirmed: false,
   };
 }
 

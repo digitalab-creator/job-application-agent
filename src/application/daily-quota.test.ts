@@ -23,9 +23,11 @@ test("quota counts real attempts and ignores closed rows", () => {
   const previousQuota = process.env.QUOTA_LEDGER_PATH;
   const previousLedger = process.env.LEDGER_PATH;
   const previousLimit = process.env.DAILY_APPLY_LIMIT;
+  const previousMaxAttempts = process.env.DAILY_APPLY_MAX_ATTEMPTS;
   process.env.QUOTA_LEDGER_PATH = path.join(dir, "quota.jsonl");
   process.env.LEDGER_PATH = path.join(dir, "missing-ledger.jsonl");
   process.env.DAILY_APPLY_LIMIT = "10";
+    process.env.DAILY_APPLY_MAX_ATTEMPTS = "3";
   try {
     rememberQuotaUse({ url: "https://jobs.example/closed", status: "closed" });
     rememberQuotaUse({ url: "https://jobs.example/applied", status: "applied" });
@@ -33,6 +35,8 @@ test("quota counts real attempts and ignores closed rows", () => {
     assert.equal(snapshot.limit, 10);
     assert.equal(snapshot.counted, 1);
     assert.equal(snapshot.remaining, 9);
+    assert.equal(snapshot.maxAttempts, 3);
+    assert.equal(snapshot.attempted, 0);
   } finally {
     if (previousQuota === undefined) {
       delete process.env.QUOTA_LEDGER_PATH;
@@ -49,5 +53,29 @@ test("quota counts real attempts and ignores closed rows", () => {
     } else {
       process.env.DAILY_APPLY_LIMIT = previousLimit;
     }
+    if (previousMaxAttempts === undefined) delete process.env.DAILY_APPLY_MAX_ATTEMPTS;
+    else process.env.DAILY_APPLY_MAX_ATTEMPTS = previousMaxAttempts;
+  }
+});
+
+test("attempt safety cap closes work independently of confirmed quota", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "attempt-cap-"));
+  const previousPath = process.env.APPLY_ATTEMPTS_PATH;
+  const previousMaxAttempts = process.env.DAILY_APPLY_MAX_ATTEMPTS;
+  process.env.APPLY_ATTEMPTS_PATH = path.join(dir, "attempts.jsonl");
+  process.env.DAILY_APPLY_MAX_ATTEMPTS = "2";
+  fs.writeFileSync(process.env.APPLY_ATTEMPTS_PATH, [
+    JSON.stringify({ attemptId: "a", finishedAt: new Date().toISOString() }),
+    JSON.stringify({ attemptId: "b", finishedAt: new Date().toISOString() }),
+  ].join("\n") + "\n");
+  try {
+    const snapshot = quotaSnapshot();
+    assert.equal(snapshot.attempted, 2);
+    assert.equal(snapshot.attemptsRemaining, 0);
+  } finally {
+    if (previousPath === undefined) delete process.env.APPLY_ATTEMPTS_PATH;
+    else process.env.APPLY_ATTEMPTS_PATH = previousPath;
+    if (previousMaxAttempts === undefined) delete process.env.DAILY_APPLY_MAX_ATTEMPTS;
+    else process.env.DAILY_APPLY_MAX_ATTEMPTS = previousMaxAttempts;
   }
 });

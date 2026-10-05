@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAutomatableApplyUrl } from "./automatable-url.js";
+import { isAutomatableApplyUrl, parseHttpUrl } from "./automatable-url.js";
 
 test("Comeet, Workable, LinkedIn, and company career pages are attempted", () => {
   assert.equal(
@@ -27,4 +27,12 @@ test("empty links and known junk placeholders are skipped", () => {
     isAutomatableApplyUrl("https://www.comeet.com/jobs/stampli/F6.007/0B.273"),
     false,
   );
+});
+
+test("URL validation rejects malformed and non-web schemes before navigation", () => {
+  assert.equal(parseHttpUrl("javascript:alert(1)"), null);
+  assert.equal(parseHttpUrl("https://"), null);
+  const parsed = parseHttpUrl("https://jobs.example/apply");
+  assert.ok(parsed);
+  assert.equal(parsed.hostname, "jobs.example");
 });

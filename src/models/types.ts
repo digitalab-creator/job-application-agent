@@ -53,6 +53,7 @@ export type ApplicationStatus =
   | "applied"
   | "closed"
   | "not_relevant"
+  | "invalid_url"
   | "review"
   | "failed"
   | "quota_reached"
@@ -62,6 +63,53 @@ export type ApplicationStatus =
   /** Tried auto-apply; captcha / login / account gate — human only, not a fixable Review. */
   | "manual_required";
 
+export type AttemptOutcome =
+  | "applied"
+  | "manual_required"
+  | "closed"
+  | "no_suitable_replacement"
+  | "not_relevant"
+  | "location_ineligible"
+  | "invalid_url"
+  | "navigation_failed"
+  | "form_not_detected"
+  | "form_validation"
+  | "cv_generation_failed"
+  | "confirmation_not_detected"
+  | "request_failed"
+  | "quota_reached"
+  | "budget_reached"
+  | "already_submitted"
+  | "dry_run";
+
+export type AttemptPipeline = {
+  urlValidated: boolean;
+  opened: boolean;
+  recovered: boolean;
+  fitPassed: boolean;
+  cvGenerated: boolean;
+  cvQualityPassed: boolean;
+  submitted: boolean;
+  confirmed: boolean;
+};
+
+export type ApplyAttemptRecord = {
+  attemptId: string;
+  startedAt: string;
+  finishedAt: string;
+  company: string;
+  role: string;
+  originalJobUrl: string;
+  canonicalJobUrl?: string;
+  cvPath?: string;
+  outcome: AttemptOutcome;
+  blocker?: string;
+  submitted: boolean;
+  confirmationDetected: boolean;
+  pipeline: AttemptPipeline;
+  notes: string;
+};
+
 export type AnswerRecord = {
   question: string;
   answer: string;
@@ -69,6 +117,7 @@ export type AnswerRecord = {
 };
 
 export type ApplicationResult = {
+  attemptId?: string;
   status: ApplicationStatus;
   jobUrl: string;
   canonicalJobUrl?: string;
@@ -77,6 +126,7 @@ export type ApplicationResult = {
   cvSource?: CvSource;
   cvWording?: CvWording;
   cvPath?: string;
+  cvRelevanceScore?: number;
   factIds?: string[];
   ats?: string;
   submitted: boolean;
@@ -84,6 +134,13 @@ export type ApplicationResult = {
   appliedAt?: string;
   blocker?: string;
   notes: string;
+  terminalOutcome?: AttemptOutcome;
+  pipeline?: AttemptPipeline;
+  recoveredFrom?: {
+    originalRole: string;
+    originalUrl: string;
+    replacementRole: string;
+  };
   screenshots?: string[];
   answers?: AnswerRecord[];
   /** Copy-paste fields + CV link for Google Sheet Manual rows. */
