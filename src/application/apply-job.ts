@@ -31,6 +31,7 @@ import {
 import { detectConfirmation, detectEmailVerification, detectLoginWall, classifyCaptchaSignal } from "./verify-submission.js";
 import { newAttemptId } from "./attempt-ledger.js";
 import { parseHttpUrl } from "./automatable-url.js";
+import { hostDoesNotExist, isNameNotResolvedError } from "./dead-host.js";
 import type { AttemptPipeline } from "../models/types.js";
 import { applicationStateFromEvidence } from "./application-state.js";
 
@@ -156,6 +157,16 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     } catch (error) {
       const message = error instanceof Error ? error.message : "navigation_failed";
       log("JOB_NAVIGATION_FAILED", { url: input.job.url, message });
+      if (isNameNotResolvedError(message) && await hostDoesNotExist(input.job.url)) {
+        log("JOB_CLOSED", { pageStatus: "DEAD_HOST", url: input.job.url });
+        return result(input, {
+          status: "closed",
+          submitted: false,
+          confirmationDetected: false,
+          notes: lines(["result=closed", "reason=job_removed", "Job host no longer exists in DNS (careers site retired)."]),
+          screenshots,
+        });
+      }
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       return result(input, {
         status: "review",
