@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import socket
 import subprocess
 import sys
 import urllib.error
@@ -208,6 +209,11 @@ def quick_live_job_status(url: str, role: str, timeout: int = 22) -> tuple[str |
         if status == 404:
             return "NOT_FOUND", "http_404"
     except (urllib.error.URLError, TimeoutError, ValueError) as err:
+        # NXDOMAIN (-2 / -5 "Name or service not known") = retired careers host = dead link.
+        # Mirrors src/application/dead-host.ts. Temporary resolver failures stay "alive".
+        reason = getattr(err, "reason", None)
+        if isinstance(reason, socket.gaierror) and reason.errno in (socket.EAI_NONAME, getattr(socket, "EAI_NODATA", socket.EAI_NONAME)):
+            return "NOT_FOUND", "dns_nxdomain"
         return None, f"probe_failed:{type(err).__name__}"
 
     if status == 404:
