@@ -375,6 +375,57 @@ def n8n_runs_today(day: str) -> list[N8nRun]:
     return runs
 
 
+def discover_execution_state(execution_id: int) -> str:
+    """Return whether a Discover execution scanned boards, skipped, or is unknown."""
+    api = load_n8n_api_key()
+    if not api:
+        return "unknown"
+    url = f"http://127.0.0.1:5678/api/v1/executions/{execution_id}?includeData=true"
+    request = urllib.request.Request(url, headers={"X-N8N-API-KEY": api})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        return "unknown"
+
+    run_data = payload.get("data", {}).get("resultData", {}).get("runData")
+    if not isinstance(run_data, dict):
+        return "unknown"
+
+    scan_runs = run_data.get("Scan Boards")
+    if isinstance(scan_runs, list) and scan_runs:
+        for run in scan_runs:
+            for item in node_output_items(run):
+                result = item.get("json")
+                if not isinstance(result, dict):
+                    continue
+                notes = str(result.get("notes", ""))
+                if result.get("status") == "skipped" and "queue_depth" in notes:
+                    return "skipped"
+        return "scanned"
+
+    if "Queue depth gate" in run_data:
+        return "skipped"
+    return "unknown"
+
+
+def node_output_items(run: object) -> list[dict]:
+    if not isinstance(run, dict):
+        return []
+    data = run.get("data")
+    if not isinstance(data, dict):
+        return []
+    outputs = data.get("main")
+    if not isinstance(outputs, list):
+        return []
+    items: list[dict] = []
+    for output in outputs:
+        if not isinstance(output, list):
+            continue
+        items.extend(item for item in output if isinstance(item, dict))
+    return items
+
+
 def container_running() -> bool:
     try:
         out = subprocess.check_output(
@@ -635,6 +686,10 @@ def print_report(day: str | None = None) -> int:
 
     apply_runs = [r for r in n8n_runs_today(day) if r.workflow_id == APPLY_WF_ID]
     discover_runs = [r for r in n8n_runs_today(day) if r.workflow_id == DISCOVER_WF_ID]
+    discover_states = {
+        run.execution_id: discover_execution_state(run.execution_id)
+        for run in discover_runs
+    }
 
     queue = sheet_queue_snapshot()
     discover_depth_threshold = int(
@@ -731,10 +786,14 @@ def print_report(day: str | None = None) -> int:
         print("- No apply/discover executions found in n8n DB (or postgres unreachable).")
     else:
         for r in discover_runs:
-            flag = ""
-            if discover_should_skip:
-                flag = " _(ran despite deep queue — should skip after worker deploy)_"
-            print(f"- Discover: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}{flag}")
+            state = discover_states.get(r.execution_id, "unknown")
+            if state == "skipped":
+                detail = " _(schedule fired; queue-depth gate skipped board scan)_"
+            elif state == "scanned":
+                detail = " _(board scan executed)_"
+            else:
+                detail = " _(board-scan state could not be verified)_"
+            print(f"- Discover: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}{detail}")
         for r in apply_runs:
             print(f"- Apply: exec `{r.execution_id}` **{r.status}** {r.started} → {r.stopped}")
     print()
@@ -843,9 +902,24 @@ def print_report(day: str | None = None) -> int:
         blockers.append("Daily quota exhausted before enough confirmed submissions.")
     if budget and float(budget.get("remainingIls") or 0) <= 0:
         blockers.append("Monthly LLM budget exhausted (`budget_reached`).")
-    if discover_runs and discover_should_skip:
+    deep_queue_discover_runs = [
+        run for run in discover_runs
+        if discover_states.get(run.execution_id) == "scanned"
+    ]
+    unverifiable_deep_queue_runs = [
+        run for run in discover_runs
+        if discover_states.get(run.execution_id) == "unknown"
+    ]
+    if deep_queue_discover_runs and discover_should_skip:
         blockers.append(
-            f"Discover ran while sheet had **{sheet_new}** `New` rows (skip threshold **{discover_depth_threshold}**)."
+            f"Discover scanned boards while sheet had **{sheet_new}** `New` rows "
+            f"(skip threshold **{discover_depth_threshold}**)."
+        )
+    elif unverifiable_deep_queue_runs and discover_should_skip:
+        blockers.append(
+            f"Could not verify whether {len(unverifiable_deep_queue_runs)} Discover execution(s) "
+            f"scanned boards while sheet had **{sheet_new}** `New` rows "
+            f"(skip threshold **{discover_depth_threshold}**)."
         )
     if not container_running():
         blockers.append("Worker container not running — no applies possible.")
