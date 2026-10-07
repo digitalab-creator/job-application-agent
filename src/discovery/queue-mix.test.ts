@@ -18,6 +18,7 @@ function job(partial: Partial<ScoredDiscoveryJob> & Pick<ScoredDiscoveryJob, "ca
     url: "https://example.com/jobs/x",
     whyItFits: partial.whyItFits ?? "fit",
     source: "n8n_discover",
+    location: "rules: metro:Tel Aviv",
     ...partial,
   };
 }

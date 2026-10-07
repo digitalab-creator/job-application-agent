@@ -1,4 +1,3 @@
-import { isDiscoveryLocationEligible } from "./location-eligibility.js";
 import { DISCOVERY_SKIP_NEW_MULTIPLIER as DISCOVERY_SKIP_MULTIPLIER } from "../application/daily-quota.js";
 import type { ScoredDiscoveryJob } from "./score-jobs.js";
 
@@ -135,10 +134,8 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
   };
 }
 
+/** Score / mix gate only. Location is decided once, in score-jobs.ts via resolveJobLocationVerdict. */
 export function passesDiscoveryQuality(job: ScoredDiscoveryJob, policy: RebalancePolicy): boolean {
-  if (!isDiscoveryLocationEligible(job.role, job.whyItFits, job.url)) {
-    return false;
-  }
   if (job.matchScore < policy.baseMinScore) {
     return false;
   }

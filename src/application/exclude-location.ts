@@ -1,9 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { log } from "../logging/logger.js";
 
 /**
- * Location tokens we never auto-apply to (matched in title, snippet, URL, or page text).
- * Admin SSOT = Google Sheet tab "Exclude Locations" (synced by n8n each apply run).
+ * Cities we never auto-apply to (matched in title, URL, and the top of the page text).
+ *
+ * SINGLE SOURCE OF TRUTH: data/config/excluded-locations.json (mounted at /app/data/config).
+ * Edit that file, or `PUT /config/excluded-locations`. There is deliberately no code seed,
+ * no env fallback and no sheet copy: two lists would drift apart.
  */
 export type ExcludedLocationsConfig = {
   locations: string[];
@@ -11,20 +15,8 @@ export type ExcludedLocationsConfig = {
   source?: string;
 };
 
-const DEFAULT_SEED = [
-  "רעננה",
-  "Ra'anana",
-  "Raanana",
-  "רחובות",
-  "Rehovot",
-  "נס ציונה",
-  "Nes Ziona",
-  "Nes-Ziona",
-  "חולון",
-  "Holon",
-  "נתניה",
-  "Netanya",
-];
+/** Job location is stated near the top; footers list every company office, so scanning all of it blocks good jobs. */
+export const EXCLUDED_SCAN_CHARS = 2_500;
 
 export function parseExcludedLocationsText(raw: string): string[] {
   const seen = new Set<string>();
@@ -60,24 +52,41 @@ export function excludedLocationsPath(): string {
   return "/app/data/config/excluded-locations.json";
 }
 
+let cached: { filePath: string; mtimeMs: number; list: string[] } | null = null;
+
+/**
+ * Reads the block list from its one file. A missing or unreadable file is logged loudly, never silently ignored.
+ * Re-reads only when the file's mtime changes, so edits apply immediately without a disk read per classification.
+ */
 export function getExcludedLocations(): string[] {
   const filePath = excludedLocationsPath();
+  let mtimeMs: number;
   try {
-    if (fs.existsSync(filePath)) {
-      const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as ExcludedLocationsConfig | string[];
-      const list = Array.isArray(raw) ? raw : raw.locations;
-      if (Array.isArray(list)) {
-        return normalizeLocationList(list.map(String));
-      }
-    }
+    mtimeMs = fs.statSync(filePath).mtimeMs;
   } catch {
-    // Fall through to env / seed.
+    cached = null;
+    log("EXCLUDED_LOCATIONS_FILE_MISSING", { filePath, effect: "no cities are blocked" });
+    return [];
   }
-  const fromEnv = process.env.APPLY_EXCLUDED_LOCATIONS?.trim();
-  if (fromEnv) {
-    return parseExcludedLocationsText(fromEnv);
+  if (cached && cached.filePath === filePath && cached.mtimeMs === mtimeMs) {
+    return cached.list;
   }
-  return [...DEFAULT_SEED];
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as ExcludedLocationsConfig | string[];
+    const list = Array.isArray(raw) ? raw : raw.locations;
+    if (Array.isArray(list)) {
+      const normalized = normalizeLocationList(list.map(String));
+      cached = { filePath, mtimeMs, list: normalized };
+      return normalized;
+    }
+    log("EXCLUDED_LOCATIONS_FILE_INVALID", { filePath, reason: "no locations array" });
+  } catch (error) {
+    log("EXCLUDED_LOCATIONS_FILE_INVALID", {
+      filePath,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return [];
 }
 
 export function setExcludedLocations(
@@ -93,21 +102,15 @@ export function setExcludedLocations(
   const filePath = excludedLocationsPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+  cached = null;
   return payload;
 }
 
+/** Startup check: report what is blocked (or shout that nothing is). Never invents a list. */
 export function ensureExcludedLocationsConfig(): ExcludedLocationsConfig {
-  const filePath = excludedLocationsPath();
-  if (fs.existsSync(filePath)) {
-    return {
-      locations: getExcludedLocations(),
-      updatedAt: undefined,
-      source: "file",
-    };
-  }
-  const fromEnv = process.env.APPLY_EXCLUDED_LOCATIONS?.trim();
-  const seed = fromEnv ? parseExcludedLocationsText(fromEnv) : [...DEFAULT_SEED];
-  return setExcludedLocations(seed, fromEnv ? "env" : "seed");
+  const locations = getExcludedLocations();
+  log("EXCLUDED_LOCATIONS_LOADED", { count: locations.length, filePath: excludedLocationsPath() });
+  return { locations };
 }
 
 export function textMatchesExcludedLocation(

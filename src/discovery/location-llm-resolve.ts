@@ -35,7 +35,7 @@ export async function researchJobLocationWithLlm(input: {
     url: input.url,
     policy: {
       accept: "remote anywhere in Israel OR on-site/hybrid in Israel Central District or Tel Aviv District (Gush Dan / Sharon: Tel Aviv, Petah Tikva, Ramat Gan, Herzliya, Kfar Saba, Hod HaSharon, etc.)",
-      reject: `on-site only outside those districts (Haifa, Jerusalem, Netanya, Beer Sheva, etc. unless remote) and admin-excluded cities: ${excluded.join(", ")}`,
+      reject: `on-site only outside those districts (Haifa, Jerusalem, Beer Sheva, etc. unless remote), and any city on this blocked list: ${excluded.join(", ") || "(none)"}`,
     },
   });
 

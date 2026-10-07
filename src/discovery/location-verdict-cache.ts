@@ -9,6 +9,8 @@ export type CachedLocationVerdict = {
   reason: string;
   source: LocationVerdictSource;
   cachedAt: string;
+  /** LOCATION_RULES_VERSION that produced a rules / page_fetch verdict. Missing = made by the pre-versioning rules. */
+  rulesVersion?: number;
 };
 
 type CacheFile = Record<string, CachedLocationVerdict>;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyJobPage } from "./classify-page.js";
+import { classifyJobPage, isLoginWallUrl } from "./classify-page.js";
 
 test("an active Comeet posting is active", () => {
   const status = classifyJobPage({
@@ -50,4 +50,29 @@ test("a removed role with a usable current-opening list is recoverable", () => {
     role: "Senior AI Engineer",
   });
   assert.equal(status, "CAREERS_PAGE");
+});
+
+test("a Workable not_found landing is a removed posting", () => {
+  const status = classifyJobPage({
+    url: "https://apply.workable.com/glassbox/?not_found=true",
+    title: "Glassbox",
+    text: "Glassbox is hiring. Browse our team and culture to learn more about working with us at Glassbox today.",
+    role: "MarTech Lead",
+  });
+  assert.equal(status, "NOT_FOUND");
+});
+
+test("a LinkedIn authwall is a login wall, never a job page", () => {
+  const status = classifyJobPage({
+    url: "https://www.linkedin.com/authwall?trk=bf&sessionRedirect=https%3A%2F%2Fil.linkedin.com%2Fjobs%2Fview%2F1",
+    title: "Sign Up | LinkedIn",
+    text: "Join to view this job. Sign in to apply.",
+    role: "Full-Stack AI Engineer",
+  });
+  assert.equal(status, "LOGIN_WALL");
+});
+
+test("login wall URLs are recognised without reading the page", () => {
+  assert.equal(isLoginWallUrl("https://www.linkedin.com/authwall?trk=bf"), true);
+  assert.equal(isLoginWallUrl("https://il.linkedin.com/jobs/view/123"), false);
 });

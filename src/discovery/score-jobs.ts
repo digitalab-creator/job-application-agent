@@ -3,7 +3,7 @@ import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import type { RawBoardJob } from "./scan-boards.js";
 import { sheetCategoryFromDiscovery } from "./category-map.js";
-import { resolveJobLocationEligible } from "./resolve-location-eligibility.js";
+import { resolveJobLocationVerdict } from "./resolve-location-eligibility.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
 
 const SYSTEM = `You score job openings for Or Shvartz (AI engineer, full-stack, performance marketing, growth).
@@ -12,8 +12,11 @@ category: AI = engineering/product AI roles; Growth = marketing, PPC, growth, pe
 Target mix over time: roughly 65% AI and 35% Growth — prefer labeling true growth/performance roles as Growth, not AI.
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
-relevant=false for on-site roles outside Israel Central or Tel Aviv District (e.g. Haifa, Jerusalem, Netanya only) unless remote/hybrid is stated.
+relevant=false for on-site roles outside Israel Central or Tel Aviv District (e.g. Haifa, Jerusalem only) unless remote is stated.
 Do not invent candidate facts. Base only on title and snippet.`;
+
+/** Keep the sheet cell readable. */
+const LOCATION_EVIDENCE_MAX_CHARS = 140;
 
 const schema = z.object({
   jobs: z.array(z.object({
@@ -34,6 +37,8 @@ export type ScoredDiscoveryJob = {
   category: string;
   whyItFits: string;
   source: string;
+  /** Why the location gate passed (sheet "Location" column), e.g. "rules: metro:Tel Aviv". */
+  location: string;
 };
 
 export async function scoreDiscoveryJobs(
@@ -68,11 +73,12 @@ export async function scoreDiscoveryJobs(
     if (!opening) {
       continue;
     }
-    if (!await resolveJobLocationEligible({
+    const locationVerdict = await resolveJobLocationVerdict({
       title: opening.title,
       snippet: opening.snippet,
       url: opening.href,
-    })) {
+    });
+    if (!locationVerdict.eligible) {
       continue;
     }
     out.push({
@@ -84,6 +90,7 @@ export async function scoreDiscoveryJobs(
       category: sheetCategoryFromDiscovery(row.category),
       whyItFits: row.whyItFits,
       source: "n8n_discover",
+      location: `${locationVerdict.source}: ${locationVerdict.reason}`.slice(0, LOCATION_EVIDENCE_MAX_CHARS),
     });
   }
   return out;

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyLocationRules, isDiscoveryLocationEligible } from "./location-eligibility.js";
+import {
+  classifyLocationDetailed,
+  classifyLocationRules,
+  isDiscoveryLocationEligible,
+  matchesExcludedLocationHead,
+} from "./location-eligibility.js";
 
 const NO_EXCLUDED: string[] = [];
 
@@ -97,8 +102,66 @@ test("explicit remote from Israel is eligible even with US in company name", () 
   );
 });
 
-test("generic remote role is eligible when not foreign-only", () => {
-  assert.equal(isDiscoveryLocationEligible("Platform Engineer (Remote)", "Fully remote position.", "", NO_EXCLUDED), true);
+test("generic remote with no Israel evidence needs a lookup, not an instant yes", () => {
+  assert.equal(classifyLocationRules("Platform Engineer (Remote)", "Fully remote position.", "", NO_EXCLUDED), "needs_lookup");
+  assert.equal(isDiscoveryLocationEligible("Platform Engineer (Remote)", "Fully remote position.", "", NO_EXCLUDED), false);
+});
+
+test("remote plus Israel evidence is eligible", () => {
+  assert.equal(isDiscoveryLocationEligible("Platform Engineer (Remote)", "Team based in Israel.", "", NO_EXCLUDED), true);
+  assert.equal(isDiscoveryLocationEligible("Platform Engineer (Remote)", "", "https://careers.example.co.il/jobs/1", NO_EXCLUDED), true);
+});
+
+test("remote US stays ineligible", () => {
+  assert.equal(isDiscoveryLocationEligible("Platform Engineer (Remote, US)", "", "", NO_EXCLUDED), false);
+});
+
+test("hybrid without a city is never treated as remote", () => {
+  const detail = classifyLocationDetailed("Growth Manager", "Hybrid role, Israel", "", NO_EXCLUDED);
+  assert.equal(detail.verdict, "needs_lookup");
+  assert.equal(detail.evidence, "hybrid_without_city");
+  assert.equal(classifyLocationRules("Growth Manager", "Hybrid role", "", NO_EXCLUDED), "ineligible");
+});
+
+test("Hebrew city names match (JavaScript \\b never matched Hebrew)", () => {
+  assert.equal(isDiscoveryLocationEligible("מנהל/ת שיווק", "משרה בתל אביב, היקף מלא", "", NO_EXCLUDED), true);
+  assert.equal(isDiscoveryLocationEligible("מפתח Backend", "המשרה בפתח תקווה", "", NO_EXCLUDED), true);
+  assert.equal(isDiscoveryLocationEligible("אנליסט", "במשרד ברמת גן", "", NO_EXCLUDED), true);
+  assert.equal(isDiscoveryLocationEligible("מנהל קמפיינים", "תל-אביב", "", NO_EXCLUDED), true);
+});
+
+test("Hebrew remote needs Hebrew/Israel context and is eligible on an Israeli page", () => {
+  assert.equal(isDiscoveryLocationEligible("מנהל PPC", "אפשרות לעבודה מרחוק", "", NO_EXCLUDED), true);
+});
+
+test("Hebrew other-region role is ineligible", () => {
+  assert.equal(isDiscoveryLocationEligible("מפתח", "משרה בחיפה", "", NO_EXCLUDED), false);
+  assert.equal(classifyLocationRules("מפתח", "משרה בבאר שבע", "", NO_EXCLUDED), "ineligible");
+});
+
+test("Hebrew words that merely contain a city are not matched", () => {
+  // "יהודי" (Jewish) must not read as Yehud; "אזור" (area) must not read as Azor.
+  assert.equal(classifyLocationRules("מנהל", "קהילה יהודית באזור הצפון", "", NO_EXCLUDED), "needs_lookup");
+});
+
+test("verdict carries evidence for the sheet Location column", () => {
+  assert.equal(classifyLocationDetailed("Data Scientist Tel Aviv", "", "", NO_EXCLUDED).evidence, "metro:Tel Aviv");
+  assert.equal(classifyLocationDetailed("Engineer", "Office in Raanana", "", ["Raanana"]).evidence, "blocked_city");
+});
+
+test("Netanya is only blocked through the admin list, not hardcoded geography", () => {
+  assert.equal(classifyLocationRules("AI Engineer Netanya", "On-site in Netanya, Israel.", "", NO_EXCLUDED), "needs_lookup");
+  assert.equal(classifyLocationRules("AI Engineer Netanya", "On-site in Netanya, Israel.", "", ["Netanya"]), "ineligible");
+});
+
+test("a blocked city in a long page footer does not block a Tel Aviv job", () => {
+  const footer = `${"Great company. ".repeat(300)} Our offices: Tel Aviv, Netanya, London.`;
+  assert.equal(matchesExcludedLocationHead("Growth Manager Tel Aviv", footer, "", ["Netanya"]), false);
+  assert.equal(matchesExcludedLocationHead("Growth Manager", "Office in Netanya.", "", ["Netanya"]), true);
+});
+
+test("malformed percent-encoding in a URL does not crash classification", () => {
+  assert.doesNotThrow(() => classifyLocationRules("Role", "", "https://example.com/jobs/%E0%A4%A", NO_EXCLUDED));
 });
 
 test("Israel in Comeet URL query with TLV is eligible", () => {

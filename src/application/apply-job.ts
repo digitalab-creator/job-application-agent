@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
-import { classifyJobPage } from "../application/classify-page.js";
+import { classifyJobPage, isLoginWallUrl } from "../application/classify-page.js";
 import { applyFormScope, fillFields, readFields, revealApplicationForm, uploadResume, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
 import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
@@ -21,7 +21,9 @@ import { isExcludedApplyTarget } from "./exclude-company.js";
 import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledger.js";
 import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
 import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
-import { resolveJobLocationEligible } from "../discovery/resolve-location-eligibility.js";
+import { resolveJobLocationEligible, resolveJobLocationVerdict } from "../discovery/resolve-location-eligibility.js";
+import { postingGoneReason, redirectedAwayReason } from "./posting-gone.js";
+import { fitLocationRejection } from "./fit-location-guard.js";
 import { analyzeFullJobFit } from "./job-fit-llm.js";
 import {
   declineReasonFromFieldLabels,
@@ -141,19 +143,25 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   page.setDefaultTimeout(env.actionTimeoutMs);
   try {
     let listingNote: Awaited<ReturnType<typeof enterBestOpening>> = null;
+    let earlyExit: EarlyExit | null = null;
     try {
       await openJob(page, input.job.url);
-      listingNote = await enterBestOpening(page, input.job.role, input.job.company, input.job.url);
-      if (listingNote?.recovered) {
-        input.recoveredFrom = {
-          originalRole: input.job.role,
-          originalUrl: input.job.url,
-          replacementRole: listingNote.title,
-        };
-        pipeline.recovered = true;
+      // A sign-in wall or an unrelated website has no openings to pick from: decide that BEFORE list recovery,
+      // otherwise its nav links are mistaken for a job list.
+      earlyExit = earlyExitReason(input.job.url, page.url());
+      if (!earlyExit) {
+        listingNote = await enterBestOpening(page, input.job.role, input.job.company, input.job.url);
+        if (listingNote?.recovered) {
+          input.recoveredFrom = {
+            originalRole: input.job.role,
+            originalUrl: input.job.url,
+            replacementRole: listingNote.title,
+          };
+          pipeline.recovered = true;
+        }
+        await ensurePositionDetailPage(page, input.job.role, input.job.url);
+        await tryGreenhouseCareersFallback(page, input.job.url);
       }
-      await ensurePositionDetailPage(page, input.job.role, input.job.url);
-      await tryGreenhouseCareersFallback(page, input.job.url);
     } catch (error) {
       const message = error instanceof Error ? error.message : "navigation_failed";
       log("JOB_NAVIGATION_FAILED", { url: input.job.url, message });
@@ -190,13 +198,21 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     });
     pipeline.opened = true;
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
+    if (earlyExit?.kind === "login_wall") {
+      log("JOB_LOGIN_WALL", { url: page.url(), company: input.job.company });
+      return await loginWallResult(input, screenshots, page.url());
+    }
+    if (earlyExit?.kind === "gone") {
+      log("JOB_POSTING_GONE", { reason: earlyExit.reason, original: input.job.url, landed: page.url() });
+      return closedResult(input, screenshots, `Posting is gone (${earlyExit.reason}).`, page.url());
+    }
     if (listingNote?.blocked) {
       if (listingNote.outcome === "location_ineligible") {
         return result(input, {
           status: "location_ineligible",
           submitted: false,
           confirmationDetected: false,
-          canonicalJobUrl: listingNote.canonicalUrl || page.url(),
+          canonicalJobUrl: listingNote.canonicalUrl,
           notes: lines(["result=not_relevant", "reason=location_ineligible", listingNote.line, "Nothing was submitted."]),
           screenshots,
         });
@@ -226,42 +242,26 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       text: bodyText,
       role: activeRole,
     });
+    // Order matters: decide what KIND of page this is before judging its location. A removed posting, a sign-in
+    // wall or a careers home says nothing about the job's city, so none of them may become "location_ineligible".
     if (pageStatus === "CLOSED" || pageStatus === "NOT_FOUND") {
       log("JOB_CLOSED", { pageStatus });
-      return result(input, {
-        status: "closed",
-        submitted: false,
-        confirmationDetected: false,
-        canonicalJobUrl: page.url(),
-        notes: lines(["result=closed", "reason=job_removed", "Live check: job no longer available."]),
-        screenshots,
-      });
+      return closedResult(input, screenshots, "Live check: job no longer available.", page.url());
     }
     if (/error=true/i.test(page.url()) && !await pageHasResumeField(page)) {
       log("JOB_GREENHOUSE_BOARD_ERROR", { url: page.url() });
-      return result(input, {
-        status: "closed",
-        submitted: false,
-        confirmationDetected: false,
-        canonicalJobUrl: page.url(),
-        notes: lines(["result=closed", "reason=job_removed", "Greenhouse returned error=true (posting missing or board link)."]),
-        screenshots,
-      });
+      return closedResult(input, screenshots, "Greenhouse returned error=true (posting missing or board link).", page.url());
     }
-    if (!await resolveJobLocationEligible({ title: activeRole, snippet: bodyText, url: page.url() })) {
-      log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url() });
-      return result(input, {
-        status: "location_ineligible",
-        submitted: false,
-        confirmationDetected: false,
-        canonicalJobUrl: page.url(),
-        notes: lines([
-          "result=not_relevant",
-          "reason=location_ineligible",
-          "Role must be remote or in Central/Tel Aviv District, and not in an excluded location. Nothing was submitted.",
-        ]),
-        screenshots,
-      });
+    if (pageStatus === "LOGIN_WALL") {
+      log("JOB_LOGIN_WALL", { url: page.url(), company: input.job.company });
+      return await loginWallResult(input, screenshots, page.url());
+    }
+    if (!listingNote && !await pageHasResumeField(page)) {
+      const goneReason = await postingGoneReason(input.job.url, page.url());
+      if (goneReason) {
+        log("JOB_POSTING_GONE", { reason: goneReason, original: input.job.url, landed: page.url() });
+        return closedResult(input, screenshots, `Posting is gone (${goneReason}).`, page.url());
+      }
     }
     if (pageStatus === "CAREERS_PAGE") {
       await tryGreenhouseCareersFallback(page, input.job.url);
@@ -279,11 +279,20 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
           submitted: false,
           confirmationDetected: false,
           blocker: "careers_page",
-          canonicalJobUrl: page.url(),
-          notes: lines(["result=review", "blocker=careers_page", listingNote?.line ?? "Live page was a careers list, not one job."]),
+          notes: lines([
+            "result=review",
+            "blocker=careers_page",
+            `landed_on=${page.url().split("?", 1)[0]}`,
+            listingNote?.line ?? "Live page was a careers list, not one job.",
+          ]),
           screenshots,
         });
       }
+    }
+    const locationVerdict = await resolveJobLocationVerdict({ title: activeRole, snippet: bodyText, url: page.url() });
+    if (!locationVerdict.eligible) {
+      log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url(), source: locationVerdict.source, reason: locationVerdict.reason });
+      return locationIneligibleResult(input, screenshots, page.url(), locationVerdict.reason);
     }
     if (pageStatus === "UNKNOWN") {
       log("JOB_PAGE_UNCONFIRMED", { url: page.url(), company: input.job.company });
@@ -334,6 +343,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       missingMustHaves: fit.missingMustHaves,
       risks: fit.risks,
     });
+    // The model read the whole posting, so its stated location is better evidence than a footer that lists every office.
+    const fitLocation = fitLocationRejection(fit.requirements, activeRole);
+    if (fitLocation) {
+      log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url(), source: "job_fit", reason: fitLocation, stated: fit.requirements.location });
+      return locationIneligibleResult(input, screenshots, page.url(), `job_fit:${fitLocation}:${fit.requirements.location}`);
+    }
     if (fit.decision !== "apply" || !fit.persona) {
       const replacementRejected = Boolean(input.recoveredFrom);
       return result(input, {
@@ -1311,6 +1326,64 @@ function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): Ap
     recoveredFrom: input.recoveredFrom,
     ...extra,
   };
+}
+
+type EarlyExit = { kind: "login_wall" } | { kind: "gone"; reason: string };
+
+/** URL-only verdicts that make list recovery pointless. Only an UNRELATED domain counts as gone here; a hand-off to the company home stays recoverable. */
+function earlyExitReason(originalUrl: string, landedUrl: string): EarlyExit | null {
+  if (isLoginWallUrl(landedUrl)) {
+    return { kind: "login_wall" };
+  }
+  const reason = redirectedAwayReason(originalUrl, landedUrl);
+  return reason?.startsWith("redirected_away:") ? { kind: "gone", reason } : null;
+}
+
+async function loginWallResult(input: ApplyInput, screenshots: string[], landedOn: string): Promise<ApplicationResult> {
+  rememberManualApply(input, { blocker: "login_required", canonicalJobUrl: input.job.url });
+  return result(input, {
+    status: "manual_required",
+    submitted: false,
+    confirmationDetected: false,
+    blocker: "login_required",
+    notes: lines([
+      "result=manual_required",
+      "blocker=login_required",
+      `landed_on=${landedOn.split("?", 1)[0]}`,
+      "The site shows a sign-in page instead of the job. Open the original link while signed in.",
+    ]),
+    screenshots,
+  });
+}
+
+/**
+ * A removed posting. The sheet keeps the ORIGINAL url (no canonicalJobUrl): the landing page of a dead link is a
+ * careers home or a "not found" page, and saving it would erase the only evidence of which job this was.
+ */
+function closedResult(input: ApplyInput, screenshots: string[], detail: string, landedOn: string): ApplicationResult {
+  return result(input, {
+    status: "closed",
+    submitted: false,
+    confirmationDetected: false,
+    notes: lines(["result=closed", "reason=job_removed", `landed_on=${landedOn.split("?", 1)[0]}`, detail]),
+    screenshots,
+  });
+}
+
+function locationIneligibleResult(input: ApplyInput, screenshots: string[], jobUrl: string, evidence: string): ApplicationResult {
+  return result(input, {
+    status: "location_ineligible",
+    submitted: false,
+    confirmationDetected: false,
+    canonicalJobUrl: jobUrl,
+    notes: lines([
+      "result=not_relevant",
+      "reason=location_ineligible",
+      `location_evidence=${evidence}`,
+      "Role must be remote or in Central/Tel Aviv District, and not in an excluded location. Nothing was submitted.",
+    ]),
+    screenshots,
+  });
 }
 
 function lines(parts: string[]): string {
