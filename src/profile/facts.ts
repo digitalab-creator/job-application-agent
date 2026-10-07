@@ -271,8 +271,8 @@ export const facts: Fact[] = [
   {
     id: "boroda-platform",
     roleId: "boroda",
-    text: "Architected and built ROI Me / Budget Watch, an AI advertising ecosystem with 20+ microservices for analysis, monitoring and automated actions.",
-    tags: ["ai", "backend", "microservices"],
+    text: "Architected and operated ROI Me / Budget Watch in production as an internal AI advertising ecosystem with 20+ microservices for analysis, monitoring and automated actions.",
+    tags: ["ai", "backend", "microservices", "production", "internal-product"],
     personas: ["technical", "hybrid"],
     verified: true,
   },
