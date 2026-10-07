@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import re
 import socket
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +25,7 @@ N8N_ENV = Path("/opt/apps/n8n/.env")
 APPLY_WF_ID = "fcYSvcG7IiP8xAqr"
 CONTAINER = "job-application-agent"
 TZ = ZoneInfo("Asia/Jerusalem")
+ATTEMPTS_LEDGER = ROOT / "data" / "ledger" / "apply-attempts.jsonl"
 
 BLOCKER_RE = re.compile(r"^blocker=(\S+)", re.M)
 
@@ -82,6 +86,59 @@ class ReviewRow:
         }
 
 
+class LiveSheetError(RuntimeError):
+    """The current sheet state could not be read safely."""
+
+
+def normalize_job_url(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+        path = parsed.path.rstrip("/") or "/"
+        return urllib.parse.urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.query, ""))
+    except ValueError:
+        return url.strip()
+
+
+def same_job_url(left: str, right: str) -> bool:
+    return normalize_job_url(left) == normalize_job_url(right)
+
+
+def parse_timestamp(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(TZ)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_attempt_records() -> list[dict]:
+    if not ATTEMPTS_LEDGER.is_file():
+        return []
+    records: list[dict] = []
+    for line in ATTEMPTS_LEDGER.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def recent_attempt_for(row: ReviewRow, records: list[dict]) -> dict | None:
+    today = datetime.now(TZ).date()
+    for record in reversed(records):
+        finished_at = parse_timestamp(str(record.get("finishedAt", "")))
+        if not finished_at or finished_at.date() != today:
+            continue
+        urls = [
+            str(record.get("originalJobUrl", "")),
+            str(record.get("canonicalJobUrl", "")),
+        ]
+        if any(url and same_job_url(row.job_url, url) for url in urls):
+            return record
+    return None
+
+
 def load_n8n_api_key() -> str:
     if not N8N_ENV.is_file():
         return ""
@@ -89,6 +146,55 @@ def load_n8n_api_key() -> str:
         if line.startswith("N8N_API_KEY="):
             return line.split("=", 1)[1].strip()
     return ""
+
+
+def fetch_live_sheet_rows(api: str) -> list[ReviewRow]:
+    workflow_url = f"http://127.0.0.1:5678/api/v1/workflows/{APPLY_WF_ID}"
+    request = urllib.request.Request(workflow_url, headers={"X-N8N-API-KEY": api})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            workflow = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as error:
+        raise LiveSheetError(f"could not load apply workflow configuration: {type(error).__name__}") from error
+
+    read_node = next(
+        (
+            node for node in workflow.get("nodes", [])
+            if node.get("name") == "Read Jobs" and node.get("type") == "n8n-nodes-base.googleSheets"
+        ),
+        None,
+    )
+    parameters = read_node.get("parameters", {}) if read_node else {}
+    document_id = parameters.get("documentId", {}).get("value")
+    sheet_id = parameters.get("sheetName", {}).get("value")
+    if not document_id or not sheet_id:
+        raise LiveSheetError("Read Jobs node has no Google Sheet document or tab configured")
+
+    export_url = (
+        f"https://docs.google.com/spreadsheets/d/{urllib.parse.quote(str(document_id), safe='')}"
+        f"/export?format=csv&gid={urllib.parse.quote(str(sheet_id), safe='')}"
+    )
+    request = urllib.request.Request(
+        export_url,
+        headers={"User-Agent": "job-application-agent-review-triage/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            content = response.read().decode("utf-8-sig", "replace")
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise LiveSheetError(f"could not read the live Google Sheet export: {type(error).__name__}") from error
+
+    reader = csv.DictReader(io.StringIO(content))
+    required_columns = {"Company", "Role", "Job URL", "Status", "Notes"}
+    if not reader.fieldnames or not required_columns.issubset(reader.fieldnames):
+        raise LiveSheetError("live Google Sheet export is missing the expected job columns")
+
+    rows: list[ReviewRow] = []
+    for row_number, item in enumerate(reader, start=2):
+        row = row_from_sheet_json({**item, "row_number": row_number}, "live_sheet", None)
+        if row:
+            rows.append(row)
+    return rows
 
 
 def parse_blocker(notes: str) -> str:
@@ -118,61 +224,6 @@ def row_from_sheet_json(item: dict, source: str, execution_id: int | None) -> Re
         source=source,
         execution_id=execution_id,
     )
-
-
-def fetch_latest_apply_execution(api: str, limit: int = 8) -> tuple[int, dict] | None:
-    url = f"http://127.0.0.1:5678/api/v1/executions?workflowId={APPLY_WF_ID}&limit={limit}&status=success"
-    req = urllib.request.Request(url, headers={"X-N8N-API-KEY": api})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
-        return None
-    for ex in payload.get("data", []):
-        eid = ex.get("id")
-        if not eid:
-            continue
-        detail_url = f"http://127.0.0.1:5678/api/v1/executions/{eid}?includeData=true"
-        req2 = urllib.request.Request(detail_url, headers={"X-N8N-API-KEY": api})
-        try:
-            with urllib.request.urlopen(req2, timeout=120) as resp2:
-                detail = json.loads(resp2.read().decode("utf-8"))
-        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
-            continue
-        runs = detail.get("data", {}).get("resultData", {}).get("runData", {})
-        if runs.get("Read Jobs"):
-            return int(eid), runs
-    return None
-
-
-def collect_review_rows(runs: dict, execution_id: int) -> list[ReviewRow]:
-    by_key: dict[tuple[int, str], ReviewRow] = {}
-
-    read = runs.get("Read Jobs")
-    if read:
-        for item in read[0]["data"]["main"][0]:
-            row = row_from_sheet_json(item["json"], "sheet_read", execution_id)
-            if row:
-                by_key[(row.row_number, row.job_url)] = row
-
-    pick = runs.get("Pick Jobs")
-    if pick:
-        for item in pick[0]["data"]["main"][0]:
-            j = item["json"]
-            status = str(j.get("Status", "")).strip()
-            notes = str(j.get("Notes", "") or "")
-            if status.lower() != "review" and "blocker=" not in notes:
-                continue
-            row = row_from_sheet_json({**j, "Status": "Review"}, "pick_jobs", execution_id)
-            if row:
-                by_key[(row.row_number, row.job_url)] = row
-
-    def sort_key(r: ReviewRow) -> tuple[int, int, int]:
-        known = 1 if r.blocker and r.blocker != "unknown" else 0
-        from_pick = 1 if r.source == "pick_jobs" else 0
-        return (-known, -from_pick, -r.row_number)
-
-    return sorted(by_key.values(), key=sort_key)
 
 
 def html_to_text(html: str, limit: int = 15_000) -> str:
@@ -339,6 +390,7 @@ def pick_row(
     *,
     code_fixable_only: bool,
     live_check: bool,
+    attempt_records: list[dict],
 ) -> ReviewRow | None:
     if row_number is not None:
         for row in rows:
@@ -354,6 +406,8 @@ def pick_row(
 
     pre_candidates: list[tuple[ReviewRow, str]] = []
     for row in rows:
+        if recent_attempt_for(row, attempt_records):
+            continue
         events = worker_log_events(row.job_url, row.company)
         blocker = effective_blocker(row, events)
         if code_fixable_only and not is_code_fixable(blocker):
@@ -520,21 +574,22 @@ def main() -> int:
     if not api:
         print("triage-review-row: missing N8N_API_KEY in /opt/apps/n8n/.env", file=sys.stderr)
         return 2
-    fetched = fetch_latest_apply_execution(api)
-    if not fetched:
-        print("triage-review-row: could not load apply workflow execution from n8n", file=sys.stderr)
+    try:
+        rows = fetch_live_sheet_rows(api)
+    except LiveSheetError as error:
+        print(f"triage-review-row: {error}", file=sys.stderr)
         return 2
-    execution_id, runs = fetched
-    rows = collect_review_rows(runs, execution_id)
     if not rows:
-        print("triage-review-row: no Review rows in latest apply execution", file=sys.stderr)
+        print("triage-review-row: no Review rows in the live sheet", file=sys.stderr)
         return 1
+    attempt_records = load_attempt_records()
     selected = pick_row(
         rows,
         args.row,
         args.url,
         code_fixable_only=code_fixable_only,
         live_check=live_check,
+        attempt_records=attempt_records,
     )
     if not selected:
         if code_fixable_only:
