@@ -1,4 +1,4 @@
-import { dailyApplyLimit } from "../application/daily-quota.js";
+import { dailyApplyMaxAttempts } from "../application/daily-quota.js";
 import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
 import { env } from "../config/env.js";
 import { withJobCost } from "../llm/cost-ledger.js";
@@ -64,12 +64,12 @@ export async function runDiscovery(input: {
     };
   }
   const queueStats = input.newQueueStats ?? { tech: 0, marketing: 0, total: 0, techPct: 65 };
-  const applyLimit = dailyApplyLimit();
-  if (shouldSkipDiscoveryForQueueDepth(queueStats.statusNew, applyLimit)) {
-    const threshold = applyLimit * DISCOVER_SKIP_NEW_MULTIPLIER;
+  const applySafetyCap = dailyApplyMaxAttempts();
+  if (shouldSkipDiscoveryForQueueDepth(queueStats.statusNew, applySafetyCap)) {
+    const threshold = applySafetyCap * DISCOVER_SKIP_NEW_MULTIPLIER;
     log("DISCOVERY_SKIPPED_QUEUE_DEPTH", {
       statusNew: queueStats.statusNew,
-      dailyApplyLimit: applyLimit,
+      dailyApplyLimit: applySafetyCap,
       threshold,
     });
     return {
@@ -81,7 +81,7 @@ export async function runDiscovery(input: {
       notes: [
         `discovery_skipped=queue_depth`,
         `status_new=${queueStats.statusNew}`,
-        `threshold=${threshold} (${DISCOVER_SKIP_NEW_MULTIPLIER}× daily apply limit ${applyLimit})`,
+        `threshold=${threshold} (${DISCOVER_SKIP_NEW_MULTIPLIER}× apply safety cap ${applySafetyCap})`,
         "Sheet still has enough New rows — run apply, not discover.",
       ].join("\n"),
     };

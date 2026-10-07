@@ -33,12 +33,17 @@ test("hosting reserve counts only when MONTHLY_FIXED_COST_ILS is set", () => {
     assert.equal(snap.fixedCostIls, 0);
     assert.equal(snap.spentIls, 0);
     assert.equal(snap.remainingIls, 500);
+    assert.equal(snap.dailySpentIls, 0);
+    assert.equal(snap.dailyBudgetIls, Math.round((500 / snap.daysRemaining) * 100) / 100);
+    assert.equal(snap.dailyRemainingIls, snap.dailyBudgetIls);
     assert.equal(snap.open, true);
     process.env.MONTHLY_FIXED_COST_ILS = "150";
     const withFixed = budgetSnapshot();
     assert.equal(withFixed.fixedCostIls, 150);
     assert.equal(withFixed.spentIls, 150);
     assert.equal(withFixed.remainingIls, 350);
+    assert.equal(withFixed.dailySpentIls, 0);
+    assert.equal(withFixed.dailyBudgetIls, Math.round((350 / withFixed.daysRemaining) * 100) / 100);
   } finally {
     if (previousLedger === undefined) {
       delete process.env.COST_LEDGER_PATH;
@@ -74,5 +79,40 @@ test("default monthly cap is 500 ils", () => {
     } else {
       process.env.MONTHLY_BUDGET_ILS = previous;
     }
+  }
+});
+
+test("daily allowance is recalculated from remaining monthly spend", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "daily-budget-"));
+  const previousLedger = process.env.COST_LEDGER_PATH;
+  const previousBudget = process.env.MONTHLY_BUDGET_ILS;
+  const previousFixed = process.env.MONTHLY_FIXED_COST_ILS;
+  process.env.COST_LEDGER_PATH = path.join(dir, "costs.jsonl");
+  process.env.MONTHLY_BUDGET_ILS = "500";
+  process.env.MONTHLY_FIXED_COST_ILS = "0";
+  try {
+    const month = budgetSnapshot().month;
+    recordExternalSpend({
+      month,
+      source: "external",
+      label: "daily_test_spend",
+      ils: 5,
+    });
+    const snap = budgetSnapshot();
+    assert.equal(snap.spentIls, 5);
+    assert.equal(snap.dailySpentIls, 5);
+    assert.equal(snap.dailyBudgetIls, Math.round((495 / snap.daysRemaining) * 100) / 100);
+    assert.equal(
+      snap.dailyRemainingIls,
+      Math.max(0, Math.round((snap.dailyBudgetIls - 5) * 100) / 100),
+    );
+    assert.equal(snap.bySource.external?.ils, 5);
+  } finally {
+    if (previousLedger === undefined) delete process.env.COST_LEDGER_PATH;
+    else process.env.COST_LEDGER_PATH = previousLedger;
+    if (previousBudget === undefined) delete process.env.MONTHLY_BUDGET_ILS;
+    else process.env.MONTHLY_BUDGET_ILS = previousBudget;
+    if (previousFixed === undefined) delete process.env.MONTHLY_FIXED_COST_ILS;
+    else process.env.MONTHLY_FIXED_COST_ILS = previousFixed;
   }
 });

@@ -644,9 +644,16 @@ def print_report(day: str | None = None) -> int:
     quota = http_json(f"{WORKER_BASE}/quota", token) if token else None
     budget = http_json(f"{WORKER_BASE}/budget", token) if token else None
 
-    limit = int(health.get("dailyApplyLimit") or quota.get("limit") if quota else 20)
-    counted = int(health.get("dailyApplyCounted") or quota.get("counted") if quota else 0)
-    remaining = int(quota.get("remaining") if quota else max(0, limit - counted))
+    attempt_cap = int(
+        health.get("dailyApplySafetyAttempts")
+        or quota.get("maxAttempts")
+        if quota
+        else 1000
+    )
+    worker_confirmed = int(quota.get("confirmed") if quota else 0)
+    daily_budget = float(budget.get("dailyBudgetIls") or 0) if budget else 0
+    daily_spent = float(budget.get("dailySpentIls") or 0) if budget else 0
+    daily_remaining = float(budget.get("dailyRemainingIls") or 0) if budget else 0
 
     confirmed = confirmed_today(day)
     attempts = attempts_today(day)
@@ -695,14 +702,13 @@ def print_report(day: str | None = None) -> int:
     discover_depth_threshold = int(
         quota.get("discoverySkipThreshold")
         if quota and quota.get("discoverySkipThreshold") is not None
-        else limit * 3
+        else attempt_cap * 3
     )
     sheet_new = queue["status_new"] if queue else None
     discover_should_skip = (
         isinstance(sheet_new, int) and sheet_new > discover_depth_threshold
     )
 
-    met_target = len(confirmed) >= limit
     eligible_attempts = len(attempts)
 
     def rate(numerator: int, denominator: int) -> str:
@@ -711,22 +717,24 @@ def print_report(day: str | None = None) -> int:
     print(f"# Daily apply report — {day}")
     print(f"_Generated {now}_\n")
     print(
-        f"**{len(confirmed)}/{limit} confirmed from {eligible_attempts} eligible attempts. "
-        f"{max(0, limit - len(confirmed))} remaining.**\n"
+        f"**{len(confirmed)} confirmed from {eligible_attempts} eligible attempts. "
+        f"Daily budget: {daily_spent:.2f}/{daily_budget:.2f} ILS, "
+        f"{daily_remaining:.2f} ILS remaining.**\n"
     )
 
     print("## Summary")
     print(f"| Metric | Value |")
     print(f"|--------|-------|")
-    print(f"| Daily limit | {limit} |")
     print(f"| **Confirmed submissions** | **{len(confirmed)}** |")
-    print(f"| Quota counted (worker) | {counted} / {limit} ({remaining} remaining) |")
+    print(f"| Confirmed submissions (worker) | {worker_confirmed} |")
+    print(f"| Daily budget ILS | {daily_spent:.2f} / {daily_budget:.2f} ({daily_remaining:.2f} remaining) |")
+    print(f"| Attempt safety cap | {attempt_cap} |")
     print(f"| Worker attempts with terminal outcomes | {ledger_attempts} |")
     print(f"| Jobs opened (docker logs) | {job_opened} |")
     print(f"| CV PDFs in today's folder | {cv_count} ({cv_linked} tied to ledger, {cv_orphan} extra previews/retries) |")
     print(f"| n8n Pick Jobs (latest run) | {queue['pick_jobs_output'] if queue else '—'} |")
     print(f"| Worker container | {'up' if container_running() else 'down/missing'} |")
-    print(f"| Met {limit}-apply target? | **{'yes' if met_target else 'no'}** |")
+    print(f"| Daily budget available? | **{'yes' if daily_remaining > 0 else 'no'}** |")
     print()
 
     print("## Quality funnel")
@@ -755,15 +763,15 @@ def print_report(day: str | None = None) -> int:
         skipped = queue["status_new"] - queue["automatable_new"]
         if skipped > 0:
             print(f"- **{skipped}** `New` rows have no usable http(s) link (or a known junk URL).")
-        if queue["pick_jobs_output"] < limit and queue["automatable_new"] >= limit:
+        if queue["pick_jobs_output"] < attempt_cap and queue["automatable_new"] >= attempt_cap:
             print(
                 f"- Eligible queue is **{queue['automatable_new']}**, but this run only picked **{queue['pick_jobs_output']}**. "
-                "Check the Pick Jobs mix (13 tech / 7 marketing) and daily cap of 20."
+                f"Check the attempt safety cap of {attempt_cap}."
             )
         if discover_should_skip:
             print(
                 f"- Discover **should be skipped**: `{queue['status_new']}` New rows > "
-                f"{discover_depth_threshold} ({DISCOVER_SKIP_NEW_MULTIPLIER}× daily limit {limit})."
+                f"{discover_depth_threshold} ({DISCOVER_SKIP_NEW_MULTIPLIER}× attempt safety cap {attempt_cap})."
             )
         print()
 
@@ -778,6 +786,10 @@ def print_report(day: str | None = None) -> int:
             print(
                 f"- Monthly budget ILS: {budget.get('spentIls')}/{budget.get('limitIls')} "
                 f"({budget.get('remainingIls')} remaining)"
+            )
+            print(
+                f"- Daily budget ILS: {budget.get('dailySpentIls')}/{budget.get('dailyBudgetIls')} "
+                f"({budget.get('dailyRemainingIls')} remaining; {budget.get('daysRemaining')} days remaining)"
             )
         print()
 
@@ -853,7 +865,7 @@ def print_report(day: str | None = None) -> int:
         print()
 
     if quota_rows:
-        print("## Quota ledger (counts toward daily limit)")
+        print("## Confirmed-application ledger")
         by_status = Counter(str(r.get("status", "?")) for r in quota_rows)
         for status, n in by_status.most_common():
             print(f"- `{status}`: {n}")
@@ -866,24 +878,6 @@ def print_report(day: str | None = None) -> int:
     print()
 
     blockers: list[str] = []
-    if len(confirmed) < limit and ledger_attempts < limit:
-        if queue and queue["pick_jobs_output"] < limit and queue["automatable_new"] >= limit:
-            blockers.append(
-                f"Eligible `New` URLs: **{queue['automatable_new']}**, but Pick Jobs only output **{queue['pick_jobs_output']}**."
-            )
-        elif pick_n := (queue["pick_jobs_output"] if queue else None):
-            if isinstance(pick_n, int) and pick_n > ledger_attempts:
-                blockers.append(
-                    f"n8n picked **{pick_n}** jobs but only **{ledger_attempts}** reached the worker ledger."
-                )
-            else:
-                blockers.append(
-                    f"Only **{ledger_attempts}** worker attempts logged (target {limit})."
-                )
-        else:
-            blockers.append(
-                f"Only **{ledger_attempts}** worker attempts logged (target {limit})."
-            )
     if job_opened == 0 and ledger_attempts > 0:
         blockers.append(
             "Docker logs for today lack `JOB_OPENED` (container likely restarted) — use the attempts table above."
@@ -898,10 +892,10 @@ def print_report(day: str | None = None) -> int:
         blockers.append(f"**{review_events}** `REVIEW_REQUIRED` (manual screening answers).")
         for q in review_questions(events)[:5]:
             blockers.append(f"  - {q}")
-    if counted >= limit and len(confirmed) < limit:
-        blockers.append("Daily quota exhausted before enough confirmed submissions.")
     if budget and float(budget.get("remainingIls") or 0) <= 0:
         blockers.append("Monthly LLM budget exhausted (`budget_reached`).")
+    elif budget and daily_remaining <= 0:
+        blockers.append("Calculated daily budget exhausted (`budget_reached`).")
     deep_queue_discover_runs = [
         run for run in discover_runs
         if discover_states.get(run.execution_id) == "scanned"
@@ -928,10 +922,7 @@ def print_report(day: str | None = None) -> int:
 
     print("## What stopped progress")
     if not blockers:
-        if met_target:
-            print("- Nothing critical; daily target met.")
-        else:
-            print("- No dominant blocker in logs; check sheet queue and n8n execution details.")
+        print("- No dominant blocker in logs; continue while the calculated daily budget remains open.")
     else:
         for b in blockers:
             print(f"- {b}")
@@ -953,15 +944,15 @@ def print_report(day: str | None = None) -> int:
         )
     if review_events or failed_blockers.get("missing_fact"):
         print("- Answer or tune screening rules for `REVIEW_REQUIRED` / missing-fact jobs; re-run apply for those rows.")
-    if len(confirmed) < limit and not discover_should_skip and (not queue or queue["automatable_new"] < limit):
+    if daily_remaining > 0 and not discover_should_skip and (not queue or queue["automatable_new"] < attempt_cap):
         print("- Sheet queue is thin — run discover or add `New` rows.")
-    elif len(confirmed) < limit and discover_should_skip:
+    elif daily_remaining > 0 and discover_should_skip:
         print("- Queue is deep enough — **do not run discover**; fix apply blockers and re-run apply only.")
     if request_failed and ledger_attempts > 0 and len(confirmed) == 0:
         print("- Re-trigger apply after fix: n8n webhook `job-apply-run` or wait for scheduled apply.")
     print()
 
-    return 0 if met_target else 1
+    return 0 if not blockers else 1
 
 
 def main() -> None:

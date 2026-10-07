@@ -146,12 +146,25 @@ export type ApplicationResult = {
   /** Copy-paste fields + CV link for Google Sheet Manual rows. */
   manualFillGuide?: string;
   llmCostUsd?: number;
-  quota?: { day: string; limit: number; counted: number; remaining: number };
+  quota?: {
+    day: string;
+    confirmed: number;
+    maxAttempts: number;
+    attempted: number;
+    attemptsRemaining: number;
+  };
   budget?: {
+    day: string;
     month: string;
     limitIls: number;
     spentIls: number;
     remainingIls: number;
+    daysRemaining: number;
+    dailyBudgetIls: number;
+    dailySpentIls: number;
+    dailyRemainingIls: number;
+    monthlyOpen: boolean;
+    dailyOpen: boolean;
     open: boolean;
   };
 };

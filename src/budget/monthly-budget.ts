@@ -2,7 +2,9 @@ import { monthlyFixedCostIls, usdIlsRate } from "./config.js";
 import { readCostCalls, recordExternalSpend } from "../llm/cost-ledger.js";
 
 export type BudgetSnapshot = {
+  day: string;
   month: string;
+  daysRemaining: number;
   limitIls: number;
   fixedCostIls: number;
   llmSpendUsd: number;
@@ -10,6 +12,11 @@ export type BudgetSnapshot = {
   manualSpendIls: number;
   spentIls: number;
   remainingIls: number;
+  dailyBudgetIls: number;
+  dailySpentIls: number;
+  dailyRemainingIls: number;
+  monthlyOpen: boolean;
+  dailyOpen: boolean;
   open: boolean;
   usdIlsRate: number;
   bySource: Record<string, { usd: number; ils: number }>;
@@ -24,6 +31,7 @@ export function monthlyBudgetLimitIls(): number {
 }
 
 export function budgetSnapshot(): BudgetSnapshot {
+  const day = jerusalemDay();
   const month = jerusalemMonth();
   const limitIls = monthlyBudgetLimitIls();
   const rate = usdIlsRate();
@@ -33,6 +41,7 @@ export function budgetSnapshot(): BudgetSnapshot {
   const fixedEnabled = monthlyFixedCostIls() > 0;
   let platformIls = 0;
   let manualSpendIls = 0;
+  let dailySpentIls = 0;
   for (const call of calls) {
     const source = call.source ?? "apply";
     const row = bySource[source] ?? { usd: 0, ils: 0 };
@@ -42,14 +51,23 @@ export function budgetSnapshot(): BudgetSnapshot {
       }
       platformIls = roundIls(platformIls + (call.ils ?? 0));
       row.ils = roundIls(row.ils + (call.ils ?? 0));
+      row.usd = roundUsd(row.usd + call.usd);
     } else if (call.source === "external") {
       const ils = call.ils ?? usdToIls(call.usd, rate);
       manualSpendIls = roundIls(manualSpendIls + ils);
+      row.usd = roundUsd(row.usd + call.usd);
       row.ils = roundIls(row.ils + ils);
+      if (call.day === day) {
+        dailySpentIls = roundIls(dailySpentIls + ils);
+      }
     } else if (call.usd > 0) {
       llmSpendUsd = roundUsd(llmSpendUsd + call.usd);
       row.usd = roundUsd(row.usd + call.usd);
-      row.ils = roundIls(row.ils + usdToIls(call.usd, rate));
+      const ils = usdToIls(call.usd, rate);
+      row.ils = roundIls(row.ils + ils);
+      if (call.day === day) {
+        dailySpentIls = roundIls(dailySpentIls + ils);
+      }
     }
     bySource[source] = row;
   }
@@ -59,8 +77,17 @@ export function budgetSnapshot(): BudgetSnapshot {
   const llmSpendIls = usdToIls(llmSpendUsd, rate);
   const spentIls = roundIls(fixedCostIls + llmSpendIls + manualSpendIls);
   const remainingIls = roundIls(Math.max(0, limitIls - spentIls));
+  // Include today in the divisor. Subtracting today's variable spend below makes the
+  // allowance self-correct after every recorded model or external cost.
+  const daysRemaining = daysRemainingInMonth();
+  const dailyBudgetIls = roundIls(remainingIls / daysRemaining);
+  const dailyRemainingIls = roundIls(Math.max(0, dailyBudgetIls - dailySpentIls));
+  const monthlyOpen = remainingIls > 0.01;
+  const dailyOpen = monthlyOpen && dailyRemainingIls > 0.01;
   return {
+    day,
     month,
+    daysRemaining,
     limitIls,
     fixedCostIls,
     llmSpendUsd: roundUsd(llmSpendUsd),
@@ -68,7 +95,12 @@ export function budgetSnapshot(): BudgetSnapshot {
     manualSpendIls,
     spentIls,
     remainingIls,
-    open: remainingIls > 0.01,
+    dailyBudgetIls,
+    dailySpentIls,
+    dailyRemainingIls,
+    monthlyOpen,
+    dailyOpen,
+    open: dailyOpen,
     usdIlsRate: rate,
     bySource,
   };
@@ -106,6 +138,10 @@ export function recordPlatformAllocationIfNeeded(): void {
 
 export { recordExternalSpend };
 
+function jerusalemDay(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(date);
+}
+
 function jerusalemMonth(date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Jerusalem",
@@ -115,6 +151,20 @@ function jerusalemMonth(date = new Date()): string {
   const year = parts.find((part) => part.type === "year")?.value ?? "1970";
   const month = parts.find((part) => part.type === "month")?.value ?? "01";
   return `${year}-${month}`;
+}
+
+function daysRemainingInMonth(date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? "1970");
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? "1");
+  const totalDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return Math.max(1, totalDays - day + 1);
 }
 
 function roundIls(value: number): number {
