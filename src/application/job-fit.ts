@@ -34,6 +34,38 @@ export const jobFitAnalysisSchema = z.object({
 });
 
 export type JobFitAnalysis = z.infer<typeof jobFitAnalysisSchema>;
+
+/**
+ * Output shape sent to the LLM. Lives next to the zod schema (single source of truth) and
+ * `satisfies Record<keyof JobFitAnalysis, unknown>` makes the compiler fail if a top-level key is added/removed
+ * in the schema but not here (nested `requirements` keys: keep in sync with requirementsSchema above).
+ * Without it the model invents its own keys (decision / candidateFit / rationale) and parsing fails.
+ */
+export const JOB_FIT_OUTPUT_EXAMPLE = {
+  requirements: {
+    roleFamily: "technical | marketing | hybrid | product | operations | other",
+    seniority: "intern | junior | mid | senior | lead | manager | director | unknown",
+    mustHaveSkills: ["skill"],
+    preferredSkills: ["skill"],
+    responsibilities: ["responsibility"],
+    yearsRequired: 0,
+    location: "city, country",
+    workMode: "remote | hybrid | onsite | unknown",
+    languageRequirements: ["language"],
+    educationRequirements: ["requirement"],
+    managementRequirement: false,
+    domainRequirements: ["domain"],
+    hardBlockers: ["mandatory requirement the candidate cannot meet"],
+  },
+  persona: "technical | marketing | hybrid",
+  matchedMustHaves: ["must-have skill the candidate has"],
+  matchedPreferred: ["preferred skill the candidate has"],
+  matchedFactIds: ["verifiedFacts[].id supporting the match"],
+  missingMustHaves: ["must-have skill the candidate lacks"],
+  risks: ["risk"],
+  strongestEvidence: ["short evidence from verified facts"],
+  reason: "one short paragraph",
+} as const satisfies Record<keyof JobFitAnalysis, unknown>;
 export type JobRequirements = z.infer<typeof requirementsSchema>;
 
 export type JobFitResult = {
