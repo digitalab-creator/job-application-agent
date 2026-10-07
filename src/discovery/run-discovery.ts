@@ -26,6 +26,7 @@ export type DiscoveryResult = {
     category: string;
     whyItFits: string;
     source: string;
+    location: string;
     foundDate: string;
   }>;
   scannedBoards: number;

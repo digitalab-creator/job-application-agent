@@ -1,8 +1,10 @@
 import { getExcludedLocations } from "../application/exclude-location.js";
 import { log } from "../logging/logger.js";
 import {
-  classifyLocationRules,
+  classifyLocationDetailed,
   isDiscoveryLocationEligible,
+  LOCATION_RULES_VERSION,
+  matchesExcludedLocationHead,
   type LocationRulesVerdict,
 } from "./location-eligibility.js";
 import { factsToSnippet, researchJobLocationWithLlm } from "./location-llm-resolve.js";
@@ -11,10 +13,9 @@ import {
   getCachedLocationVerdict,
   locationCacheKey,
   setCachedLocationVerdict,
+  type CachedLocationVerdict,
   type LocationVerdictSource,
 } from "./location-verdict-cache.js";
-
-const inflight = new Map<string, Promise<boolean>>();
 
 export type ResolveLocationInput = {
   title: string;
@@ -22,17 +23,30 @@ export type ResolveLocationInput = {
   url: string;
 };
 
+/** Why a job was judged eligible or not. `reason` is stored in the sheet Location column for auditing. */
+export type LocationVerdict = {
+  eligible: boolean;
+  source: LocationVerdictSource | "blocked_city";
+  reason: string;
+};
+
+const inflight = new Map<string, Promise<LocationVerdict>>();
+
 /**
  * Location gate with disk cache + in-flight dedupe. Rules first; optional page fetch and LLM web search
  * only when the job looks Israeli but city/remote is unknown.
  */
-export async function resolveJobLocationEligible(input: ResolveLocationInput): Promise<boolean> {
+export async function resolveJobLocationVerdict(input: ResolveLocationInput): Promise<LocationVerdict> {
+  // The block list is the one thing that can change without a deploy, so it always beats the cache.
+  if (matchesExcludedLocationHead(input.title, input.snippet, input.url)) {
+    return { eligible: false, source: "blocked_city", reason: "blocked_city" };
+  }
+
   const key = locationCacheKey(input.url, input.title);
-  const cached = getCachedLocationVerdict(key);
-  const snippetRich = input.snippet.trim().length > 300;
-  if (cached && !(snippetRich && cached.source === "rules" && cached.eligible === false)) {
+  const cached = usableCachedVerdict(getCachedLocationVerdict(key), input);
+  if (cached) {
     log("LOCATION_VERDICT_CACHE_HIT", { key, eligible: cached.eligible, source: cached.source });
-    return cached.eligible;
+    return { eligible: cached.eligible, source: cached.source, reason: cached.reason };
   }
 
   const existing = inflight.get(key);
@@ -47,27 +61,52 @@ export async function resolveJobLocationEligible(input: ResolveLocationInput): P
   return work;
 }
 
-async function resolveUncached(input: ResolveLocationInput, key: string): Promise<boolean> {
-  const excluded = getExcludedLocations();
-  const verdict = classifyLocationRules(input.title, input.snippet, input.url, excluded);
-  if (verdict === "eligible") {
-    return remember(key, true, "rules", "matched_remote_or_metro_district");
+export async function resolveJobLocationEligible(input: ResolveLocationInput): Promise<boolean> {
+  return (await resolveJobLocationVerdict(input)).eligible;
+}
+
+/**
+ * Cache entries from older rules are ignored (rules/page_fetch verdicts only; LLM research is expensive and
+ * independent of the regexes). A cheap "ineligible" made from a thin snippet is re-judged once a rich snippet exists.
+ */
+function usableCachedVerdict(
+  cached: CachedLocationVerdict | null,
+  input: ResolveLocationInput,
+): CachedLocationVerdict | null {
+  if (!cached) {
+    return null;
   }
-  if (verdict === "ineligible") {
-    return remember(key, false, "rules", "failed_rules");
+  if (cached.source !== "llm_search" && cached.rulesVersion !== LOCATION_RULES_VERSION) {
+    return null;
+  }
+  const snippetRich = input.snippet.trim().length > 300;
+  if (snippetRich && cached.source === "rules" && !cached.eligible) {
+    return null;
+  }
+  return cached;
+}
+
+async function resolveUncached(input: ResolveLocationInput, key: string): Promise<LocationVerdict> {
+  const excluded = getExcludedLocations();
+  const detail = classifyLocationDetailed(input.title, input.snippet, input.url, excluded);
+  if (detail.verdict === "eligible") {
+    return remember(key, true, "rules", detail.evidence);
+  }
+  if (detail.verdict === "ineligible") {
+    return remember(key, false, "rules", detail.evidence);
   }
 
-  log("LOCATION_LOOKUP_START", { key, url: input.url, title: input.title.slice(0, 80) });
+  log("LOCATION_LOOKUP_START", { key, url: input.url, title: input.title.slice(0, 80), why: detail.evidence });
 
   const pageText = await fetchJobPostingText(input.url);
   if (pageText) {
     const mergedSnippet = `${input.snippet} ${pageText}`.trim();
-    if (isDiscoveryLocationEligible(input.title, mergedSnippet, input.url, excluded)) {
-      return remember(key, true, "page_fetch", "eligible_after_page_fetch");
+    const afterPage = classifyLocationDetailed(input.title, mergedSnippet, input.url, excluded);
+    if (afterPage.verdict === "eligible") {
+      return remember(key, true, "page_fetch", afterPage.evidence);
     }
-    const afterPage = classifyLocationRules(input.title, mergedSnippet, input.url, excluded);
-    if (afterPage === "ineligible") {
-      return remember(key, false, "page_fetch", "ineligible_after_page_fetch");
+    if (afterPage.verdict === "ineligible") {
+      return remember(key, false, "page_fetch", afterPage.evidence);
     }
   }
 
@@ -76,11 +115,10 @@ async function resolveUncached(input: ResolveLocationInput, key: string): Promis
     snippet: pageText ? `${input.snippet} ${pageText}` : input.snippet,
     url: input.url,
   });
-  const enriched = `${input.snippet} ${factsToSnippet(facts)}`.trim();
+  const factsText = factsToSnippet(facts);
+  const enriched = `${input.snippet} ${factsText}`.trim();
   const eligible = isDiscoveryLocationEligible(input.title, enriched, input.url, excluded);
-  const reason = eligible
-    ? `llm_research_ok:${factsToSnippet(facts).slice(0, 120)}`
-    : `llm_research_reject:${factsToSnippet(facts).slice(0, 120)}`;
+  const reason = `${eligible ? "llm_ok" : "llm_reject"}:${factsText.slice(0, 100)}`;
   log("LOCATION_LOOKUP_DONE", { key, eligible, facts });
   return remember(key, eligible, "llm_search", reason);
 }
@@ -90,12 +128,12 @@ function remember(
   eligible: boolean,
   source: LocationVerdictSource,
   reason: string,
-): boolean {
-  setCachedLocationVerdict(key, { eligible, source, reason });
-  return eligible;
+): LocationVerdict {
+  setCachedLocationVerdict(key, { eligible, source, reason, rulesVersion: LOCATION_RULES_VERSION });
+  return { eligible, source, reason };
 }
 
 /** Sync helper for tests and n8n-style rough filters. */
 export function locationRulesVerdict(input: ResolveLocationInput): LocationRulesVerdict {
-  return classifyLocationRules(input.title, input.snippet, input.url, getExcludedLocations());
+  return classifyLocationDetailed(input.title, input.snippet, input.url, getExcludedLocations()).verdict;
 }

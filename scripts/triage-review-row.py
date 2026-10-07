@@ -240,10 +240,36 @@ def role_mentioned(role: str, text: str) -> bool:
     return hits >= (len(words) + 1) // 2
 
 
+GREENHOUSE_JOB_RE = re.compile(r"greenhouse\.io/(?:embed/)?([^/?#]+)/jobs/(\d+)", re.I)
+GREENHOUSE_EMBED_RE = re.compile(r"greenhouse\.io/embed/job_app\?[^#]*?for=([\w-]+)[^#]*?token=(\d+)", re.I)
+
+
+def greenhouse_api_dead(url: str, timeout: int = 15) -> bool:
+    """True when the public Greenhouse board API says the job no longer exists.
+
+    Removed Greenhouse postings often redirect to the company careers home (looks "alive"
+    to a plain HTTP probe), but boards-api answers 404 "Job not found".
+    """
+    match = GREENHOUSE_JOB_RE.search(url) or GREENHOUSE_EMBED_RE.search(url)
+    if not match:
+        return False
+    slug, job_id = match.group(1), match.group(2)
+    api = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs/{job_id}"
+    try:
+        urllib.request.urlopen(urllib.request.Request(api, headers={"User-Agent": "job-application-agent-triage/1.0"}), timeout=timeout)
+    except urllib.error.HTTPError as err:
+        return err.code == 404
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return False  # Probe failure is not proof of a dead job.
+    return False
+
+
 def quick_live_job_status(url: str, role: str, timeout: int = 22) -> tuple[str | None, str]:
     """HTTP probe for dead links only. None = alive (includes careers/listing pages)."""
     if not url.lower().startswith("http"):
         return None, "not_http"
+    if greenhouse_api_dead(url):
+        return "NOT_FOUND", "greenhouse_api_404"
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0 (compatible; job-application-agent-triage/1.0)"},
