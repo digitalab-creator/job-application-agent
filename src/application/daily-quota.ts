@@ -3,9 +3,7 @@ import path from "node:path";
 
 export type QuotaSnapshot = {
   day: string;
-  limit: number;
-  counted: number;
-  remaining: number;
+  confirmed: number;
   maxAttempts: number;
   attempted: number;
   attemptsRemaining: number;
@@ -21,47 +19,36 @@ type QuotaRow = {
   status: string;
 };
 
-/** Only a confirmed send uses a daily slot. Review and skips stay available for a later fix. */
+/** Only a confirmed send is counted for reporting; it no longer blocks applies. */
 export function countsTowardDailyLimit(status: string): boolean {
   return status === "applied";
 }
 
-export function dailyApplyLimit(): number {
-  const parsed = Number(process.env.DAILY_APPLY_LIMIT ?? "20");
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return 20;
-  }
-  return Math.floor(parsed);
-}
-
 export function dailyApplyMaxAttempts(): number {
-  const parsed = Number(process.env.DAILY_APPLY_MAX_ATTEMPTS ?? "40");
+  const parsed = Number(process.env.DAILY_APPLY_MAX_ATTEMPTS ?? "1000");
   if (!Number.isFinite(parsed) || parsed < 1) {
-    return 40;
+    return 1000;
   }
   return Math.floor(parsed);
 }
 
 export function quotaSnapshot(): QuotaSnapshot {
-  const limit = dailyApplyLimit();
-  const counted = countedToday();
+  const confirmed = countedToday();
   const maxAttempts = dailyApplyMaxAttempts();
   const attempted = attemptedToday();
   return {
     day: jerusalemDay(),
-    limit,
-    counted,
-    remaining: Math.max(0, limit - counted),
+    confirmed,
     maxAttempts,
     attempted,
     attemptsRemaining: Math.max(0, maxAttempts - attempted),
-    discoverySkipThreshold: DISCOVERY_SKIP_NEW_MULTIPLIER * limit,
+    discoverySkipThreshold: DISCOVERY_SKIP_NEW_MULTIPLIER * maxAttempts,
   };
 }
 
 export function quotaIsOpen(): boolean {
   const snapshot = quotaSnapshot();
-  return snapshot.remaining > 0 && snapshot.attemptsRemaining > 0;
+  return snapshot.attemptsRemaining > 0;
 }
 
 export function rememberQuotaUse(input: { url: string; status: string }): void {

@@ -197,7 +197,10 @@ const server = http.createServer(async (req, res) => {
             notes: [
               "result=budget_reached",
               `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
-              "The shared monthly budget is exhausted. This job was not opened.",
+              `daily_budget_ils=${budget.dailySpentIls}/${budget.dailyBudgetIls}`,
+              budget.monthlyOpen
+                ? "The calculated daily budget is used for today. This job was not opened."
+                : "The shared monthly budget is exhausted. This job was not opened.",
             ].join("\n"),
           };
           rememberAttempt(input, outcome);
@@ -218,11 +221,8 @@ const server = http.createServer(async (req, res) => {
             quota,
             notes: [
               "result=quota_reached",
-              `daily_quota=${quota.counted}/${quota.limit}`,
               `daily_attempts=${quota.attempted}/${quota.maxAttempts}`,
-              quota.remaining === 0
-                ? "The confirmed daily limit is already used. This job was not opened."
-                : "The daily safety attempt cap is already used. This job was not opened.",
+              "The daily safety attempt cap is already used. This job was not opened.",
             ].join("\n"),
           };
           rememberAttempt(input, outcome);
@@ -242,12 +242,26 @@ const server = http.createServer(async (req, res) => {
           outcome.llmCostUsd = tracked.usd;
           outcome.quota = quota;
           outcome.budget = compactBudget(budget);
+          if (!budget.open) {
+            log("APPLY_BUDGET_CLOSED", {
+              day: budget.day,
+              monthlyOpen: budget.monthlyOpen,
+              dailyOpen: budget.dailyOpen,
+              spentIls: budget.spentIls,
+              remainingIls: budget.remainingIls,
+              dailySpentIls: budget.dailySpentIls,
+              dailyBudgetIls: budget.dailyBudgetIls,
+              dailyRemainingIls: budget.dailyRemainingIls,
+            });
+          }
           outcome.notes = [
             outcome.notes,
             `llm_cost_usd=${tracked.usd}`,
             `llm_calls=${tracked.calls}`,
-            `daily_quota=${quota.counted}/${quota.limit}`,
+            `daily_confirmed=${quota.confirmed}`,
+            `daily_attempts=${quota.attempted}/${quota.maxAttempts}`,
             `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
+            `daily_budget_ils=${budget.dailySpentIls}/${budget.dailyBudgetIls}`,
           ].filter(Boolean).join("\n");
           rememberAttempt(input, outcome);
           send(res, 200, outcome);
@@ -338,12 +352,15 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     browserOk,
     browserError,
     llmConfigured,
-    dailyApplyLimit: quotaSnapshot().limit,
-    dailyApplyCounted: quotaSnapshot().counted,
+    dailyApplySafetyAttempts: quotaSnapshot().maxAttempts,
+    dailyApplyAttemptsToday: quotaSnapshot().attempted,
     llmCostUsdToday: todayCostSummary().usd,
     monthlyBudgetLimitIls: budget.limitIls,
     monthlyBudgetSpentIls: budget.spentIls,
     monthlyBudgetRemainingIls: budget.remainingIls,
+    dailyBudgetIls: budget.dailyBudgetIls,
+    dailyBudgetSpentIls: budget.dailySpentIls,
+    dailyBudgetRemainingIls: budget.dailyRemainingIls,
     browserPersistentProfile: env.browserPersistentProfile,
     browserApplyHeadless: env.browserApplyHeadless,
     browserUserDataDir: env.browserUserDataDir,
@@ -466,10 +483,17 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
 
 function compactBudget(budget: ReturnType<typeof budgetSnapshot>): ApplicationResult["budget"] {
   return {
+    day: budget.day,
     month: budget.month,
     limitIls: budget.limitIls,
     spentIls: budget.spentIls,
     remainingIls: budget.remainingIls,
+    daysRemaining: budget.daysRemaining,
+    dailyBudgetIls: budget.dailyBudgetIls,
+    dailySpentIls: budget.dailySpentIls,
+    dailyRemainingIls: budget.dailyRemainingIls,
+    monthlyOpen: budget.monthlyOpen,
+    dailyOpen: budget.dailyOpen,
     open: budget.open,
   };
 }

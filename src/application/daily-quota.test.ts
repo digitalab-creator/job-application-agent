@@ -32,9 +32,7 @@ test("quota counts real attempts and ignores closed rows", () => {
     rememberQuotaUse({ url: "https://jobs.example/closed", status: "closed" });
     rememberQuotaUse({ url: "https://jobs.example/applied", status: "applied" });
     const snapshot = quotaSnapshot();
-    assert.equal(snapshot.limit, 10);
-    assert.equal(snapshot.counted, 1);
-    assert.equal(snapshot.remaining, 9);
+    assert.equal(snapshot.confirmed, 1);
     assert.equal(snapshot.maxAttempts, 3);
     assert.equal(snapshot.attempted, 0);
   } finally {

@@ -33,12 +33,12 @@ const BASE_MIN_SCORE = 55;
 const TECH_HEAVY_MIN_TECH = 85;
 const EXCEPTIONAL_TECH = 90;
 
-/** Daily apply workflow (n8n Pick Jobs) — fixed mix at DAILY_APPLY_LIMIT=20. */
+/** n8n uses the worker safety cap as its maximum batch size; budget decides the real spend. */
 export const DAILY_APPLY_BATCH_LIMIT = 20;
 export const DAILY_APPLY_TECH_TARGET = 13;
 export const DAILY_APPLY_MARKETING_TARGET = 7;
 
-/** Skip board scan when sheet `New` rows exceed this multiple of DAILY_APPLY_LIMIT. */
+/** Skip board scan when sheet `New` rows exceed this multiple of the apply safety cap. */
 export const DISCOVER_SKIP_NEW_MULTIPLIER = DISCOVERY_SKIP_MULTIPLIER;
 
 export type NewQueueStats = {
@@ -52,12 +52,12 @@ export type NewQueueStats = {
 
 export function shouldSkipDiscoveryForQueueDepth(
   statusNew: number | undefined,
-  dailyApplyLimit: number,
+  applySafetyCap: number,
 ): boolean {
   if (typeof statusNew !== "number" || !Number.isFinite(statusNew)) {
     return false;
   }
-  return statusNew > DISCOVER_SKIP_NEW_MULTIPLIER * dailyApplyLimit;
+  return statusNew > DISCOVER_SKIP_NEW_MULTIPLIER * applySafetyCap;
 }
 
 export type RebalanceMode = "heavy_tech" | "moderate_tech" | "maintenance";
