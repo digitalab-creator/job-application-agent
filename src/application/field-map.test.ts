@@ -211,6 +211,33 @@ test("country phone code selects Israel not full mobile number", () => {
   }
 });
 
+test("country phone code never invents a full phone-number answer", () => {
+  const decision = decideField({
+    label: "country phone code",
+    name: "country_phone_code",
+    required: true,
+    type: "select",
+    options: ["Select", "+1 (US)", "+44 (UK)"],
+    ctx,
+  });
+  assert.equal(decision.action, "block");
+});
+
+test("unknown required CRM fields are blocked instead of receiving invented facts", () => {
+  const decision = decideField({
+    label: "",
+    name: "hubspot__estimated_monthly_orders",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(decision.action, "block");
+  if (decision.action === "block") {
+    assert.match(decision.reason, /estimated monthly orders/i);
+  }
+});
+
 test("LLM experience yes/no uses verified years", () => {
   const decision = decideField({
     label: "Do you have 3+ years of production LLM serving experience?",

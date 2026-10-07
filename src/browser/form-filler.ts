@@ -3,6 +3,7 @@ import { answerBlockedField } from "../application/answer-blocked-field.js";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
 import { isPlatformQuestion, matchPlatforms } from "../application/media-answers.js";
+import { countryCodeValue, israelPhoneCountryOption } from "../application/phone-country-code.js";
 import { candidate } from "../config/candidate.js";
 import { log } from "../logging/logger.js";
 import type { AnswerRecord, Persona } from "../models/types.js";
@@ -326,12 +327,14 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
   const locator = scope.locator(`[data-agent-field="${field.index}"]`);
   const fieldBlob = `${field.name} ${field.id} ${field.label}`;
   if (/country_phone_code|phone_country_code|dial.code/i.test(fieldBlob)) {
-    const prefer = field.options.find((option) => /\+972|^972|\(\+972\)|israel/i.test(option))
-      ?? field.options.find((option) => /israel/i.test(option));
-    const pick = prefer ?? value;
+    const pick = countryCodeValue(field.options);
     if (field.tag === "select" && field.options.length > 0) {
-      await locator.selectOption({ label: pick }).catch(async () => {
-        await locator.selectOption({ value: pick });
+      const option = israelPhoneCountryOption(field.options);
+      if (!option) {
+        throw new Error("No Israel (+972) option for country phone code");
+      }
+      await locator.selectOption({ label: option }).catch(async () => {
+        await locator.selectOption({ value: option });
       });
       return;
     }
