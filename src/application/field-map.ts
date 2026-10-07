@@ -4,6 +4,7 @@ import type { Persona } from "../models/types.js";
 import { roles } from "../profile/facts.js";
 import { isOfficeCommuteQuestion, officeCommuteAnswerYes } from "./office-commute.js";
 import { isPlatformQuestion, matchPlatforms, pickBudgetOption, pickYearsOption } from "./media-answers.js";
+import { countryCodeValue, israelPhoneCountryOption } from "./phone-country-code.js";
 import { matchesOfficeCommuteSkip } from "./skip-job-screening.js";
 
 export type FieldDecision =
@@ -258,30 +259,16 @@ function mapKnown(
     return fill(international ? candidate.phone.international : candidate.phone.local);
   }
   if (/country phone code|country_phone_code|phone_country_code|dial code/i.test(blob)) {
-    if (type === "select" && options.length > 0) {
-      const choice = options.find((option) => /\+972|^972|\bisrael\b/i.test(option))
-        ?? options.find((option) => /israel/i.test(option));
-      if (choice) {
-        return { action: "fill", value: choice, source: "candidate_profile" };
-      }
+    if (type === "select" && options.length > 0 && !israelPhoneCountryOption(options)) {
+      return { action: "block", reason: "Country phone-code field has no Israel (+972) option." };
     }
-    return fill("+972");
+    return fill(countryCodeValue(options));
   }
   if (/most recent company|current company|latest company/i.test(label)) {
     return fill(mostRecentEmployment(ctx.persona).company);
   }
   if (/most recent title|current title|latest title|current job title/i.test(label)) {
     return fill(mostRecentEmployment(ctx.persona).title);
-  }
-  if (/estimated monthly orders|hubspot__estimated/i.test(blob)) {
-    if (type === "select" && options.length > 0) {
-      const choice = options.find((option) => /1.*10|0.*50|under 100|1-50/i.test(option))
-        ?? options.find((option) => !/select|choose/i.test(option));
-      if (choice) {
-        return { action: "fill", value: choice, source: "candidate_profile" };
-      }
-    }
-    return fill("1-10");
   }
   if (/linkedin/i.test(label)) {
     return fill(candidate.linkedin);
