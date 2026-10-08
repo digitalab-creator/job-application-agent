@@ -46,6 +46,13 @@ export const env = {
   greenhouseOtpPollIntervalMs: Math.max(2_000, Number(optional("GREENHOUSE_OTP_POLL_INTERVAL_MS", "5000"))),
 };
 
+export type OrchestrationMode = "n8n" | "native";
+
+export function orchestrationMode(): OrchestrationMode {
+  const raw = optional("ORCHESTRATION_MODE", "n8n").toLowerCase();
+  return raw === "native" ? "native" : "n8n";
+}
+
 export function cvFileStatus(): { technical: boolean; marketing: boolean } {
   return {
     technical: fileReady(env.technicalCvPath),

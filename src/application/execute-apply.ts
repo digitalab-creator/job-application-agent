@@ -1,0 +1,167 @@
+import { applyToJob, type ApplyInput } from "./apply-job.js";
+import { attemptRecordFromResult, rememberAttemptOutcome } from "./attempt-ledger.js";
+import { budgetIsOpen, budgetSnapshot } from "../budget/monthly-budget.js";
+import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./daily-quota.js";
+import { withJobCost } from "../llm/cost-ledger.js";
+import { log, withLogContext } from "../logging/logger.js";
+import type { ApplicationResult } from "../models/types.js";
+import { withApplySession } from "../browser/session.js";
+import { recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
+import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./manual-fill-guide.js";
+import { env } from "../config/env.js";
+
+export async function executeApply(input: ApplyInput): Promise<ApplicationResult> {
+  recordPlatformAllocationIfNeeded();
+  if (!budgetIsOpen()) {
+    const budget = budgetSnapshot();
+    const outcome: ApplicationResult = {
+      attemptId: input.attemptId,
+      status: "budget_reached",
+      jobUrl: input.job.url,
+      submitted: false,
+      confirmationDetected: false,
+      terminalOutcome: "budget_reached",
+      pipeline: emptyPipeline(),
+      llmCostUsd: 0,
+      budget: compactBudget(budget),
+      notes: "result=budget_reached",
+    };
+    rememberAttempt(input, outcome);
+    return outcome;
+  }
+  if (!quotaIsOpen()) {
+    const quota = quotaSnapshot();
+    const outcome: ApplicationResult = {
+      attemptId: input.attemptId,
+      status: "quota_reached",
+      jobUrl: input.job.url,
+      submitted: false,
+      confirmationDetected: false,
+      terminalOutcome: "quota_reached",
+      pipeline: emptyPipeline(),
+      llmCostUsd: 0,
+      quota,
+      notes: "result=quota_reached",
+    };
+    rememberAttempt(input, outcome);
+    return outcome;
+  }
+  try {
+    const tracked = await withJobCost(
+      input.job.url,
+      () =>
+        withLogContext({ attemptId: input.attemptId! }, () =>
+          withApplySession((context) => applyToJob(context, input)),
+        ),
+    );
+    rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
+    const outcome = tracked.result;
+    attachManualFillGuide(outcome);
+    outcome.llmCostUsd = tracked.usd;
+    outcome.quota = quotaSnapshot();
+    outcome.budget = compactBudget(budgetSnapshot());
+    outcome.notes = [outcome.notes, `llm_cost_usd=${tracked.usd}`].filter(Boolean).join("\n");
+    rememberAttempt(input, outcome);
+    return outcome;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "request_failed";
+    log("APPLY_EXECUTE_FAILED", { message });
+    const outcome: ApplicationResult = {
+      attemptId: input.attemptId,
+      status: "review",
+      jobUrl: input.job.url,
+      submitted: false,
+      confirmationDetected: false,
+      terminalOutcome: "request_failed",
+      pipeline: input.pipeline ?? emptyPipeline(),
+      blocker: "navigation_failed",
+      notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
+    };
+    rememberQuotaUse({ url: input.job.url, status: outcome.status });
+    rememberAttempt(input, outcome);
+    return outcome;
+  }
+}
+
+function attachManualFillGuide(outcome: ApplicationResult): void {
+  if (shouldPromoteToManualSheet(outcome) && outcome.status === "review") {
+    outcome.status = "manual_required";
+  }
+  const needsPack = outcome.status === "manual_required" || shouldPromoteToManualSheet(outcome);
+  if (!needsPack) {
+    return;
+  }
+  const cvRel = outcome.cvPath?.includes(env.generatedCvDir)
+    ? outcome.cvPath.replace(`${env.generatedCvDir}/`, "")
+    : outcome.cvPath?.replace(/^\/app\/generated-cv\//, "");
+  const cvDownloadUrl = cvRel
+    ? (env.applyPublicBaseUrl
+      ? `${env.applyPublicBaseUrl}/generated-cv/${cvRel}`
+      : `http://127.0.0.1:3099/generated-cv/${cvRel}`)
+    : undefined;
+  const pack = buildSheetManualNotes({
+    applyUrl: outcome.canonicalJobUrl ?? outcome.jobUrl,
+    blocker: outcome.blocker,
+    cvPath: outcome.cvPath,
+    cvDownloadUrl,
+    answers: outcome.answers,
+  });
+  outcome.manualFillGuide = pack;
+  const baseNotes = (outcome.notes || "").split("\n\nMANUAL_FILL")[0]?.trim() ?? outcome.notes;
+  outcome.notes = [baseNotes, pack].filter(Boolean).join("\n\n");
+}
+
+function rememberAttempt(input: ApplyInput, outcome: ApplicationResult): void {
+  if (!input.attemptId || !input.startedAt) {
+    return;
+  }
+  try {
+    rememberAttemptOutcome(
+      attemptRecordFromResult(
+        {
+          attemptId: input.attemptId,
+          startedAt: input.startedAt,
+          company: input.job.company,
+          role: input.job.role,
+          url: input.job.url,
+        },
+        outcome,
+      ),
+    );
+  } catch (error) {
+    log("ATTEMPT_LEDGER_WRITE_FAILED", {
+      attemptId: input.attemptId,
+      message: error instanceof Error ? error.message : "attempt_ledger_write_failed",
+    });
+  }
+}
+
+function emptyPipeline(): NonNullable<ApplicationResult["pipeline"]> {
+  return {
+    urlValidated: false,
+    opened: false,
+    recovered: false,
+    fitPassed: false,
+    cvGenerated: false,
+    cvQualityPassed: false,
+    submitted: false,
+    confirmed: false,
+  };
+}
+
+function compactBudget(budget: ReturnType<typeof budgetSnapshot>): ApplicationResult["budget"] {
+  return {
+    day: budget.day,
+    month: budget.month,
+    limitIls: budget.limitIls,
+    spentIls: budget.spentIls,
+    remainingIls: budget.remainingIls,
+    daysRemaining: budget.daysRemaining,
+    dailyBudgetIls: budget.dailyBudgetIls,
+    dailySpentIls: budget.dailySpentIls,
+    dailyRemainingIls: budget.dailyRemainingIls,
+    monthlyOpen: budget.monthlyOpen,
+    dailyOpen: budget.dailyOpen,
+    open: budget.open,
+  };
+}

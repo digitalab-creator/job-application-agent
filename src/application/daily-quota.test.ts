@@ -24,10 +24,12 @@ test("quota counts real attempts and ignores closed rows", () => {
   const previousLedger = process.env.LEDGER_PATH;
   const previousLimit = process.env.DAILY_APPLY_LIMIT;
   const previousMaxAttempts = process.env.DAILY_APPLY_MAX_ATTEMPTS;
+  const previousAttempts = process.env.APPLY_ATTEMPTS_PATH;
   process.env.QUOTA_LEDGER_PATH = path.join(dir, "quota.jsonl");
   process.env.LEDGER_PATH = path.join(dir, "missing-ledger.jsonl");
+  process.env.APPLY_ATTEMPTS_PATH = path.join(dir, "attempts.jsonl");
   process.env.DAILY_APPLY_LIMIT = "10";
-    process.env.DAILY_APPLY_MAX_ATTEMPTS = "3";
+  process.env.DAILY_APPLY_MAX_ATTEMPTS = "3";
   try {
     rememberQuotaUse({ url: "https://jobs.example/closed", status: "closed" });
     rememberQuotaUse({ url: "https://jobs.example/applied", status: "applied" });
@@ -53,6 +55,8 @@ test("quota counts real attempts and ignores closed rows", () => {
     }
     if (previousMaxAttempts === undefined) delete process.env.DAILY_APPLY_MAX_ATTEMPTS;
     else process.env.DAILY_APPLY_MAX_ATTEMPTS = previousMaxAttempts;
+    if (previousAttempts === undefined) delete process.env.APPLY_ATTEMPTS_PATH;
+    else process.env.APPLY_ATTEMPTS_PATH = previousAttempts;
   }
 });
 

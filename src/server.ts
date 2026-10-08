@@ -4,23 +4,29 @@ import path from "node:path";
 import { chromium } from "playwright";
 import { ensureExcludedCompaniesConfig, getExcludedCompanies, setExcludedCompanies } from "./application/exclude-company.js";
 import { ensureExcludedLocationsConfig, getExcludedLocations, setExcludedLocations } from "./application/exclude-location.js";
-import { applyToJob, type ApplyInput } from "./application/apply-job.js";
-import { attemptRecordFromResult, newAttemptId, rememberAttemptOutcome } from "./application/attempt-ledger.js";
+import { type ApplyInput } from "./application/apply-job.js";
+import { newAttemptId } from "./application/attempt-ledger.js";
+import { executeApply } from "./application/execute-apply.js";
 import { applyPolicySnapshot } from "./application/apply-policy.js";
-import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
+import { quotaSnapshot } from "./application/daily-quota.js";
 import { browserApplyLockHeld, claimBrowserApply, releaseBrowserApply } from "./application/browser-apply-lock.js";
 import { claimApplyRun, releaseApplyRun } from "./application/run-lock.js";
-import { withApplySession, withHeadlessBrowser } from "./browser/session.js";
+import { withHeadlessBrowser } from "./browser/session.js";
 import { removeOldScreenshots } from "./browser/screenshot.js";
-import { cvFileStatus, env } from "./config/env.js";
+import { cvFileStatus, env, orchestrationMode } from "./config/env.js";
+import { authorizeWorkspaceRun } from "./orchestration/auth.js";
+import { runWorkspaceApplyDaily } from "./orchestration/apply-daily.js";
+import { runWorkspaceDiscoverDaily } from "./orchestration/discover-daily.js";
+import { getWorkspace } from "./orchestration/workspace-store.js";
+import { startNativeScheduler } from "./orchestration/scheduler.js";
+import { ensureWorkspaceSchema } from "./orchestration/db.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
 import { choosePersonaFromText } from "./cv/persona-from-text.js";
-import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "./budget/monthly-budget.js";
+import { budgetSnapshot, recordPlatformAllocationIfNeeded } from "./budget/monthly-budget.js";
 import { runDiscovery } from "./discovery/run-discovery.js";
-import { recordExternalSpend, todayCostSummary, withJobCost } from "./llm/cost-ledger.js";
-import { log, withLogContext } from "./logging/logger.js";
+import { recordExternalSpend, todayCostSummary } from "./llm/cost-ledger.js";
+import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
-import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./application/manual-fill-guide.js";
 
 ensureExcludedCompaniesConfig();
 ensureExcludedLocationsConfig();
@@ -30,6 +36,38 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url?.startsWith("/health")) {
       const health = await healthCheck();
       send(res, health.ok ? 200 : 503, health);
+      return;
+    }
+    const workspaceRun = parseWorkspaceRunPath(req.method ?? "", req.url ?? "");
+    if (workspaceRun) {
+      const token = bearerToken(req);
+      const auth = await authorizeWorkspaceRun(workspaceRun.workspaceId, token);
+      if (!auth.ok) {
+        send(res, 401, { error: auth.reason });
+        return;
+      }
+      const workspace = await getWorkspace(workspaceRun.workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const body = await readBody(req) as { dryRun?: boolean; submit?: boolean };
+      if (workspaceRun.kind === "apply-run") {
+        const result = await runWorkspaceApplyDaily({
+          workspace,
+          runSource: "native_manual",
+          submit: body.submit !== false,
+          dryRun: body.dryRun === true,
+        });
+        send(res, 200, result);
+        return;
+      }
+      const result = await runWorkspaceDiscoverDaily({
+        workspace,
+        runSource: "native_manual",
+        dryRun: body.dryRun === true,
+      });
+      send(res, 200, result);
       return;
     }
     if (!authorized(req)) {
@@ -182,108 +220,8 @@ const server = http.createServer(async (req, res) => {
         const input = parseApply(await readBody(req));
         input.attemptId = newAttemptId();
         input.startedAt = new Date().toISOString();
-        recordPlatformAllocationIfNeeded();
-        if (!budgetIsOpen()) {
-          const budget = budgetSnapshot();
-          const outcome: ApplicationResult = {
-            attemptId: input.attemptId,
-            status: "budget_reached",
-            jobUrl: input.job.url,
-            submitted: false,
-            confirmationDetected: false,
-            terminalOutcome: "budget_reached",
-            pipeline: emptyPipeline(),
-            llmCostUsd: 0,
-            budget: compactBudget(budget),
-            notes: [
-              "result=budget_reached",
-              `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
-              `daily_budget_ils=${budget.dailySpentIls}/${budget.dailyBudgetIls}`,
-              budget.monthlyOpen
-                ? "The calculated daily budget is used for today. This job was not opened."
-                : "The shared monthly budget is exhausted. This job was not opened.",
-            ].join("\n"),
-          };
-          rememberAttempt(input, outcome);
-          send(res, 200, outcome);
-          return;
-        }
-        if (!quotaIsOpen()) {
-          const quota = quotaSnapshot();
-          const outcome: ApplicationResult = {
-            attemptId: input.attemptId,
-            status: "quota_reached",
-            jobUrl: input.job.url,
-            submitted: false,
-            confirmationDetected: false,
-            terminalOutcome: "quota_reached",
-            pipeline: emptyPipeline(),
-            llmCostUsd: 0,
-            quota,
-            notes: [
-              "result=quota_reached",
-              `daily_attempts=${quota.attempted}/${quota.maxAttempts}`,
-              "The daily safety attempt cap is already used. This job was not opened.",
-            ].join("\n"),
-          };
-          rememberAttempt(input, outcome);
-          send(res, 200, outcome);
-          return;
-        }
-        try {
-          const tracked = await withJobCost(
-            input.job.url,
-            () => withLogContext({ attemptId: input.attemptId! }, () => withApplySession((context) => applyToJob(context, input))),
-          );
-          rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
-          const quota = quotaSnapshot();
-          const budget = budgetSnapshot();
-          const outcome = tracked.result;
-          attachManualFillGuide(outcome);
-          outcome.llmCostUsd = tracked.usd;
-          outcome.quota = quota;
-          outcome.budget = compactBudget(budget);
-          if (!budget.open) {
-            log("APPLY_BUDGET_CLOSED", {
-              day: budget.day,
-              monthlyOpen: budget.monthlyOpen,
-              dailyOpen: budget.dailyOpen,
-              spentIls: budget.spentIls,
-              remainingIls: budget.remainingIls,
-              dailySpentIls: budget.dailySpentIls,
-              dailyBudgetIls: budget.dailyBudgetIls,
-              dailyRemainingIls: budget.dailyRemainingIls,
-            });
-          }
-          outcome.notes = [
-            outcome.notes,
-            `llm_cost_usd=${tracked.usd}`,
-            `llm_calls=${tracked.calls}`,
-            `daily_confirmed=${quota.confirmed}`,
-            `daily_attempts=${quota.attempted}/${quota.maxAttempts}`,
-            `monthly_budget_ils=${budget.spentIls}/${budget.limitIls}`,
-            `daily_budget_ils=${budget.dailySpentIls}/${budget.dailyBudgetIls}`,
-          ].filter(Boolean).join("\n");
-          rememberAttempt(input, outcome);
-          send(res, 200, outcome);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "request_failed";
-          log("REQUEST_FAILED", { message });
-          const outcome: ApplicationResult = {
-            attemptId: input.attemptId,
-            status: "review",
-            jobUrl: input.job.url,
-            submitted: false,
-            confirmationDetected: false,
-            terminalOutcome: "request_failed",
-            pipeline: input.pipeline ?? emptyPipeline(),
-            blocker: "navigation_failed",
-            notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
-          };
-          rememberQuotaUse({ url: input.job.url, status: outcome.status });
-          rememberAttempt(input, outcome);
-          send(res, 200, outcome);
-        }
+        const outcome = await executeApply(input);
+        send(res, 200, outcome);
       } finally {
         releaseBrowserApply();
       }
@@ -329,7 +267,18 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(env.port, () => {
   removeOldScreenshots(env.screenshotDir, env.screenshotRetentionDays);
-  log("SERVER_STARTED", { port: env.port, browserPersistentProfile: env.browserPersistentProfile, browserApplyHeadless: env.browserApplyHeadless });
+  log("SERVER_STARTED", {
+    port: env.port,
+    orchestrationMode: orchestrationMode(),
+    browserPersistentProfile: env.browserPersistentProfile,
+    browserApplyHeadless: env.browserApplyHeadless,
+  });
+  void ensureWorkspaceSchema()
+    .then(() => startNativeScheduler())
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      log("ORCHESTRATION_BOOT_FAILED", { message });
+    });
 });
 
 async function healthCheck(): Promise<Record<string, unknown>> {
@@ -368,35 +317,8 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     excludedCompanies: getExcludedCompanies().length,
     excludedLocations: getExcludedLocations().length,
     applyInProgress: browserApplyLockHeld(),
+    orchestrationMode: orchestrationMode(),
   };
-}
-
-function attachManualFillGuide(outcome: ApplicationResult): void {
-  if (shouldPromoteToManualSheet(outcome) && outcome.status === "review") {
-    outcome.status = "manual_required";
-  }
-  const needsPack = outcome.status === "manual_required" || shouldPromoteToManualSheet(outcome);
-  if (!needsPack) {
-    return;
-  }
-  const cvRel = outcome.cvPath?.includes(env.generatedCvDir)
-    ? outcome.cvPath.replace(`${env.generatedCvDir}/`, "")
-    : outcome.cvPath?.replace(/^\/app\/generated-cv\//, "");
-  const cvDownloadUrl = cvRel
-    ? (env.applyPublicBaseUrl
-      ? `${env.applyPublicBaseUrl}/generated-cv/${cvRel}`
-      : `http://127.0.0.1:3099/generated-cv/${cvRel} (Authorization: Bearer APPLY_API_TOKEN)`)
-    : undefined;
-  const pack = buildSheetManualNotes({
-    applyUrl: outcome.canonicalJobUrl ?? outcome.jobUrl,
-    blocker: outcome.blocker,
-    cvPath: outcome.cvPath,
-    cvDownloadUrl,
-    answers: outcome.answers,
-  });
-  outcome.manualFillGuide = pack;
-  const baseNotes = (outcome.notes || "").split("\n\nMANUAL_FILL")[0]?.split("\n\nresult=manual_fill")[0]?.trim() ?? outcome.notes;
-  outcome.notes = [baseNotes, pack].filter(Boolean).join("\n\n");
 }
 
 function authorized(req: http.IncomingMessage): boolean {
@@ -420,40 +342,6 @@ function parseApply(body: unknown): ApplyInput {
     submit: record.submit === true,
     ignoreLedger: record.ignoreLedger === true,
     job,
-  };
-}
-
-function rememberAttempt(input: ApplyInput, outcome: ApplicationResult): void {
-  if (!input.attemptId || !input.startedAt) {
-    return;
-  }
-  try {
-    rememberAttemptOutcome(attemptRecordFromResult({
-      attemptId: input.attemptId,
-      startedAt: input.startedAt,
-      company: input.job.company,
-      role: input.job.role,
-      url: input.job.url,
-    }, outcome));
-  } catch (error) {
-    log("ATTEMPT_LEDGER_WRITE_FAILED", {
-      attemptId: input.attemptId,
-      message: error instanceof Error ? error.message : "attempt_ledger_write_failed",
-      outcome: outcome.terminalOutcome ?? outcome.status,
-    });
-  }
-}
-
-function emptyPipeline(): NonNullable<ApplicationResult["pipeline"]> {
-  return {
-    urlValidated: false,
-    opened: false,
-    recovered: false,
-    fitPassed: false,
-    cvGenerated: false,
-    cvQualityPassed: false,
-    submitted: false,
-    confirmed: false,
   };
 }
 
@@ -482,21 +370,31 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
   });
 }
 
-function compactBudget(budget: ReturnType<typeof budgetSnapshot>): ApplicationResult["budget"] {
-  return {
-    day: budget.day,
-    month: budget.month,
-    limitIls: budget.limitIls,
-    spentIls: budget.spentIls,
-    remainingIls: budget.remainingIls,
-    daysRemaining: budget.daysRemaining,
-    dailyBudgetIls: budget.dailyBudgetIls,
-    dailySpentIls: budget.dailySpentIls,
-    dailyRemainingIls: budget.dailyRemainingIls,
-    monthlyOpen: budget.monthlyOpen,
-    dailyOpen: budget.dailyOpen,
-    open: budget.open,
-  };
+function bearerToken(req: http.IncomingMessage): string | undefined {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    return undefined;
+  }
+  return header.slice("Bearer ".length).trim();
+}
+
+function parseWorkspaceRunPath(
+  method: string,
+  url: string,
+): { workspaceId: string; kind: "apply-run" | "discover-run" } | null {
+  if (method !== "POST") {
+    return null;
+  }
+  const pathOnly = url.split("?")[0] ?? "";
+  const apply = /^\/workspaces\/([^/]+)\/apply-run$/.exec(pathOnly);
+  if (apply) {
+    return { workspaceId: decodeURIComponent(apply[1]), kind: "apply-run" };
+  }
+  const discover = /^\/workspaces\/([^/]+)\/discover-run$/.exec(pathOnly);
+  if (discover) {
+    return { workspaceId: decodeURIComponent(discover[1]), kind: "discover-run" };
+  }
+  return null;
 }
 
 function send(res: http.ServerResponse, status: number, payload: unknown): void {

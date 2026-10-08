@@ -39,6 +39,7 @@ export type DiscoveryResult = {
 export async function runDiscovery(input: {
   existingUrls: string[];
   newQueueStats?: NewQueueStats;
+  boardUrls?: string[];
 }): Promise<DiscoveryResult> {
   recordPlatformAllocationIfNeeded();
   const budget = budgetSnapshot();
@@ -52,7 +53,7 @@ export async function runDiscovery(input: {
       notes: "Monthly budget exhausted. Discovery did not run.",
     };
   }
-  const boards = discoveryBoardUrls();
+  const boards = input.boardUrls?.length ? input.boardUrls : discoveryBoardUrls();
   if (boards.length === 0) {
     return {
       status: "skipped",
