@@ -125,6 +125,10 @@ jobs:
           echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           changed="$(git diff --name-only "$OUTGOING" "$APPLIED" || true)"
           echo "$changed"
+          if printf '%s\n' "$changed" | grep -q '^orchestration/n8n/workflows/'; then
+            echo "Job n8n workflow JSON changed. Syncing to live n8n."
+            bash orchestration/n8n/scripts/sync-workflows-to-live.sh
+          fi
           if printf '%s\n' "$changed" | grep -Eq '(^|/)Dockerfile$|(^|/)package\.json$|^docker-compose\.yml$|^package-lock\.json$'; then
             echo "Image or compose changed. Rebuilding job-application-agent."
             docker compose up -d --build job-application-agent

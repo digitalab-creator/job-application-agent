@@ -20,8 +20,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from n8n_orchestration import n8n_env_file  # noqa: E402
+
 ENV_FILE = ROOT / ".env"
-N8N_ENV = Path("/opt/apps/n8n/.env")
+N8N_ENV = n8n_env_file()
 APPLY_WF_ID = "fcYSvcG7IiP8xAqr"
 CONTAINER = "job-application-agent"
 TZ = ZoneInfo("Asia/Jerusalem")
@@ -598,7 +601,7 @@ def main() -> int:
 
     api = load_n8n_api_key()
     if not api:
-        print("triage-review-row: missing N8N_API_KEY in /opt/apps/n8n/.env", file=sys.stderr)
+        print(f"triage-review-row: missing N8N_API_KEY in {N8N_ENV}", file=sys.stderr)
         return 2
     try:
         rows = fetch_live_sheet_rows(api)

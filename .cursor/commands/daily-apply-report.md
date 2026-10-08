@@ -36,5 +36,6 @@ Logic lives in `scripts/daily-apply-report.py`. Update the script when new block
 
 ## Related
 
-- Manual apply + deep n8n audit: `/opt/apps/n8n/.cursor/commands/job-apply-run.md`
+- Job n8n workflow exports: `orchestration/n8n/workflows/auto-export/` (SSOT in this repo)
+- Manual apply + deep n8n audit: `/opt/apps/n8n/.cursor/commands/job-apply-run.md` (shared n8n host until Phase 2 cutover)
 - Ship worker fixes: `.cursor/extensions/ship.md`

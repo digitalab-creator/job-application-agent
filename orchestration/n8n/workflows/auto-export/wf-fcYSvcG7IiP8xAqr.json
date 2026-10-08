@@ -1,0 +1,2264 @@
+{
+  "updatedAt": "2026-10-08T12:44:19.531Z",
+  "createdAt": "2026-09-27T18:06:33.078Z",
+  "id": "fcYSvcG7IiP8xAqr",
+  "name": "Apply to jobs (daily)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "a0e542c2-94db-4309-9615-7d91497957d7",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "job-apply-run",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "0c78f9a1-6372-48e5-befe-8845c9e691b0"
+    },
+    {
+      "id": "ab26b706-3383-497b-8bfd-8af32fe87e67",
+      "name": "Every morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "17645cff-5a4a-4c69-bb47-ab9f81b8e8a3",
+      "name": "Read Jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        780,
+        100
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REDACTED_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REDACTED_SHEET_GID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "e4497b66-d891-40a3-9517-14adca813363",
+      "name": "Pick Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const rows = $items('Read Jobs', 0).map((item) => item.json);\nif (!rows.length) {\n  throw new Error('Pick Jobs: Read Jobs returned 0 rows');\n}\nconst TECH = new Set([\n  'Applied AI', 'AI Product', 'AI Solutions', 'Growth Engineering', 'Digital Operations', 'Marketing Technology',\n]);\nconst MKT = new Set([\n  'Growth Marketing', 'Performance Marketing Leadership', 'Analytics & CRO', 'Product-led Growth', 'Revenue Systems',\n]);\nconst policy = $('Check Apply Policy').first().json;\nconst ATTEMPT_CAP = Math.max(0, Number(policy.dailyPickLimit ?? policy.maxAttempts ?? 20));\nconst TARGET_MKT = Math.round(ATTEMPT_CAP * 0.35);\nconst TARGET_TECH = ATTEMPT_CAP - TARGET_MKT;\n// Admin SSOT: Google Sheet tab \"Exclude Companies\" (Company column).\nconst excludedCompanies = (() => {\n  try {\n    return $('Load Exclude Companies').all()\n      .map((item) => String(item.json.Company || item.json.company || '').trim())\n      .filter(Boolean);\n  } catch (e) {\n    return [];\n  }\n})();\n\nfunction side(row) {\n  const c = String(row.Category || '').trim();\n  if (MKT.has(c)) return 'marketing';\n  if (TECH.has(c)) return 'tech';\n  return 'other';\n}\nfunction score(row) {\n  const n = Number(String(row['Match Score'] || '').replace(/[^\\d.]/g, ''));\n  return Number.isFinite(n) ? n : 0;\n}\nfunction okUrl(url) {\n  const u = String(url || '').trim();\n  if (!/^https?:\\/\\//i.test(u)) return false;\n  const host = u.replace(/^https?:\\/\\//i, '').split('/')[0];\n  if (!host) return false;\n  if (u.toLowerCase().includes('/jobs/stampli/') && u.toLowerCase().includes('0b.273')) return false;\n  if (/^https:\\/\\/apply\\.workable\\.com\\/comeet\\//i.test(u)) return false;\n  return true;\n}\nfunction normalizeCompanyKey(value) {\n  return String(value || '')\n    .toLowerCase()\n    .normalize('NFKC')\n    .replace(/[\\s_\\-./]+/g, '')\n    .replace(/[^\\p{L}\\p{N}]+/gu, '');\n}\nfunction isExcludedCompany(company) {\n  const key = normalizeCompanyKey(company);\n  if (!key) return false;\n  for (const excluded of excludedCompanies) {\n    const needle = normalizeCompanyKey(excluded);\n    if (!needle) continue;\n    if (key === needle || key.includes(needle)) return true;\n  }\n  return false;\n}\nfunction applyTier(row) {\n  const u = String(row['Job URL'] || '');\n  if (/linkedin\\.com|gotfriends\\.co\\.il|dialog\\.co\\.il|drushim\\.co\\.il|sqlink\\.com|jobmaster\\.co\\.il|comblack\\.co\\.il/i.test(u)) return 0;\n  return 1;\n}\nfunction sortRows(list) {\n  return list.sort((a, b) => score(b) - score(a) || String(b['Found Date'] || '').localeCompare(String(a['Found Date'] || '')));\n}\n\nconst seenUrl = new Set();\nconst jobs = [];\nfor (const row of rows) {\n  const status = String(row.Status || '').trim();\n  const retryUpload = status === 'Review' && String(row.Notes || '').includes('cv_upload_failed');\n  if ((status !== 'New' && !retryUpload) || !okUrl(row['Job URL'])) continue;\n  if (isExcludedCompany(row.Company)) continue;\n  const url = String(row['Job URL'] || '');\n  if (seenUrl.has(url)) continue;\n  seenUrl.add(url);\n  jobs.push(row);\n}\n\nconst tech = sortRows(jobs.filter((r) => side(r) === 'tech'));\nconst mkt = sortRows(jobs.filter((r) => side(r) === 'marketing'));\nconst other = sortRows(jobs.filter((r) => side(r) === 'other'));\n\nconst pickedMkt = mkt.slice(0, TARGET_MKT);\nconst pickedTech = tech.slice(0, TARGET_TECH);\nlet picked = [...pickedMkt, ...pickedTech];\nconst pickedUrls = new Set(picked.map((r) => String(r['Job URL'] || '')));\n\nconst backfill = sortRows([\n  ...tech.slice(TARGET_TECH),\n  ...mkt.slice(TARGET_MKT),\n  ...other,\n]).filter((r) => !pickedUrls.has(String(r['Job URL'] || '')));\n\nfor (const row of backfill) {\n  if (picked.length >= ATTEMPT_CAP) break;\n  picked.push(row);\n}\n\npicked = sortRows([...picked]).slice(0, ATTEMPT_CAP);\nreturn picked.map((row) => ({ json: row }));\n",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "82efc9f6-d430-403f-8318-c90fdf936713",
+      "name": "One Job",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        780,
+        220
+      ],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "83fd33b2-a5a1-4172-bec2-1d1ae2176be5",
+      "name": "Set Applying",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1020,
+        220
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REDACTED_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REDACTED_SHEET_GID",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "Status": "Applying",
+            "Notes": "AUTO_APPLY\nresult=applying\nWorker started. Do not submit this row again until it finishes."
+          },
+          "schema": [
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Applied Date",
+              "displayName": "Applied Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job URL",
+              "displayName": "Job URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "6b61da2a-2cca-4da4-b565-c8a95f796a00",
+      "name": "Apply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1260,
+        220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://job-application-agent:3000/apply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ submit: true, row: $(\"One Job\").item.json.row_number, job: { role: $(\"One Job\").item.json.Role, company: $(\"One Job\").item.json.Company, url: $(\"One Job\").item.json[\"Job URL\"], matchScore: Number($(\"One Job\").item.json[\"Match Score\"] || 0), category: $(\"One Job\").item.json.Category || \"\", estimatedSalary: $(\"One Job\").item.json[\"Est. Salary Range\"] || \"\" } }) }}",
+        "options": {
+          "timeout": 480000,
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "7af37e84-903c-4f5d-b996-35e5b1391806",
+      "name": "Map Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const src = $('One Job').item.json;\nconst res = $json || {};\nconst today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });\nif (res.status === 'budget_reached') {\n  return [{\n    json: {\n      row_number: src.row_number,\n      company: src.Company,\n      role: src.Role,\n      Status: 'New',\n      'Applied Date': src['Applied Date'] || '',\n      Notes: src.Notes || '',\n      'Job URL': src['Job URL'],\n      workerStatus: 'budget_reached',\n    },\n  }];\n}\nif (res.status === 'quota_reached') {\n  return [{\n    json: {\n      row_number: src.row_number,\n      company: src.Company,\n      role: src.Role,\n      Status: 'New',\n      'Applied Date': src['Applied Date'] || '',\n      Notes: src.Notes || '',\n      'Job URL': src['Job URL'],\n      workerStatus: 'quota_reached',\n    },\n  }];\n}\nconst labels = { applied: 'Applied', closed: 'Closed', not_relevant: 'Not Relevant', no_suitable_replacement: 'Not Relevant', review: 'Review', failed: 'Review', invalid_url: 'Review', confirmation_not_detected: 'Review', already_submitted: 'Review', location_ineligible: 'Not Relevant', manual_required: 'Manual' };\nconst status = res.blocker === 'captcha' ? 'Manual' : (labels[res.status] || 'Review');\nconst notes = [res.notes || res.message || res.error || 'Worker returned no notes.', res.attemptId ? `attempt_id=${res.attemptId}` : ''].filter(Boolean).join('\\n');\nreturn [{\n  json: {\n    row_number: src.row_number,\n    company: src.Company,\n    role: src.Role,\n    Status: status,\n    'Applied Date': status === 'Applied' ? (String(res.appliedAt || '').slice(0, 10) || today) : (src['Applied Date'] || ''),\n    Notes: notes,\n    'Job URL': res.canonicalJobUrl || src['Job URL'],\n    workerStatus: res.status || 'failed',\n  },\n}];"
+      }
+    },
+    {
+      "id": "9fedd0e5-8147-4a1a-9823-1c94714e458d",
+      "name": "Write Result",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1740,
+        220
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "REDACTED_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REDACTED_SHEET_GID",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "row_number"
+          ],
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "Status": "={{ $json.Status }}",
+            "Notes": "={{ $json.Notes }}",
+            "Applied Date": "={{ $json[\"Applied Date\"] }}",
+            "Job URL": "={{ $json[\"Job URL\"] }}"
+          },
+          "schema": [
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Applied Date",
+              "displayName": "Applied Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job URL",
+              "displayName": "Job URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "4b7d89e5-a475-4d86-ad12-9a7e7d5fae28",
+      "name": "Check Quota",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        40
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://job-application-agent:3000/quota",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "id": "0dbbc9ff-fe09-4200-9d8c-26896b5049d7",
+      "name": "Quota Open",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        40
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "1619eb2d-1a75-497f-9417-84247489c682",
+              "leftValue": "={{ $json.attemptsRemaining }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e662092d-4033-4341-87c0-8ed7586ebd4a",
+      "name": "Check Budget",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        -80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://job-application-agent:3000/budget",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "id": "68afce12-79b4-41bd-9296-566640849103",
+      "name": "Budget Open",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1080,
+        -80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "f6d1ab4f-ac38-4e04-9416-bc5c9dbb5956",
+              "leftValue": "={{ $json.open }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "48dc239a-6195-439c-8c96-b9eea4937732",
+      "name": "Prepare Job Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        220
+      ],
+      "parameters": {
+        "jsCode": "const job = $('One Job').item.json;\nconst rowNumber = job.row_number;\nif (rowNumber === undefined || rowNumber === null || rowNumber === '') {\n  throw new Error(`Missing row_number for job ${job.Company || '?'} — ${job.Role || job['Job URL'] || 'no url'}`);\n}\nreturn [{\n  json: {\n    ...job,\n    row_number: rowNumber,\n    quota: $json,\n  },\n}];"
+      }
+    },
+    {
+      "id": "ebe15665-342c-43bb-9534-2181787250fb",
+      "name": "Single run guard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst now = Date.now();\nconst DEBOUNCE_MS = 2 * 60 * 1000; // prevent double webhook / overlapping cron within 2 min\nif (staticData.applyRunStartedAt && now - staticData.applyRunStartedAt < DEBOUNCE_MS) {\n  throw new Error('Apply workflow started moments ago (debounce). Retry in 2 minutes.');\n}\nstaticData.applyRunStartedAt = now;\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "f7818c14-aa01-4a57-91e0-542a7b466dce",
+      "name": "Clear run lock",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.applyRunStartedAt = 0;\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "22cc3b32-a823-42cf-8803-d8070ad23d16",
+      "name": "Wait before sheet write",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        220
+      ],
+      "parameters": {
+        "amount": 4,
+        "unit": "seconds"
+      },
+      "webhookId": "74cc9437-cd12-4d58-9ed5-46541c5394a4"
+    },
+    {
+      "id": "c4ea3efd-16ae-45f0-a8c9-1baea408d4c5",
+      "name": "Wait before result write",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        220
+      ],
+      "parameters": {
+        "amount": 4,
+        "unit": "seconds"
+      },
+      "webhookId": "e10bae50-07ef-4880-abce-c4950708fa93"
+    },
+    {
+      "id": "c1a11e11-0a01-4a01-8a01-000000000001",
+      "name": "Claim apply run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://job-application-agent:3000/runs/claim",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "id": "c1a11e11-0a01-4a01-8a01-000000000002",
+      "name": "Run lock gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "if ($json.ok !== true) {\n  return [];\n}\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "c1a11e11-0a01-4a01-8a01-000000000003",
+      "name": "Release apply run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://job-application-agent:3000/runs/release",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REDACTED_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Exclude Companies",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        220,
+        100
+      ],
+      "id": "70386ebd-85e1-4cee-8dda-9720d26a1480",
+      "name": "Load Exclude Companies",
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const companies = $('Load Exclude Companies').all()\n  .map((item) => String(item.json.Company || item.json.company || '').trim())\n  .filter(Boolean);\nreturn [{ json: { companies, excludeCount: companies.length } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        100
+      ],
+      "id": "371982f7-586d-4e51-ba8b-37d6e21c712f",
+      "name": "Build Exclude Payload",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://job-application-agent:3000/config/excluded-companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companies: $json.companies, source: 'exclude-companies-sheet' }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        580,
+        100
+      ],
+      "id": "37ff719d-a861-465c-8a92-d2daddb2296a",
+      "name": "Sync Exclude to Worker",
+      "executeOnce": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'REDACTED_SPREADSHEET_ID', sheetId: REDACTED_SHEET_GID } }];\n"
+      },
+      "id": "571e9b13-00b0-4277-ae47-daffc9a4c97e",
+      "name": "Ensure Manual row highlight",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        100
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "5a7b5fcb-a77f-4b70-9782-47bcf76bfacd",
+              "leftValue": "={{ $json.skipped }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2deaadb-7696-45dd-aa74-1ec107621fbb",
+      "name": "Manual highlight needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1180,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/REDACTED_SPREADSHEET_ID:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ requests: [{ addConditionalFormatRule: { rule: { ranges: [{ sheetId: REDACTED_SHEET_GID, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 17 }], booleanRule: { condition: { type: \"CUSTOM_FORMULA\", values: [{ userEnteredValue: '=$O2=\"Manual\"' }] }, format: { backgroundColor: { red: 1, green: 0.898, blue: 0.6 }, textFormat: { bold: true } } } }, index: 0 } }] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "d21b67fe-1a4e-458f-9062-ebd7f4e99d8b",
+      "name": "Sheets Manual row highlight rule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        40
+      ],
+      "executeOnce": true,
+      "continueOnFail": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "c1a11e11-0a01-4a01-8a01-000000000004",
+      "name": "Check Apply Policy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        220
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://job-application-agent:3000/quota",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Single run guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every morning": {
+      "main": [
+        [
+          {
+            "node": "Single run guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Jobs": {
+      "main": [
+        [
+          {
+            "node": "Pick Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One Job": {
+      "main": [
+        [
+          {
+            "node": "Release apply run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Budget",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Applying": {
+      "main": [
+        [
+          {
+            "node": "Apply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply": {
+      "main": [
+        [
+          {
+            "node": "Map Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Result": {
+      "main": [
+        [
+          {
+            "node": "Wait before result write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Result": {
+      "main": [
+        [
+          {
+            "node": "Clear run lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Jobs": {
+      "main": [
+        [
+          {
+            "node": "One Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Quota": {
+      "main": [
+        [
+          {
+            "node": "Quota Open",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quota Open": {
+      "main": [
+        [
+          {
+            "node": "Prepare Job Row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release apply run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Budget": {
+      "main": [
+        [
+          {
+            "node": "Budget Open",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Budget Open": {
+      "main": [
+        [
+          {
+            "node": "Check Quota",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release apply run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Job Row": {
+      "main": [
+        [
+          {
+            "node": "Wait before sheet write",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Single run guard": {
+      "main": [
+        [
+          {
+            "node": "Claim apply run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear run lock": {
+      "main": [
+        [
+          {
+            "node": "One Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before sheet write": {
+      "main": [
+        [
+          {
+            "node": "Set Applying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before result write": {
+      "main": [
+        [
+          {
+            "node": "Write Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim apply run": {
+      "main": [
+        [
+          {
+            "node": "Run lock gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run lock gate": {
+      "main": [
+        [
+          {
+            "node": "Load Exclude Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Exclude Companies": {
+      "main": [
+        [
+          {
+            "node": "Build Exclude Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Exclude Payload": {
+      "main": [
+        [
+          {
+            "node": "Sync Exclude to Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sync Exclude to Worker": {
+      "main": [
+        [
+          {
+            "node": "Ensure Manual row highlight",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Manual row highlight": {
+      "main": [
+        [
+          {
+            "node": "Manual highlight needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual highlight needed?": {
+      "main": [
+        [
+          {
+            "node": "Check Apply Policy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check Apply Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Manual row highlight rule": {
+      "main": [
+        [
+          {
+            "node": "Check Apply Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Apply Policy": {
+      "main": [
+        [
+          {
+            "node": "Read Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Jerusalem",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "SmGAzL8f8MS9cj9k"
+  },
+  "staticData": {
+    "node:Every morning": {
+      "recurrenceRules": []
+    },
+    "global": {
+      "applyRunStartedAt": 0,
+      "jobSheetManualHighlightRuleV": 1
+    }
+  },
+  "meta": null,
+  "versionId": "a56bb73c-db86-4320-9852-540a284200dd",
+  "activeVersionId": "a56bb73c-db86-4320-9852-540a284200dd",
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2026-09-27T18:06:33.078Z",
+      "createdAt": "2026-09-27T18:06:33.078Z",
+      "role": "workflow:owner",
+      "workflowId": "fcYSvcG7IiP8xAqr",
+      "projectId": "jZQwxx5XeYWCtjlU"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-10-08T12:44:19.533Z",
+    "createdAt": "2026-10-08T12:44:19.533Z",
+    "versionId": "a56bb73c-db86-4320-9852-540a284200dd",
+    "workflowId": "fcYSvcG7IiP8xAqr",
+    "nodes": [
+      {
+        "id": "a0e542c2-94db-4309-9615-7d91497957d7",
+        "name": "Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "job-apply-run",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "webhookId": "0c78f9a1-6372-48e5-befe-8845c9e691b0"
+      },
+      {
+        "id": "ab26b706-3383-497b-8bfd-8af32fe87e67",
+        "name": "Every morning",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          200
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 9 * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "17645cff-5a4a-4c69-bb47-ab9f81b8e8a3",
+        "name": "Read Jobs",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          780,
+          100
+        ],
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "REDACTED_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "REDACTED_SHEET_GID",
+            "mode": "id"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        }
+      },
+      {
+        "id": "e4497b66-d891-40a3-9517-14adca813363",
+        "name": "Pick Jobs",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1000,
+          220
+        ],
+        "parameters": {
+          "jsCode": "const rows = $items('Read Jobs', 0).map((item) => item.json);\nif (!rows.length) {\n  throw new Error('Pick Jobs: Read Jobs returned 0 rows');\n}\nconst TECH = new Set([\n  'Applied AI', 'AI Product', 'AI Solutions', 'Growth Engineering', 'Digital Operations', 'Marketing Technology',\n]);\nconst MKT = new Set([\n  'Growth Marketing', 'Performance Marketing Leadership', 'Analytics & CRO', 'Product-led Growth', 'Revenue Systems',\n]);\nconst policy = $('Check Apply Policy').first().json;\nconst ATTEMPT_CAP = Math.max(0, Number(policy.dailyPickLimit ?? policy.maxAttempts ?? 20));\nconst TARGET_MKT = Math.round(ATTEMPT_CAP * 0.35);\nconst TARGET_TECH = ATTEMPT_CAP - TARGET_MKT;\n// Admin SSOT: Google Sheet tab \"Exclude Companies\" (Company column).\nconst excludedCompanies = (() => {\n  try {\n    return $('Load Exclude Companies').all()\n      .map((item) => String(item.json.Company || item.json.company || '').trim())\n      .filter(Boolean);\n  } catch (e) {\n    return [];\n  }\n})();\n\nfunction side(row) {\n  const c = String(row.Category || '').trim();\n  if (MKT.has(c)) return 'marketing';\n  if (TECH.has(c)) return 'tech';\n  return 'other';\n}\nfunction score(row) {\n  const n = Number(String(row['Match Score'] || '').replace(/[^\\d.]/g, ''));\n  return Number.isFinite(n) ? n : 0;\n}\nfunction okUrl(url) {\n  const u = String(url || '').trim();\n  if (!/^https?:\\/\\//i.test(u)) return false;\n  const host = u.replace(/^https?:\\/\\//i, '').split('/')[0];\n  if (!host) return false;\n  if (u.toLowerCase().includes('/jobs/stampli/') && u.toLowerCase().includes('0b.273')) return false;\n  if (/^https:\\/\\/apply\\.workable\\.com\\/comeet\\//i.test(u)) return false;\n  return true;\n}\nfunction normalizeCompanyKey(value) {\n  return String(value || '')\n    .toLowerCase()\n    .normalize('NFKC')\n    .replace(/[\\s_\\-./]+/g, '')\n    .replace(/[^\\p{L}\\p{N}]+/gu, '');\n}\nfunction isExcludedCompany(company) {\n  const key = normalizeCompanyKey(company);\n  if (!key) return false;\n  for (const excluded of excludedCompanies) {\n    const needle = normalizeCompanyKey(excluded);\n    if (!needle) continue;\n    if (key === needle || key.includes(needle)) return true;\n  }\n  return false;\n}\nfunction applyTier(row) {\n  const u = String(row['Job URL'] || '');\n  if (/linkedin\\.com|gotfriends\\.co\\.il|dialog\\.co\\.il|drushim\\.co\\.il|sqlink\\.com|jobmaster\\.co\\.il|comblack\\.co\\.il/i.test(u)) return 0;\n  return 1;\n}\nfunction sortRows(list) {\n  return list.sort((a, b) => score(b) - score(a) || String(b['Found Date'] || '').localeCompare(String(a['Found Date'] || '')));\n}\n\nconst seenUrl = new Set();\nconst jobs = [];\nfor (const row of rows) {\n  const status = String(row.Status || '').trim();\n  const retryUpload = status === 'Review' && String(row.Notes || '').includes('cv_upload_failed');\n  if ((status !== 'New' && !retryUpload) || !okUrl(row['Job URL'])) continue;\n  if (isExcludedCompany(row.Company)) continue;\n  const url = String(row['Job URL'] || '');\n  if (seenUrl.has(url)) continue;\n  seenUrl.add(url);\n  jobs.push(row);\n}\n\nconst tech = sortRows(jobs.filter((r) => side(r) === 'tech'));\nconst mkt = sortRows(jobs.filter((r) => side(r) === 'marketing'));\nconst other = sortRows(jobs.filter((r) => side(r) === 'other'));\n\nconst pickedMkt = mkt.slice(0, TARGET_MKT);\nconst pickedTech = tech.slice(0, TARGET_TECH);\nlet picked = [...pickedMkt, ...pickedTech];\nconst pickedUrls = new Set(picked.map((r) => String(r['Job URL'] || '')));\n\nconst backfill = sortRows([\n  ...tech.slice(TARGET_TECH),\n  ...mkt.slice(TARGET_MKT),\n  ...other,\n]).filter((r) => !pickedUrls.has(String(r['Job URL'] || '')));\n\nfor (const row of backfill) {\n  if (picked.length >= ATTEMPT_CAP) break;\n  picked.push(row);\n}\n\npicked = sortRows([...picked]).slice(0, ATTEMPT_CAP);\nreturn picked.map((row) => ({ json: row }));\n",
+          "mode": "runOnceForAllItems"
+        }
+      },
+      {
+        "id": "82efc9f6-d430-403f-8318-c90fdf936713",
+        "name": "One Job",
+        "type": "n8n-nodes-base.splitInBatches",
+        "typeVersion": 3,
+        "position": [
+          780,
+          220
+        ],
+        "parameters": {
+          "batchSize": 1,
+          "options": {}
+        }
+      },
+      {
+        "id": "83fd33b2-a5a1-4172-bec2-1d1ae2176be5",
+        "name": "Set Applying",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1020,
+          220
+        ],
+        "parameters": {
+          "operation": "update",
+          "documentId": {
+            "__rl": true,
+            "value": "REDACTED_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "REDACTED_SHEET_GID",
+            "mode": "id"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "matchingColumns": [
+              "row_number"
+            ],
+            "value": {
+              "row_number": "={{ $json.row_number }}",
+              "Status": "Applying",
+              "Notes": "AUTO_APPLY\nresult=applying\nWorker started. Do not submit this row again until it finishes."
+            },
+            "schema": [
+              {
+                "id": "Status",
+                "displayName": "Status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Applied Date",
+                "displayName": "Applied Date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Notes",
+                "displayName": "Notes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Job URL",
+                "displayName": "Job URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "row_number",
+                "displayName": "row_number",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true,
+                "readOnly": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000
+      },
+      {
+        "id": "6b61da2a-2cca-4da4-b565-c8a95f796a00",
+        "name": "Apply",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1260,
+          220
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://job-application-agent:3000/apply",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ submit: true, row: $(\"One Job\").item.json.row_number, job: { role: $(\"One Job\").item.json.Role, company: $(\"One Job\").item.json.Company, url: $(\"One Job\").item.json[\"Job URL\"], matchScore: Number($(\"One Job\").item.json[\"Match Score\"] || 0), category: $(\"One Job\").item.json.Category || \"\", estimatedSalary: $(\"One Job\").item.json[\"Est. Salary Range\"] || \"\" } }) }}",
+          "options": {
+            "timeout": 480000,
+            "response": {
+              "response": {
+                "fullResponse": false
+              }
+            }
+          },
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth"
+        },
+        "onError": "continueRegularOutput",
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        },
+        "continueOnFail": true
+      },
+      {
+        "id": "7af37e84-903c-4f5d-b996-35e5b1391806",
+        "name": "Map Result",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1500,
+          220
+        ],
+        "parameters": {
+          "jsCode": "const src = $('One Job').item.json;\nconst res = $json || {};\nconst today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });\nif (res.status === 'budget_reached') {\n  return [{\n    json: {\n      row_number: src.row_number,\n      company: src.Company,\n      role: src.Role,\n      Status: 'New',\n      'Applied Date': src['Applied Date'] || '',\n      Notes: src.Notes || '',\n      'Job URL': src['Job URL'],\n      workerStatus: 'budget_reached',\n    },\n  }];\n}\nif (res.status === 'quota_reached') {\n  return [{\n    json: {\n      row_number: src.row_number,\n      company: src.Company,\n      role: src.Role,\n      Status: 'New',\n      'Applied Date': src['Applied Date'] || '',\n      Notes: src.Notes || '',\n      'Job URL': src['Job URL'],\n      workerStatus: 'quota_reached',\n    },\n  }];\n}\nconst labels = { applied: 'Applied', closed: 'Closed', not_relevant: 'Not Relevant', no_suitable_replacement: 'Not Relevant', review: 'Review', failed: 'Review', invalid_url: 'Review', confirmation_not_detected: 'Review', already_submitted: 'Review', location_ineligible: 'Not Relevant', manual_required: 'Manual' };\nconst status = res.blocker === 'captcha' ? 'Manual' : (labels[res.status] || 'Review');\nconst notes = [res.notes || res.message || res.error || 'Worker returned no notes.', res.attemptId ? `attempt_id=${res.attemptId}` : ''].filter(Boolean).join('\\n');\nreturn [{\n  json: {\n    row_number: src.row_number,\n    company: src.Company,\n    role: src.Role,\n    Status: status,\n    'Applied Date': status === 'Applied' ? (String(res.appliedAt || '').slice(0, 10) || today) : (src['Applied Date'] || ''),\n    Notes: notes,\n    'Job URL': res.canonicalJobUrl || src['Job URL'],\n    workerStatus: res.status || 'failed',\n  },\n}];"
+        }
+      },
+      {
+        "id": "9fedd0e5-8147-4a1a-9823-1c94714e458d",
+        "name": "Write Result",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1740,
+          220
+        ],
+        "parameters": {
+          "operation": "update",
+          "documentId": {
+            "__rl": true,
+            "value": "REDACTED_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "REDACTED_SHEET_GID",
+            "mode": "id"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "matchingColumns": [
+              "row_number"
+            ],
+            "value": {
+              "row_number": "={{ $json.row_number }}",
+              "Status": "={{ $json.Status }}",
+              "Notes": "={{ $json.Notes }}",
+              "Applied Date": "={{ $json[\"Applied Date\"] }}",
+              "Job URL": "={{ $json[\"Job URL\"] }}"
+            },
+            "schema": [
+              {
+                "id": "Status",
+                "displayName": "Status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Applied Date",
+                "displayName": "Applied Date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Notes",
+                "displayName": "Notes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Job URL",
+                "displayName": "Job URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "row_number",
+                "displayName": "row_number",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true,
+                "readOnly": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000
+      },
+      {
+        "id": "4b7d89e5-a475-4d86-ad12-9a7e7d5fae28",
+        "name": "Check Quota",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          40
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://job-application-agent:3000/quota",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "id": "0dbbc9ff-fe09-4200-9d8c-26896b5049d7",
+        "name": "Quota Open",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1080,
+          40
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "1619eb2d-1a75-497f-9417-84247489c682",
+                "leftValue": "={{ $json.attemptsRemaining }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "e662092d-4033-4341-87c0-8ed7586ebd4a",
+        "name": "Check Budget",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          -80
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://job-application-agent:3000/budget",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "id": "68afce12-79b4-41bd-9296-566640849103",
+        "name": "Budget Open",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1080,
+          -80
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "f6d1ab4f-ac38-4e04-9416-bc5c9dbb5956",
+                "leftValue": "={{ $json.open }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "48dc239a-6195-439c-8c96-b9eea4937732",
+        "name": "Prepare Job Row",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          840,
+          220
+        ],
+        "parameters": {
+          "jsCode": "const job = $('One Job').item.json;\nconst rowNumber = job.row_number;\nif (rowNumber === undefined || rowNumber === null || rowNumber === '') {\n  throw new Error(`Missing row_number for job ${job.Company || '?'} — ${job.Role || job['Job URL'] || 'no url'}`);\n}\nreturn [{\n  json: {\n    ...job,\n    row_number: rowNumber,\n    quota: $json,\n  },\n}];"
+        }
+      },
+      {
+        "id": "ebe15665-342c-43bb-9534-2181787250fb",
+        "name": "Single run guard",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -200,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst now = Date.now();\nconst DEBOUNCE_MS = 2 * 60 * 1000; // prevent double webhook / overlapping cron within 2 min\nif (staticData.applyRunStartedAt && now - staticData.applyRunStartedAt < DEBOUNCE_MS) {\n  throw new Error('Apply workflow started moments ago (debounce). Retry in 2 minutes.');\n}\nstaticData.applyRunStartedAt = now;\nreturn $input.all();"
+        }
+      },
+      {
+        "id": "f7818c14-aa01-4a57-91e0-542a7b466dce",
+        "name": "Clear run lock",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1900,
+          300
+        ],
+        "parameters": {
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.applyRunStartedAt = 0;\nreturn $input.all();"
+        }
+      },
+      {
+        "id": "22cc3b32-a823-42cf-8803-d8070ad23d16",
+        "name": "Wait before sheet write",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          880,
+          220
+        ],
+        "parameters": {
+          "amount": 4,
+          "unit": "seconds"
+        },
+        "webhookId": "74cc9437-cd12-4d58-9ed5-46541c5394a4"
+      },
+      {
+        "id": "c4ea3efd-16ae-45f0-a8c9-1baea408d4c5",
+        "name": "Wait before result write",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          1600,
+          220
+        ],
+        "parameters": {
+          "amount": 4,
+          "unit": "seconds"
+        },
+        "webhookId": "e10bae50-07ef-4880-abce-c4950708fa93"
+      },
+      {
+        "id": "c1a11e11-0a01-4a01-8a01-000000000001",
+        "name": "Claim apply run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          0,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://job-application-agent:3000/runs/claim",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 20000,
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "id": "c1a11e11-0a01-4a01-8a01-000000000002",
+        "name": "Run lock gate",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          220,
+          300
+        ],
+        "parameters": {
+          "jsCode": "if ($json.ok !== true) {\n  return [];\n}\nreturn $input.all();"
+        }
+      },
+      {
+        "id": "c1a11e11-0a01-4a01-8a01-000000000003",
+        "name": "Release apply run",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1900,
+          480
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://job-application-agent:3000/runs/release",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 20000,
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "REDACTED_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Exclude Companies",
+            "mode": "name"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          220,
+          100
+        ],
+        "id": "70386ebd-85e1-4cee-8dda-9720d26a1480",
+        "name": "Load Exclude Companies",
+        "executeOnce": true,
+        "alwaysOutputData": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "const companies = $('Load Exclude Companies').all()\n  .map((item) => String(item.json.Company || item.json.company || '').trim())\n  .filter(Boolean);\nreturn [{ json: { companies, excludeCount: companies.length } }];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          400,
+          100
+        ],
+        "id": "371982f7-586d-4e51-ba8b-37d6e21c712f",
+        "name": "Build Exclude Payload",
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "method": "PUT",
+          "url": "http://job-application-agent:3000/config/excluded-companies",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ companies: $json.companies, source: 'exclude-companies-sheet' }) }}",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          580,
+          100
+        ],
+        "id": "37ff719d-a861-465c-8a92-d2daddb2296a",
+        "name": "Sync Exclude to Worker",
+        "executeOnce": true,
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'REDACTED_SPREADSHEET_ID', sheetId: REDACTED_SHEET_GID } }];\n"
+        },
+        "id": "571e9b13-00b0-4277-ae47-daffc9a4c97e",
+        "name": "Ensure Manual row highlight",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          980,
+          100
+        ],
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "5a7b5fcb-a77f-4b70-9782-47bcf76bfacd",
+                "leftValue": "={{ $json.skipped }}",
+                "rightValue": false,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b2deaadb-7696-45dd-aa74-1ec107621fbb",
+        "name": "Manual highlight needed?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1180,
+          100
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://sheets.googleapis.com/v4/spreadsheets/REDACTED_SPREADSHEET_ID:batchUpdate",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "googleSheetsOAuth2Api",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ requests: [{ addConditionalFormatRule: { rule: { ranges: [{ sheetId: REDACTED_SHEET_GID, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 17 }], booleanRule: { condition: { type: \"CUSTOM_FORMULA\", values: [{ userEnteredValue: '=$O2=\"Manual\"' }] }, format: { backgroundColor: { red: 1, green: 0.898, blue: 0.6 }, textFormat: { bold: true } } } }, index: 0 } }] }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "neverError": true
+              }
+            }
+          }
+        },
+        "id": "d21b67fe-1a4e-458f-9062-ebd7f4e99d8b",
+        "name": "Sheets Manual row highlight rule",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1380,
+          40
+        ],
+        "executeOnce": true,
+        "continueOnFail": true,
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        }
+      },
+      {
+        "id": "c1a11e11-0a01-4a01-8a01-000000000004",
+        "name": "Check Apply Policy",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          560,
+          220
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://job-application-agent:3000/quota",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "Single run guard",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Every morning": {
+        "main": [
+          [
+            {
+              "node": "Single run guard",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Jobs": {
+        "main": [
+          [
+            {
+              "node": "Pick Jobs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "One Job": {
+        "main": [
+          [
+            {
+              "node": "Release apply run",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Check Budget",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Set Applying": {
+        "main": [
+          [
+            {
+              "node": "Apply",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Apply": {
+        "main": [
+          [
+            {
+              "node": "Map Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Map Result": {
+        "main": [
+          [
+            {
+              "node": "Wait before result write",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Result": {
+        "main": [
+          [
+            {
+              "node": "Clear run lock",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Pick Jobs": {
+        "main": [
+          [
+            {
+              "node": "One Job",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Quota": {
+        "main": [
+          [
+            {
+              "node": "Quota Open",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Quota Open": {
+        "main": [
+          [
+            {
+              "node": "Prepare Job Row",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Release apply run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Budget": {
+        "main": [
+          [
+            {
+              "node": "Budget Open",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Budget Open": {
+        "main": [
+          [
+            {
+              "node": "Check Quota",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Release apply run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Job Row": {
+        "main": [
+          [
+            {
+              "node": "Wait before sheet write",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Single run guard": {
+        "main": [
+          [
+            {
+              "node": "Claim apply run",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Clear run lock": {
+        "main": [
+          [
+            {
+              "node": "One Job",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait before sheet write": {
+        "main": [
+          [
+            {
+              "node": "Set Applying",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait before result write": {
+        "main": [
+          [
+            {
+              "node": "Write Result",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Claim apply run": {
+        "main": [
+          [
+            {
+              "node": "Run lock gate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Run lock gate": {
+        "main": [
+          [
+            {
+              "node": "Load Exclude Companies",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Exclude Companies": {
+        "main": [
+          [
+            {
+              "node": "Build Exclude Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Exclude Payload": {
+        "main": [
+          [
+            {
+              "node": "Sync Exclude to Worker",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sync Exclude to Worker": {
+        "main": [
+          [
+            {
+              "node": "Ensure Manual row highlight",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Ensure Manual row highlight": {
+        "main": [
+          [
+            {
+              "node": "Manual highlight needed?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Manual highlight needed?": {
+        "main": [
+          [
+            {
+              "node": "Check Apply Policy",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Check Apply Policy",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sheets Manual row highlight rule": {
+        "main": [
+          [
+            {
+              "node": "Check Apply Policy",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Apply Policy": {
+        "main": [
+          [
+            {
+              "node": "Read Jobs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "operator",
+    "name": null,
+    "description": null,
+    "autosaved": false
+  },
+  "tags": []
+}

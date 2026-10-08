@@ -1,0 +1,1207 @@
+{
+  "updatedAt": "2026-10-07T10:37:34.469Z",
+  "createdAt": "2026-09-28T08:20:57.578Z",
+  "id": "oreaKVjt7ifi0i6a",
+  "name": "Discover jobs (daily)",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "6c633347-ef8f-4808-8084-216e6a2014ad",
+      "name": "Every morning early",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bf03e803-b662-42c1-a623-b19eb0d6ff81",
+      "name": "Check Budget",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://job-application-agent:3000/budget",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "id": "94a0372d-4681-4fed-918f-ea5a6c5f4829",
+      "name": "Budget Open",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "6a6bd41b-5074-42b9-8dab-2ea28f861e1d",
+              "leftValue": "={{ $json.remainingIls }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "2556ecdc-ea11-4154-8dfb-965c23d0a7e6",
+      "name": "Read Jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        680,
+        0
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REDACTED_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REDACTED_SHEET_GID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "c7c8910b-ac81-490d-bad0-df2adbf0351c",
+      "name": "Collect URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const rows = $input.all().map((item) => item.json);\nconst existingUrls = rows.map((row) => String(row['Job URL'] || '').trim()).filter(Boolean);\n\nconst TECH = new Set([\n  'Applied AI', 'AI Product', 'AI Solutions', 'Growth Engineering', 'Digital Operations', 'Marketing Technology',\n]);\nconst MKT = new Set([\n  'Growth Marketing', 'Performance Marketing Leadership', 'Analytics & CRO', 'Product-led Growth', 'Revenue Systems',\n]);\n\nlet tech = 0;\nlet marketing = 0;\nfor (const row of rows) {\n  if (String(row.Status || '').trim() !== 'New') continue;\n  const cat = String(row.Category || '').trim();\n  if (TECH.has(cat)) tech += 1;\n  else if (MKT.has(cat)) marketing += 1;\n}\nconst total = tech + marketing;\nconst techPct = total > 0 ? (tech / total) * 100 : 65;\n\nreturn [{\n  json: {\n    existingUrls,\n    newQueueStats: { tech, marketing, total, techPct, statusNew: rows.filter((row) => String(row.Status || '').trim() === 'New').length },\n  },\n}];"
+      }
+    },
+    {
+      "id": "33176789-765b-4dd6-ba42-c1114bb605da",
+      "name": "Scan Boards",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://job-application-agent:3000/discover/scan",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ existingUrls: $json.existingUrls || [], newQueueStats: $json.newQueueStats }) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AdigSJxrIRyVjF5h",
+          "name": "Job application worker"
+        }
+      }
+    },
+    {
+      "id": "e210fc92-b6ee-400b-b696-661b0feb1a4c",
+      "name": "Expand Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const res = $json || {};\nconst jobs = Array.isArray(res.jobs) ? res.jobs : [];\nif (jobs.length === 0) {\n  return [{ json: { skip: true, notes: res.notes || 'No new jobs.', mixReport: res.mixReport || '' } }];\n}\nconst header = res.mixReport ? `AUTO_DISCOVER\\n${res.mixReport}` : 'AUTO_DISCOVER';\nreturn jobs.map((job) => ({ json: {\n  'Unique Key': job.uniqueKey,\n  'Found Date': job.foundDate,\n  Role: job.role,\n  Company: job.company,\n  Category: job.category,\n  'Match Score': job.matchScore,\n  'Why It Fits': job.whyItFits,\n  Source: job.source,\n  Location: job.location || '',\n  'Job URL': job.url,\n  Status: 'New',\n  Notes: `${header}\\n${res.notes || ''}`.trim(),\n} }));"
+      }
+    },
+    {
+      "id": "59ab82fd-00a0-4e72-bb16-f824c4532d97",
+      "name": "Has Jobs",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "bfce54d0-4304-4d86-b43d-cef791f94520",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7871aa9b-d26b-4700-95e2-5749d49a48b4",
+      "name": "Append Jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1780,
+        0
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REDACTED_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REDACTED_SHEET_GID",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Unique Key",
+              "displayName": "Unique Key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Found Date",
+              "displayName": "Found Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Posted Date",
+              "displayName": "Posted Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Role",
+              "displayName": "Role",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Category",
+              "displayName": "Category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Location",
+              "displayName": "Location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Work Mode",
+              "displayName": "Work Mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Salary",
+              "displayName": "Salary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Est. Salary Range",
+              "displayName": "Est. Salary Range",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Match Score",
+              "displayName": "Match Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Why It Fits",
+              "displayName": "Why It Fits",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Source",
+              "displayName": "Source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Job URL",
+              "displayName": "Job URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Applied Date",
+              "displayName": "Applied Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UsVIraYKqvdQZt4b",
+          "name": "or Google Sheets account"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "5a8edf39-9933-47fb-a3b4-61f1a84e3689",
+      "name": "Manual discover webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        160
+      ],
+      "parameters": {
+        "path": "job-discover-run",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "d40bcae0-0752-401a-85f2-644889cac139"
+    },
+    {
+      "id": "d7d00c58-6c22-4e67-ae67-7a7e3d8b6b7f",
+      "name": "Queue depth gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c4c8a4ae-7ae7-4ca1-9f23-32c6bff2f2e1",
+              "leftValue": "={{ $json.newQueueStats.statusNew }}",
+              "rightValue": 60,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Every morning early": {
+      "main": [
+        [
+          {
+            "node": "Check Budget",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Budget": {
+      "main": [
+        [
+          {
+            "node": "Budget Open",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Budget Open": {
+      "main": [
+        [
+          {
+            "node": "Read Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Read Jobs": {
+      "main": [
+        [
+          {
+            "node": "Collect URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect URLs": {
+      "main": [
+        [
+          {
+            "node": "Queue depth gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan Boards": {
+      "main": [
+        [
+          {
+            "node": "Expand Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expand Jobs": {
+      "main": [
+        [
+          {
+            "node": "Has Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Jobs": {
+      "main": [
+        [
+          {
+            "node": "Append Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Manual discover webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Budget",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue depth gate": {
+      "main": [
+        [
+          {
+            "node": "Scan Boards",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "timezone": "Asia/Jerusalem",
+    "errorWorkflow": "SmGAzL8f8MS9cj9k"
+  },
+  "staticData": {
+    "node:Every morning early": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "versionId": "34e471e5-a962-477d-b008-661888c82d26",
+  "activeVersionId": "34e471e5-a962-477d-b008-661888c82d26",
+  "triggerCount": 2,
+  "shared": [
+    {
+      "updatedAt": "2026-09-28T08:20:57.578Z",
+      "createdAt": "2026-09-28T08:20:57.578Z",
+      "role": "workflow:owner",
+      "workflowId": "oreaKVjt7ifi0i6a",
+      "projectId": "jZQwxx5XeYWCtjlU"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-10-07T10:37:34.481Z",
+    "createdAt": "2026-10-07T10:37:34.481Z",
+    "versionId": "34e471e5-a962-477d-b008-661888c82d26",
+    "workflowId": "oreaKVjt7ifi0i6a",
+    "nodes": [
+      {
+        "id": "6c633347-ef8f-4808-8084-216e6a2014ad",
+        "name": "Every morning early",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          0,
+          0
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "cronExpression",
+                "expression": "0 8 * * *"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "bf03e803-b662-42c1-a623-b19eb0d6ff81",
+        "name": "Check Budget",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          240,
+          0
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://job-application-agent:3000/budget",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "options": {
+            "timeout": 20000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "id": "94a0372d-4681-4fed-918f-ea5a6c5f4829",
+        "name": "Budget Open",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          460,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "6a6bd41b-5074-42b9-8dab-2ea28f861e1d",
+                "leftValue": "={{ $json.remainingIls }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "2556ecdc-ea11-4154-8dfb-965c23d0a7e6",
+        "name": "Read Jobs",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          680,
+          0
+        ],
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "REDACTED_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "REDACTED_SHEET_GID",
+            "mode": "id"
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        }
+      },
+      {
+        "id": "c7c8910b-ac81-490d-bad0-df2adbf0351c",
+        "name": "Collect URLs",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          900,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const rows = $input.all().map((item) => item.json);\nconst existingUrls = rows.map((row) => String(row['Job URL'] || '').trim()).filter(Boolean);\n\nconst TECH = new Set([\n  'Applied AI', 'AI Product', 'AI Solutions', 'Growth Engineering', 'Digital Operations', 'Marketing Technology',\n]);\nconst MKT = new Set([\n  'Growth Marketing', 'Performance Marketing Leadership', 'Analytics & CRO', 'Product-led Growth', 'Revenue Systems',\n]);\n\nlet tech = 0;\nlet marketing = 0;\nfor (const row of rows) {\n  if (String(row.Status || '').trim() !== 'New') continue;\n  const cat = String(row.Category || '').trim();\n  if (TECH.has(cat)) tech += 1;\n  else if (MKT.has(cat)) marketing += 1;\n}\nconst total = tech + marketing;\nconst techPct = total > 0 ? (tech / total) * 100 : 65;\n\nreturn [{\n  json: {\n    existingUrls,\n    newQueueStats: { tech, marketing, total, techPct, statusNew: rows.filter((row) => String(row.Status || '').trim() === 'New').length },\n  },\n}];"
+        }
+      },
+      {
+        "id": "33176789-765b-4dd6-ba42-c1114bb605da",
+        "name": "Scan Boards",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1120,
+          0
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://job-application-agent:3000/discover/scan",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ existingUrls: $json.existingUrls || [], newQueueStats: $json.newQueueStats }) }}",
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "AdigSJxrIRyVjF5h",
+            "name": "Job application worker"
+          }
+        }
+      },
+      {
+        "id": "e210fc92-b6ee-400b-b696-661b0feb1a4c",
+        "name": "Expand Jobs",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1340,
+          0
+        ],
+        "parameters": {
+          "jsCode": "const res = $json || {};\nconst jobs = Array.isArray(res.jobs) ? res.jobs : [];\nif (jobs.length === 0) {\n  return [{ json: { skip: true, notes: res.notes || 'No new jobs.', mixReport: res.mixReport || '' } }];\n}\nconst header = res.mixReport ? `AUTO_DISCOVER\\n${res.mixReport}` : 'AUTO_DISCOVER';\nreturn jobs.map((job) => ({ json: {\n  'Unique Key': job.uniqueKey,\n  'Found Date': job.foundDate,\n  Role: job.role,\n  Company: job.company,\n  Category: job.category,\n  'Match Score': job.matchScore,\n  'Why It Fits': job.whyItFits,\n  Source: job.source,\n  Location: job.location || '',\n  'Job URL': job.url,\n  Status: 'New',\n  Notes: `${header}\\n${res.notes || ''}`.trim(),\n} }));"
+        }
+      },
+      {
+        "id": "59ab82fd-00a0-4e72-bb16-f824c4532d97",
+        "name": "Has Jobs",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1560,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "bfce54d0-4304-4d86-b43d-cef791f94520",
+                "leftValue": "={{ $json.skip }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "notEquals"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "7871aa9b-d26b-4700-95e2-5749d49a48b4",
+        "name": "Append Jobs",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1780,
+          0
+        ],
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "REDACTED_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "REDACTED_SHEET_GID",
+            "mode": "id"
+          },
+          "columns": {
+            "mappingMode": "autoMapInputData",
+            "value": {},
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "Unique Key",
+                "displayName": "Unique Key",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Found Date",
+                "displayName": "Found Date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Posted Date",
+                "displayName": "Posted Date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Role",
+                "displayName": "Role",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Company",
+                "displayName": "Company",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Category",
+                "displayName": "Category",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Location",
+                "displayName": "Location",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Work Mode",
+                "displayName": "Work Mode",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Salary",
+                "displayName": "Salary",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Est. Salary Range",
+                "displayName": "Est. Salary Range",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Match Score",
+                "displayName": "Match Score",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Why It Fits",
+                "displayName": "Why It Fits",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Source",
+                "displayName": "Source",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Job URL",
+                "displayName": "Job URL",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Status",
+                "displayName": "Status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Applied Date",
+                "displayName": "Applied Date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Notes",
+                "displayName": "Notes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": true
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "UsVIraYKqvdQZt4b",
+            "name": "or Google Sheets account"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 5,
+        "waitBetweenTries": 5000
+      },
+      {
+        "id": "5a8edf39-9933-47fb-a3b4-61f1a84e3689",
+        "name": "Manual discover webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          160
+        ],
+        "parameters": {
+          "path": "job-discover-run",
+          "httpMethod": "POST",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "webhookId": "d40bcae0-0752-401a-85f2-644889cac139"
+      },
+      {
+        "id": "d7d00c58-6c22-4e67-ae67-7a7e3d8b6b7f",
+        "name": "Queue depth gate",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1120,
+          0
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "version": 2,
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "id": "c4c8a4ae-7ae7-4ca1-9f23-32c6bff2f2e1",
+                "leftValue": "={{ $json.newQueueStats.statusNew }}",
+                "rightValue": 60,
+                "operator": {
+                  "type": "number",
+                  "operation": "lte"
+                }
+              }
+            ]
+          },
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Every morning early": {
+        "main": [
+          [
+            {
+              "node": "Check Budget",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Budget": {
+        "main": [
+          [
+            {
+              "node": "Budget Open",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Budget Open": {
+        "main": [
+          [
+            {
+              "node": "Read Jobs",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Read Jobs": {
+        "main": [
+          [
+            {
+              "node": "Collect URLs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Collect URLs": {
+        "main": [
+          [
+            {
+              "node": "Queue depth gate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Scan Boards": {
+        "main": [
+          [
+            {
+              "node": "Expand Jobs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Expand Jobs": {
+        "main": [
+          [
+            {
+              "node": "Has Jobs",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Has Jobs": {
+        "main": [
+          [
+            {
+              "node": "Append Jobs",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Manual discover webhook": {
+        "main": [
+          [
+            {
+              "node": "Check Budget",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Queue depth gate": {
+        "main": [
+          [
+            {
+              "node": "Scan Boards",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      }
+    },
+    "authors": "operator",
+    "name": null,
+    "description": null,
+    "autosaved": false
+  },
+  "tags": []
+}
