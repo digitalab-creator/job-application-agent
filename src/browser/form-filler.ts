@@ -1,4 +1,10 @@
 import type { Frame, Page } from "playwright";
+import {
+  applicationFormScoreInBrowser,
+  countFileInputsInBrowser,
+  hasEmailInputInBrowser,
+  readFieldsInBrowser,
+} from "./form-browser.js";
 import { answerBlockedField } from "../application/answer-blocked-field.js";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
@@ -24,74 +30,7 @@ export type DetectedField = {
 };
 
 export async function readFields(scope: FormScope): Promise<DetectedField[]> {
-  const raw = await scope.evaluate(() => {
-    const nodes = Array.from(document.querySelectorAll("input, textarea, select"));
-    const fields: DetectedField[] = [];
-    const seenKeys = new Set<string>();
-    const textFromRefIds = (refIds: string | null) => {
-      if (!refIds) {
-        return "";
-      }
-      return refIds
-        .split(/\s+/)
-        .map((ref) => document.getElementById(ref)?.textContent?.replace(/\s+/g, " ").trim() ?? "")
-        .filter(Boolean)
-        .join(" ");
-    };
-    nodes.forEach((node, index) => {
-      const el = node as HTMLInputElement;
-      el.setAttribute("data-agent-field", String(index));
-      const type = (el.getAttribute("type") || el.tagName).toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "button") {
-        return;
-      }
-      const style = window.getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
-        return;
-      }
-      const id = el.id;
-      const labelFor = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent : "";
-      const wrapped = el.closest("label")?.innerText ?? "";
-      const aria = el.getAttribute("aria-label") ?? "";
-      const labelledBy = textFromRefIds(el.getAttribute("aria-labelledby"));
-      const describedBy = textFromRefIds(el.getAttribute("aria-describedby"));
-      const container = el.closest(".field, .application-field, .form-group, .select__container, fieldset, [data-field]");
-      const containerLabel = (container?.querySelector("label, legend, .label, .application-label, h3, h4")?.textContent ?? "")
-        .replace(/\s+/g, " ")
-        .trim();
-      let raw = aria || labelledBy || labelFor || describedBy || containerLabel || el.placeholder || wrapped || el.name;
-      if (!raw && /^question_/i.test(id)) {
-        raw = container?.querySelector("label")?.textContent ?? "";
-      }
-      if (!raw && (type === "checkbox" || type === "radio")) {
-        raw = el.getAttribute("value") ?? "";
-      }
-      const label = (raw || "").replace(/\s+/g, " ").trim().slice(0, 240);
-      const dedupeKey = `${type}|${el.name || ""}|${label.slice(0, 100)}`;
-      if (seenKeys.has(dedupeKey)) {
-        return;
-      }
-      seenKeys.add(dedupeKey);
-      const labelRequired = label.includes("*");
-      const options = el.tagName === "SELECT"
-        ? Array.from((el as unknown as HTMLSelectElement).options).map((option) => (option.textContent || "").trim()).filter(Boolean)
-        : [];
-      const group = el.closest(".elementor-field-group, fieldset");
-      const groupLabel = (group?.querySelector(".elementor-field-label, legend")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 240);
-      fields.push({
-        index,
-        tag: el.tagName.toLowerCase(),
-        type,
-        label,
-        name: el.name || "",
-        id: el.id || "",
-        required: el.required || el.getAttribute("aria-required") === "true" || labelRequired,
-        options,
-        groupLabel,
-      });
-    });
-    return fields;
-  });
+  const raw = await scope.evaluate(readFieldsInBrowser);
   const labeled = raw.map((field) => ({
     ...field,
     label: field.label || field.groupLabel || field.name,
@@ -191,12 +130,42 @@ export async function fillFields(input: {
     otherPlatformsText: platformPlan?.otherText ?? "",
     jobText: input.jobText,
   };
-  for (const field of input.fields) {
+  const orderedFields = [...input.fields].sort((a, b) => {
+    const rank = (field: DetectedField) => {
+      if (/^search$/i.test(field.label.trim()) && input.fields.some((item) => /phone/i.test(item.label))) {
+        return 0;
+      }
+      if (/phone|tel|mobile/i.test(field.label)) {
+        return 1;
+      }
+      return 2;
+    };
+    return rank(a) - rank(b);
+  });
+  for (const field of orderedFields) {
     if (/phone/i.test(field.label) && phoneFilled) {
       continue;
     }
     if (field.type === "file" || /recaptcha/i.test(field.name) || /recaptcha/i.test(field.label)) {
       continue;
+    }
+    if (/^search$/i.test(field.label.trim())) {
+      const hasPhone = input.fields.some((item) => /phone|tel|mobile/i.test(`${item.label} ${item.name} ${item.id}`));
+      if (hasPhone) {
+        const locator = input.scope.locator(`[data-agent-field="${field.index}"]`);
+        try {
+          await pickSearchableOption(input.scope, locator, "Israel");
+          answers.push({ question: field.label, answer: "Israel", source: "candidate_profile" });
+          log("FIELD_FILLED", { label: field.label, source: "phone_country_search" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "phone_country_search_failed";
+          if (field.required) {
+            blockers.push(`Could not fill phone country search: ${message}`);
+          }
+          log("VALIDATION_FAILED", { label: field.label, message });
+        }
+        continue;
+      }
     }
     if (field.type === "search" && !/country|website|portfolio|url/i.test(`${field.label} ${field.groupLabel}`)) {
       continue;
@@ -309,7 +278,43 @@ export async function fillFields(input: {
       phoneFilled = true;
     }
   }
+  await syncPhoneInputs(input.scope);
   return { blockers, answers };
+}
+
+/** Comeet intl-tel-input keeps a separate visible `name=phone` from data-agent-field targets. */
+export async function syncPhoneInputs(scope: FormScope): Promise<void> {
+  const localPhone = candidate.phone.local.replace(/\D/g, "");
+  await scope.evaluate(({ international, localPhone: national }) => {
+    const pageWindow = window as unknown as {
+      intlTelInputGlobals?: {
+        getInstance?: (node: HTMLInputElement) => { setCountry: (code: string) => void; setNumber: (number: string) => void } | null;
+      };
+      angular?: { element: (node: Element) => { triggerHandler: (name: string) => void } };
+    };
+    const fallbackNational = national || (international.startsWith("+972") ? `0${international.slice(4)}` : international);
+    const candidates = Array.from(
+      document.querySelectorAll('input[name="phone"], input.iti__tel-input, input[type="tel"]'),
+    ) as HTMLInputElement[];
+    for (const input of candidates) {
+      const style = window.getComputedStyle(input);
+      if (style.display === "none" || style.visibility === "hidden") {
+        continue;
+      }
+      const tel = pageWindow.intlTelInputGlobals?.getInstance?.(input);
+      if (tel) {
+        tel.setCountry("il");
+        tel.setNumber(international);
+      } else if (!input.value.trim()) {
+        input.value = fallbackNational;
+      }
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("blur", { bubbles: true }));
+      pageWindow.angular?.element(input).triggerHandler("input");
+      pageWindow.angular?.element(input).triggerHandler("change");
+    }
+  }, { international: candidate.phone.international, localPhone });
 }
 
 async function writeField(scope: FormScope, field: DetectedField, value: string): Promise<void> {
@@ -347,13 +352,29 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
     return;
   }
   if (/phone/i.test(field.label) || field.id === "phone" || field.type === "tel") {
-    const phone = scope.locator("#phone");
-    if (await phone.count().catch(() => 0)) {
-      await phone.click({ timeout: 5000 }).catch(() => undefined);
-      await phone.fill(nationalPhoneDigits(value));
-      await phone.press("Tab").catch(() => undefined);
-      return;
-    }
+    const phoneById = scope.locator("#phone");
+    const target = (await phoneById.count().catch(() => 0)) > 0 ? phoneById : locator;
+    const digits = phoneDigitsForForm(value);
+    await target.click({ timeout: 5000 }).catch(() => undefined);
+    await target.fill(digits);
+    await target.press("Tab").catch(() => undefined);
+    await target.evaluate((element, international) => {
+      const input = element as HTMLInputElement;
+      const pageWindow = window as unknown as {
+        intlTelInputGlobals?: {
+          getInstance?: (node: HTMLInputElement) => { setCountry: (code: string) => void; setNumber: (number: string) => void } | null;
+        };
+        angular?: { element: (node: Element) => { triggerHandler: (name: string) => void } };
+      };
+      const tel = pageWindow.intlTelInputGlobals?.getInstance?.(input);
+      tel?.setCountry("il");
+      tel?.setNumber(international);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      pageWindow.angular?.element(input).triggerHandler("input");
+      pageWindow.angular?.element(input).triggerHandler("change");
+    }, candidate.phone.international);
+    return;
   }
   if (field.id.startsWith("question_")) {
     const questionLocator = scope.locator(`[data-agent-field="${field.index}"]`);
@@ -464,6 +485,16 @@ function digitsOnly(value: string): string {
   return match?.[0] ?? value;
 }
 
+/** Comeet wants local `05…` digits; Greenhouse often wants national without leading 0. */
+function phoneDigitsForForm(value: string): string {
+  const localDigits = candidate.phone.local.replace(/\D/g, "");
+  const incoming = value.replace(/\D/g, "");
+  if (localDigits && (incoming === localDigits || incoming === `972${localDigits.slice(1)}` || incoming.endsWith(localDigits.slice(1)))) {
+    return localDigits;
+  }
+  return nationalPhoneDigits(value);
+}
+
 /** Greenhouse keeps the country code in its own control, so the phone box wants the national number. */
 function nationalPhoneDigits(value: string): string {
   let digits = value.replace(/\D/g, "");
@@ -481,12 +512,56 @@ export async function waitForResumeUploadTarget(page: Page, timeoutMs = 20_000):
   while (Date.now() < deadline) {
     const scopes: FormScope[] = [page, ...page.frames()];
     for (const scope of scopes) {
-      const count = await scope.locator('input[type="file"]').count().catch(() => 0);
+      const count = await countDeepFileInputs(scope);
       if (count > 0) {
         return true;
       }
     }
     await page.waitForTimeout(250);
+  }
+  return false;
+}
+
+export async function waitForReadableApplyForm(page: Page, timeoutMs = 25_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const scope = await applyFormScope(page);
+    const fields = await readFields(scope).catch(() => []);
+    if (fields.length > 0) {
+      return true;
+    }
+    await page.waitForTimeout(400);
+  }
+  return false;
+}
+
+async function countDeepFileInputs(scope: FormScope): Promise<number> {
+  const locatorCount = await scope.locator('input[type="file"]').count().catch(() => 0);
+  if (locatorCount > 0) {
+    return locatorCount;
+  }
+  return scope.evaluate(countFileInputsInBrowser).catch(() => 0);
+}
+
+export async function pageHasDeepFileInput(page: Page): Promise<boolean> {
+  for (const scope of [page, ...page.frames()]) {
+    if ((await countDeepFileInputs(scope)) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function pageHasDeepEmailInput(page: Page): Promise<boolean> {
+  for (const scope of [page, ...page.frames()]) {
+    const shallow = await scope.locator('input[type="email"]').count().catch(() => 0);
+    if (shallow > 0) {
+      return true;
+    }
+    const deep = await scope.evaluate(hasEmailInputInBrowser).catch(() => false);
+    if (deep) {
+      return true;
+    }
   }
   return false;
 }
@@ -516,7 +591,7 @@ export async function revealApplicationForm(page: Page): Promise<void> {
 
 async function pageHasAnyResumeField(page: Page): Promise<boolean> {
   for (const scope of [page, ...page.frames()]) {
-    if ((await scope.locator('input[type="file"]').count().catch(() => 0)) > 0) {
+    if ((await countDeepFileInputs(scope)) > 0) {
       return true;
     }
   }
@@ -576,37 +651,5 @@ export async function applyFormScope(page: Page): Promise<FormScope> {
 }
 
 async function applicationFormScore(scope: FormScope): Promise<number> {
-  return scope.evaluate(() => {
-    const visible = (element: Element): boolean => {
-      const style = window.getComputedStyle(element);
-      return style.display !== "none"
-        && style.visibility !== "hidden"
-        && style.opacity !== "0"
-        && element.getAttribute("aria-hidden") !== "true";
-    };
-    const controls = Array.from(document.querySelectorAll("input, textarea, select")).filter(visible);
-    const text = controls.map((control) => {
-      const element = control as HTMLInputElement;
-      return [
-        element.type,
-        element.name,
-        element.id,
-        element.getAttribute("aria-label") ?? "",
-        element.getAttribute("placeholder") ?? "",
-        element.closest("label")?.textContent ?? "",
-      ].join(" ");
-    }).join(" ").toLowerCase();
-    const body = (document.body?.innerText ?? "").toLowerCase();
-    let score = 0;
-    if (/\bresume\b|\bcv\b|curriculum/.test(text)) score += 10;
-    if (controls.some((control) => (control as HTMLInputElement).type === "file")) score += 9;
-    if (controls.some((control) => (control as HTMLInputElement).type === "email") || /\bemail\b/.test(text)) score += 7;
-    if (/\bfirst.?name\b|\blast.?name\b|\bfull.?name\b/.test(text)) score += 6;
-    if (/\bphone\b|\bmobile\b|\btelephone\b/.test(text)) score += 5;
-    if (/linkedin|portfolio|github/.test(text)) score += 4;
-    if (controls.some((control) => control.tagName.toLowerCase() === "textarea") || /question|experience|cover letter/.test(text)) score += 3;
-    if (/\bapply\b|\bsubmit\b|application/.test(body)) score += 2;
-    if (/\bsearch\b|\bnewsletter\b|\bsubscribe\b|\blogin\b|\bsign in\b/.test(text) && score < 12) score -= 8;
-    return score + Math.min(controls.length, 10) / 10;
-  }).catch(() => 0);
+  return scope.evaluate(applicationFormScoreInBrowser).catch(() => 0);
 }

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
 import { classifyJobPage, isLoginWallUrl } from "../application/classify-page.js";
-import { applyFormScope, fillFields, readFields, revealApplicationForm, uploadResume, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
+import { applyFormScope, fillFields, pageHasDeepEmailInput, pageHasDeepFileInput, readFields, revealApplicationForm, uploadResume, waitForReadableApplyForm, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
 import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
 import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
@@ -14,6 +14,7 @@ import { buildCvDocument, CvGenerationError, writeCvPdf } from "../cv/generate.j
 import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { evaluateCvRelevance, validateCvQuality, validatePdfArtifact, type CvRelevanceResult } from "../cv/relevance.js";
+import { normalizeSelectedSkills } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
 import type { LedgerEntry } from "./ledger.js";
@@ -427,6 +428,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
 
     await revealApplicationForm(page);
+    if (/smartrecruiters\.com/i.test(page.url())) {
+      await waitForReadableApplyForm(page, 30_000);
+    }
     const scope = await applyFormScope(page);
     const fields = await readFields(scope);
     log("APPLICATION_STATE", { state: applicationStateFromEvidence({ formDetected: fields.length > 0 }), fields: fields.length });
@@ -882,7 +886,7 @@ async function prepareCv(
   const outputPath = `${env.generatedCvDir}/${day}/${jobSlug}-redacted-candidate.pdf`;
   let feedback = "";
   let lastFailure = "CV did not pass quality gates.";
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     const built = await buildCvDocument({
       persona,
       role: input.job.role,
@@ -890,6 +894,7 @@ async function prepareCv(
       jobText,
       feedback,
     });
+    normalizeSelectedSkills(built.doc, persona);
     const validation = validateCv(built.doc, persona);
     if (!validation.ok) {
       lastFailure = validation.errors.join("; ");
@@ -1184,13 +1189,7 @@ async function waitForApplyEntry(page: Page, timeoutMs: number): Promise<void> {
 }
 
 async function pageHasApplyEmailField(page: Page): Promise<boolean> {
-  for (const scope of [page, ...page.frames()]) {
-    const count = await scope.locator('input[type="email"]').count().catch(() => 0);
-    if (count > 0) {
-      return true;
-    }
-  }
-  return false;
+  return pageHasDeepEmailInput(page);
 }
 
 async function resolveGreenhouseEmailVerification(
@@ -1430,7 +1429,7 @@ function watchApplyPost(page: Page): Promise<{ ok: boolean; phrase: string } | n
     if (/analytics|segment|google-analytics|facebook|hotjar|sentry|doubleclick/i.test(url)) {
       return false;
     }
-    return /apply|application|submit|candidate|comeet/i.test(url);
+    return /apply|application|submit|candidate|comeet|smartrecruiters|oneclick-ui/i.test(url);
   }, { timeout: 25_000 }).then(async (response) => {
     const text = await response.text().catch(() => "");
     if (/captcha|validation error/i.test(text) && !/success|submitted|thank/i.test(text)) {
@@ -1465,7 +1464,7 @@ async function enterBestOpening(
       }
     }
   }
-  const openings = await listOpenings(page);
+  const openings = await listOpenings(page, role);
   log("LISTING_OPENINGS_FOUND", { company, targetRole: role, count: openings.length, url: page.url() });
   const positionId = careersPositionId(targetUrl);
   if (positionId && openings.length > 0) {
@@ -1560,7 +1559,7 @@ async function enterBestOpening(
       title: role,
       blocked: true,
       outcome: "not_relevant",
-      line: "The link opened a list of jobs. None was a good match, so no application was sent.",
+      line: "The link opened a list of jobs. No high-confidence title match (we do not force-apply to a loose substitute). Nothing was submitted.",
     };
   }
   await openChosen(page, chosen.job);
@@ -1604,14 +1603,7 @@ async function tryGreenhouseCareersFallback(page: Page, targetUrl: string): Prom
 }
 
 async function pageHasResumeField(page: Page): Promise<boolean> {
-  const scopes = [page, ...page.frames()];
-  for (const scope of scopes) {
-    const count = await scope.locator('input[type="file"]').count().catch(() => 0);
-    if (count > 0) {
-      return true;
-    }
-  }
-  return false;
+  return pageHasDeepFileInput(page);
 }
 
 /** Career-site chrome (search box) is not an application form — reject before CV upload. */

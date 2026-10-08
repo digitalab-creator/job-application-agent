@@ -1,6 +1,47 @@
 import type { Page } from "playwright";
 import { thankYouMatch } from "./thank-you.js";
 
+/** SmartRecruiters oneclick-ui keeps the same URL; success copy often lives in shadow roots. */
+export async function detectSmartRecruitersConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {
+  if (!/smartrecruiters\.com/i.test(page.url())) {
+    return { ok: false, phrase: "" };
+  }
+  const text = await page.evaluate(() => {
+    const parts: string[] = [document.body?.innerText ?? ""];
+    const walk = (root: Document | ShadowRoot | Element) => {
+      const children = root instanceof Document
+        ? Array.from(root.body?.children ?? [])
+        : Array.from((root as ShadowRoot | Element).children ?? []);
+      for (const child of children) {
+        if (child instanceof HTMLElement) {
+          if (child.shadowRoot) {
+            walk(child.shadowRoot);
+          }
+          const visible = child.innerText?.trim();
+          if (visible) {
+            parts.push(visible);
+          }
+        }
+      }
+    };
+    walk(document);
+    return parts.join("\n");
+  }).catch(() => "");
+  const phrase = thankYouMatch(text, page.url());
+  if (phrase) {
+    return { ok: true, phrase };
+  }
+  if (/application (has been |was )?submitted|thanks for applying|thank you for applying|we received your application|you applied successfully|already applied/i.test(text)) {
+    const match = text.match(/application (has been |was )?submitted|thanks for applying|thank you for applying|we received your application|you applied successfully|already applied/i);
+    return { ok: true, phrase: match?.[0]?.trim() ?? "smartrecruiters_success" };
+  }
+  const submitButtons = await page.getByRole("button", { name: /submit|send application|apply/i }).count().catch(() => 0);
+  if (submitButtons === 0 && /thank|success|submitted|received/i.test(text)) {
+    return { ok: true, phrase: "smartrecruiters_ui_success" };
+  }
+  return { ok: false, phrase: "" };
+}
+
 /** Comeet / Angular apply() often keeps the same URL — success is a banner or modal, not navigation. */
 export async function detectComeetConfirmation(page: Page): Promise<{ ok: boolean; phrase: string }> {
   const scopes = [page, ...page.frames()];

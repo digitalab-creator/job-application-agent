@@ -24,6 +24,17 @@ test("company-site Greenhouse links keep each gh_jid as a separate job", () => {
   assert.equal(jobs[1]?.href, "https://www.riskified.com/job-description/?gh_jid=8805197002");
 });
 
+test("Wix careers nav links are not treated as job openings", () => {
+  const jobs = normalizeOpenings([
+    { title: "Backend Engineering", href: "https://careers.wix.com/team/backend-eng", snippet: "Team" },
+    { title: "Frontend Engineering", href: "https://careers.wix.com/team/frontend-eng", snippet: "Team" },
+    { title: "How We Hire", href: "https://careers.wix.com/how-we-hire", snippet: "" },
+    { title: "Full Stack AI Engineer", href: "https://careers.wix.com/location/tel-aviv/positions/10022791", snippet: "Tel Aviv" },
+  ], "https://careers.wix.com/location/tel-aviv/3789810");
+  assert.equal(jobs.length, 1);
+  assert.ok(jobs[0]?.href.includes("10022791"));
+});
+
 test("Wix sibling position links stay visible from a position URL that renders the list", () => {
   const jobs = normalizeOpenings([
     { title: "Full Stack AI Engineer", href: "https://careers.wix.com/location/tel-aviv/positions/10022791", snippet: "Tel Aviv" },
