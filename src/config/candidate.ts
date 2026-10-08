@@ -48,7 +48,7 @@ export const candidate = {
   },
   languages: [
     { language: "Hebrew", level: "Native" },
-    { language: "English", level: "Full professional proficiency" },
+    { language: "English", level: "Fluent" },
   ],
   /**
    * Confirmed by the candidate for application forms.

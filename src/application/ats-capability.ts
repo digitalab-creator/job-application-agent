@@ -33,7 +33,10 @@ export function resolveApplyCapability(url: string): AtsCapability {
     return "invalid";
   }
   if (MANUAL_HOST_RE.test(parsed.hostname) || MANUAL_HOST_RE.test(href)) {
-    return "manual_only";
+    if (isAggregatorListPage(href, parsed.pathname)) {
+      return "manual_only";
+    }
+    return "resolvable";
   }
   if (SUPPORTED_AUTO_RE.test(href) || SUPPORTED_AUTO_RE.test(parsed.hostname)) {
     return "supported_auto";
@@ -50,4 +53,17 @@ export function resolveApplyCapability(url: string): AtsCapability {
 
 export function isAutomatableCapability(capability: AtsCapability): boolean {
   return capability === "supported_auto" || capability === "resolvable";
+}
+
+function isAggregatorListPage(href: string, pathname: string): boolean {
+  if (/\/jobs\/view\/\d+/i.test(href)) {
+    return false;
+  }
+  if (/jobpage\?positionId=/i.test(href) || /\/job\/\d+/i.test(pathname)) {
+    return false;
+  }
+  if (/[?&](q|query|search|keywords|page)=/i.test(href)) {
+    return true;
+  }
+  return /\/(jobs|careers|jobslobby)\/?$/i.test(pathname);
 }

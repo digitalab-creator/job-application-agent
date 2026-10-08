@@ -37,6 +37,9 @@ import { detectConfirmation, detectEmailVerification, detectLoginWall, classifyC
 import { newAttemptId } from "./attempt-ledger.js";
 import { parseHttpUrl } from "./automatable-url.js";
 import { hostDoesNotExist, isNameNotResolvedError } from "./dead-host.js";
+import { looksLikeRateLimit, noteHostSuccess, noteRateLimit } from "./rate-limit.js";
+import { isLinkedInJobUrl, runLinkedInEasyApply } from "./linkedin-easy-apply.js";
+import { trySolveActiveCaptcha } from "../browser/captcha-solver.js";
 import type { AttemptPipeline } from "../models/types.js";
 import { applicationStateFromEvidence } from "./application-state.js";
 
@@ -220,6 +223,31 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       state: applicationStateFromEvidence({}),
     });
     pipeline.opened = true;
+    if (isLinkedInJobUrl(page.url()) || isLinkedInJobUrl(input.job.url)) {
+      const linkedIn = await runLinkedInEasyApply(page, input, undefined);
+      if (linkedIn) {
+        if (linkedIn.confirmationDetected) {
+          noteHostSuccess(page.url());
+        }
+        return linkedIn;
+      }
+    }
+    const openedText = await page.locator("body").innerText().catch(() => "");
+    if (looksLikeRateLimit(openedText)) {
+      noteRateLimit(page.url(), "page_rate_limit_copy");
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "rate_limited",
+        notes: lines([
+          "result=review",
+          "blocker=rate_limited",
+          "The site asked us to slow down. Cooldown recorded; this host will be skipped until it expires.",
+        ]),
+        screenshots,
+      });
+    }
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
     if (earlyExit?.kind === "login_wall") {
       log("JOB_LOGIN_WALL", { url: page.url(), company: input.job.company });
@@ -793,7 +821,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     });
     if (postCaptchaSignal === "active_challenge") {
       log("CAPTCHA_REQUIRED", { company: input.job.company, stage: "post_submit", signal: postCaptchaSignal });
+      const solved = await trySolveActiveCaptcha(page, page.url());
+      if (solved.ok) {
+        log("CAPTCHA_SOLVED_CONTINUE", { url: page.url() });
+      } else {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+      noteRateLimit(page.url(), `captcha_unsolved:${solved.reason}`);
       rememberManualApply(input, {
         blocker: "captcha",
         cvPath: cv.cvPath,
@@ -814,10 +847,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
           "result=manual_required",
           "blocker=captcha",
           "captchaSignal=active_challenge",
-          "A visible CAPTCHA challenge appeared after submit. Finish manually if you want this job.",
+          "A visible CAPTCHA challenge appeared after submit. Solver did not clear it, so cooldown started.",
+          `solver=${solved.reason}`,
         ]),
         screenshots,
       });
+      }
     }
     const otpResolved = await resolveGreenhouseEmailVerification(page, scope, input, {
       persona,

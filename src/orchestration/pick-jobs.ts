@@ -1,4 +1,5 @@
 import { resolveApplyCapability } from "../application/ats-capability.js";
+import { hostIsCooling } from "../application/rate-limit.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
 import { dailyApplyPickLimit } from "../application/apply-policy.js";
 import { DAILY_APPLY_BATCH_LIMIT, selectApplyDailyBatch } from "../discovery/queue-mix.js";
@@ -17,7 +18,11 @@ export function isEligibleApplySheetRow(row: JobSheetRow): boolean {
     return false;
   }
   const url = String(row["Job URL"] ?? "").trim();
-  return resolveApplyCapability(url) === "supported_auto";
+  if (hostIsCooling(url)) {
+    return false;
+  }
+  const capability = resolveApplyCapability(url);
+  return capability === "supported_auto" || capability === "resolvable";
 }
 
 export function filterEligibleApplyRows(
@@ -50,7 +55,19 @@ export function pickWorkspaceApplyBatch(
   excludedCompanies: string[],
   pickLimit?: number,
 ): { selected: JobSheetRow[]; pickedTech: number; pickedMarketing: number; eligible: number } {
-  const eligible = filterEligibleApplyRows(rows, excludedCompanies);
+  const rawEligible = filterEligibleApplyRows(rows, excludedCompanies);
+  const aggregatorSlots = Math.max(0, Number(process.env.AGGREGATOR_ATTEMPT_SLOTS ?? "5") || 5);
+  const autoRows: JobSheetRow[] = [];
+  const aggregatorRows: JobSheetRow[] = [];
+  for (const row of rawEligible) {
+    const capability = resolveApplyCapability(String(row["Job URL"] ?? ""));
+    if (capability === "supported_auto") {
+      autoRows.push(row);
+    } else if (aggregatorRows.length < aggregatorSlots) {
+      aggregatorRows.push(row);
+    }
+  }
+  const eligible = [...autoRows, ...aggregatorRows];
   const cap = Math.min(
     DAILY_APPLY_BATCH_LIMIT,
     Math.max(0, pickLimit ?? dailyApplyPickLimit()),
