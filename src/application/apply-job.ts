@@ -50,6 +50,11 @@ export type ApplyInput = {
   row?: number;
   submit: boolean;
   ignoreLedger?: boolean;
+  workspaceId?: string;
+  runSource?: import("../models/types.js").ApplyRunSource;
+  runId?: string;
+  batchId?: string;
+  triggeredAt?: string;
   job: {
     role: string;
     company: string;

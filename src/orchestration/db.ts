@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   notification_target TEXT NOT NULL DEFAULT '',
   run_token_hash TEXT NOT NULL,
   google_refresh_token_enc TEXT,
+  mailbox_refresh_token_enc TEXT,
+  mailbox_email TEXT,
   greenhouse_otp_webhook_url TEXT,
   browser_user_data_dir TEXT,
   ledger_path TEXT,
@@ -69,6 +71,9 @@ CREATE TABLE IF NOT EXISTS orchestration_runs (
   summary_json JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS orchestration_runs_workspace_started ON orchestration_runs(workspace_id, started_at DESC);
+
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_refresh_token_enc TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_email TEXT;
 `;
 
 export async function ensureWorkspaceSchema(): Promise<void> {

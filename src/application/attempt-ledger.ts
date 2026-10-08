@@ -7,6 +7,7 @@ import type {
   AttemptOutcome,
   AttemptPipeline,
 } from "../models/types.js";
+import { resolveApplyAttemptsPath } from "../orchestration/workspace-runtime.js";
 
 export function newAttemptId(): string {
   return randomUUID();
@@ -38,6 +39,11 @@ export function attemptRecordFromResult(
     role: string;
     url: string;
     startedAt: string;
+    workspaceId?: string;
+    runSource?: ApplyAttemptRecord["runSource"];
+    runId?: string;
+    batchId?: string;
+    triggeredAt?: string;
   },
   result: ApplicationResult,
   finishedAt = new Date().toISOString(),
@@ -57,6 +63,11 @@ export function attemptRecordFromResult(
     confirmationDetected: result.confirmationDetected,
     pipeline: result.pipeline ?? defaultPipeline(result),
     notes: result.notes,
+    workspaceId: input.workspaceId,
+    runSource: input.runSource,
+    runId: input.runId,
+    batchId: input.batchId,
+    triggeredAt: input.triggeredAt,
   };
 }
 
@@ -157,5 +168,6 @@ function writeAttemptRows(rows: ApplyAttemptRecord[]): void {
 }
 
 function attemptLedgerPath(): string {
-  return process.env.APPLY_ATTEMPTS_PATH?.trim() || "/app/data/ledger/apply-attempts.jsonl";
+  const fallback = process.env.APPLY_ATTEMPTS_PATH?.trim() || "/app/data/ledger/apply-attempts.jsonl";
+  return resolveApplyAttemptsPath(fallback);
 }

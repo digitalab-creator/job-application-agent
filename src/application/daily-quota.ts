@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveApplyAttemptsPath, resolveLedgerPath } from "../orchestration/workspace-runtime.js";
 
 /** Keep aligned with `DAILY_APPLY_BATCH_LIMIT` in discovery/queue-mix.ts (avoid import cycle). */
 const DISCOVERY_QUEUE_BATCH_CAP = 20;
@@ -82,7 +83,7 @@ function countedToday(): number {
 }
 
 function confirmedUrlsToday(day: string): string[] {
-  const filePath = process.env.LEDGER_PATH?.trim() || "/app/data/ledger/applications.jsonl";
+  const filePath = resolveLedgerPath(process.env.LEDGER_PATH?.trim() || "/app/data/ledger/applications.jsonl");
   if (!fs.existsSync(filePath)) {
     return [];
   }
@@ -109,7 +110,7 @@ function confirmedUrlsToday(day: string): string[] {
 }
 
 function attemptedToday(): number {
-  const filePath = process.env.APPLY_ATTEMPTS_PATH?.trim() || "/app/data/ledger/apply-attempts.jsonl";
+  const filePath = resolveApplyAttemptsPath(process.env.APPLY_ATTEMPTS_PATH?.trim() || "/app/data/ledger/apply-attempts.jsonl");
   if (!fs.existsSync(filePath)) {
     return 0;
   }

@@ -12,6 +12,8 @@ import { readExcludeCompanies, readJobSheetRows, updateJobSheetRow } from "./she
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
 import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
+import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
+import { randomUUID } from "node:crypto";
 
 export type ApplyDailyOptions = {
   workspace: WorkspaceRecord;
@@ -29,87 +31,95 @@ export type ApplyDailyResult = {
 
 export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promise<ApplyDailyResult> {
   const { workspace, runSource, submit, dryRun } = options;
-  const runLock = claimApplyRun(workspace.id);
-  if (!runLock.ok) {
-    return { status: "locked", picked: 0, attempted: 0, notes: runLock.reason };
-  }
-  const startedAt = new Date().toISOString();
-  let picked = 0;
-  let attempted = 0;
-  try {
-    const rows = await readJobSheetRows(workspace);
-    const excluded = await readExcludeCompanies(workspace);
-    setExcludedCompanies(excluded, `workspace:${workspace.id}:sheet`);
-    const batch = pickWorkspaceApplyBatch(rows, excluded);
-    picked = batch.selected.length;
-    if (picked === 0) {
-      const result: ApplyDailyResult = {
-        status: "skipped",
-        picked: 0,
-        attempted: 0,
-        notes: `No eligible rows (eligible=${batch.eligible}).`,
-      };
-      await finishRun(workspace, runSource, startedAt, result);
-      return result;
+  const batchId = randomUUID();
+  return withWorkspaceRuntime(runtimeFromWorkspace(workspace, runSource, { batchId, runId: batchId }), async () => {
+    const runLock = claimApplyRun(workspace.id);
+    if (!runLock.ok) {
+      return { status: "locked", picked: 0, attempted: 0, notes: runLock.reason };
     }
-    if (dryRun) {
+    const startedAt = new Date().toISOString();
+    let picked = 0;
+    let attempted = 0;
+    try {
+      const rows = await readJobSheetRows(workspace);
+      const excluded = await readExcludeCompanies(workspace);
+      setExcludedCompanies(excluded, `workspace:${workspace.id}:sheet`);
+      const batch = pickWorkspaceApplyBatch(rows, excluded);
+      picked = batch.selected.length;
+      if (picked === 0) {
+        const result: ApplyDailyResult = {
+          status: "skipped",
+          picked: 0,
+          attempted: 0,
+          notes: `No eligible rows (eligible=${batch.eligible}).`,
+        };
+        await finishRun(workspace, runSource, startedAt, result);
+        return result;
+      }
+      if (dryRun) {
+        const result: ApplyDailyResult = {
+          status: "ok",
+          picked,
+          attempted: 0,
+          notes: `dry_run picked=${picked} tech=${batch.pickedTech} marketing=${batch.pickedMarketing}`,
+        };
+        await finishRun(workspace, runSource, startedAt, result);
+        return result;
+      }
+      for (const row of batch.selected) {
+        const browserClaim = claimBrowserApply();
+        if (!browserClaim.ok) {
+          log("APPLY_DAILY_BROWSER_BUSY", { workspaceId: workspace.id });
+          break;
+        }
+        try {
+          const input: ApplyInput = {
+            row: row.row_number,
+            submit,
+            workspaceId: workspace.id,
+            runSource,
+            runId: batchId,
+            batchId,
+            triggeredAt: startedAt,
+            job: {
+              role: String(row.Role ?? ""),
+              company: String(row.Company ?? ""),
+              url: String(row["Job URL"] ?? ""),
+              matchScore: sheetMatchScore(row),
+              category: String(row.Category ?? ""),
+              estimatedSalary: String(row["Est. Salary Range"] ?? ""),
+            },
+            attemptId: newAttemptId(),
+            startedAt: new Date().toISOString(),
+          };
+          const outcome = await executeApply(input);
+          attempted += 1;
+          if (row.row_number) {
+            const patch = mapApplyResultToSheetPatch(row, outcome, workspace.timezone);
+            await updateJobSheetRow(workspace, row.row_number, patch);
+          }
+        } finally {
+          releaseBrowserApply();
+        }
+      }
       const result: ApplyDailyResult = {
         status: "ok",
         picked,
-        attempted: 0,
-        notes: `dry_run picked=${picked} tech=${batch.pickedTech} marketing=${batch.pickedMarketing}`,
+        attempted,
+        notes: `attempted=${attempted} picked=${picked}`,
       };
       await finishRun(workspace, runSource, startedAt, result);
       return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log("APPLY_DAILY_FAILED", { workspaceId: workspace.id, message });
+      const result: ApplyDailyResult = { status: "error", picked, attempted, notes: message };
+      await finishRun(workspace, runSource, startedAt, result);
+      return result;
+    } finally {
+      releaseApplyRun(workspace.id);
     }
-    for (const row of batch.selected) {
-      const browserClaim = claimBrowserApply();
-      if (!browserClaim.ok) {
-        log("APPLY_DAILY_BROWSER_BUSY", { workspaceId: workspace.id });
-        break;
-      }
-      try {
-        const input: ApplyInput = {
-          row: row.row_number,
-          submit,
-          job: {
-            role: String(row.Role ?? ""),
-            company: String(row.Company ?? ""),
-            url: String(row["Job URL"] ?? ""),
-            matchScore: sheetMatchScore(row),
-            category: String(row.Category ?? ""),
-            estimatedSalary: String(row["Est. Salary Range"] ?? ""),
-          },
-          attemptId: newAttemptId(),
-          startedAt: new Date().toISOString(),
-        };
-        const outcome = await executeApply(input);
-        attempted += 1;
-        if (!dryRun && row.row_number) {
-          const patch = mapApplyResultToSheetPatch(row, outcome, workspace.timezone);
-          await updateJobSheetRow(workspace, row.row_number, patch);
-        }
-      } finally {
-        releaseBrowserApply();
-      }
-    }
-    const result: ApplyDailyResult = {
-      status: "ok",
-      picked,
-      attempted,
-      notes: `attempted=${attempted} picked=${picked}`,
-    };
-    await finishRun(workspace, runSource, startedAt, result);
-    return result;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log("APPLY_DAILY_FAILED", { workspaceId: workspace.id, message });
-    const result: ApplyDailyResult = { status: "error", picked, attempted, notes: message };
-    await finishRun(workspace, runSource, startedAt, result);
-    return result;
-  } finally {
-    releaseApplyRun(workspace.id);
-  }
+  });
 }
 
 async function finishRun(

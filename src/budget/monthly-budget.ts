@@ -1,5 +1,6 @@
 import { monthlyFixedCostIls, usdIlsRate } from "./config.js";
 import { readCostCalls, recordExternalSpend } from "../llm/cost-ledger.js";
+import { resolveMonthlyBudgetIls } from "../orchestration/workspace-runtime.js";
 
 export type BudgetSnapshot = {
   day: string;
@@ -24,10 +25,8 @@ export type BudgetSnapshot = {
 
 export function monthlyBudgetLimitIls(): number {
   const parsed = Number(process.env.MONTHLY_BUDGET_ILS ?? "500");
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return 500;
-  }
-  return roundIls(parsed);
+  const fromEnv = Number.isFinite(parsed) && parsed >= 1 ? roundIls(parsed) : 500;
+  return resolveMonthlyBudgetIls(fromEnv);
 }
 
 export function budgetSnapshot(): BudgetSnapshot {

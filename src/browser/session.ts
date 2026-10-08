@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { env } from "../config/env.js";
 import { log } from "../logging/logger.js";
+import { resolveBrowserUserDataDir } from "../orchestration/workspace-runtime.js";
 
 const STEALTH_INIT = `(() => {
   Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -31,13 +32,14 @@ export async function withApplySession<T>(work: (context: BrowserContext) => Pro
 }
 
 async function withPersistentContext<T>(work: (context: BrowserContext) => Promise<T>): Promise<T> {
-  fs.mkdirSync(env.browserUserDataDir, { recursive: true });
+  const profileDir = resolveBrowserUserDataDir(env.browserUserDataDir);
+  fs.mkdirSync(profileDir, { recursive: true });
   log("BROWSER_SESSION", {
     mode: "persistent",
     headless: env.browserApplyHeadless,
-    profile: env.browserUserDataDir,
+    profile: profileDir,
   });
-  const context = await chromium.launchPersistentContext(env.browserUserDataDir, {
+  const context = await chromium.launchPersistentContext(profileDir, {
     headless: env.browserApplyHeadless,
     slowMo: env.browserSlowMoMs,
     locale: "en-US",

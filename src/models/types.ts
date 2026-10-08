@@ -93,6 +93,14 @@ export type AttemptPipeline = {
   confirmed: boolean;
 };
 
+export type ApplyRunSource =
+  | "n8n_schedule"
+  | "n8n_webhook"
+  | "retry_batch"
+  | "manual"
+  | "native_schedule"
+  | "native_manual";
+
 export type ApplyAttemptRecord = {
   attemptId: string;
   startedAt: string;
@@ -108,6 +116,12 @@ export type ApplyAttemptRecord = {
   confirmationDetected: boolean;
   pipeline: AttemptPipeline;
   notes: string;
+  /** Paying customer / operator workspace. Default `internal`. */
+  workspaceId?: string;
+  runSource?: ApplyRunSource;
+  runId?: string;
+  batchId?: string;
+  triggeredAt?: string;
 };
 
 export type AnswerRecord = {
