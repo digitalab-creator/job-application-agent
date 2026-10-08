@@ -13,6 +13,8 @@ services:
       - "127.0.0.1:5433:5432"
     volumes:
       - workspace_pg_data:/var/lib/postgresql/data
+    networks:
+      - n8n_net
 
   job-application-agent:
     build: .

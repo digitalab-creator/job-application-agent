@@ -2,7 +2,8 @@
 /**
  * Seed workspace `internal` from operator env (one-time bootstrap).
  * Requires: WORKSPACE_DATABASE_URL, PLATFORM_ENCRYPTION_KEY, GOOGLE_OAUTH_*,
- * WORKSPACE_INTERNAL_RUN_TOKEN, and optional legacy vars for sheet/boards.
+ * WORKSPACE_INTERNAL_RUN_TOKEN, WORKSPACE_INTERNAL_GOOGLE_REFRESH_TOKEN,
+ * optional WORKSPACE_INTERNAL_MAILBOX_REFRESH_TOKEN + WORKSPACE_INTERNAL_MAILBOX_EMAIL.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -72,6 +73,9 @@ if (!refreshToken) {
   console.error("Set WORKSPACE_INTERNAL_GOOGLE_REFRESH_TOKEN before seeding.");
   process.exit(1);
 }
+const mailboxRefresh = process.env.WORKSPACE_INTERNAL_MAILBOX_REFRESH_TOKEN?.trim() || null;
+const mailboxEmail =
+  process.env.WORKSPACE_INTERNAL_MAILBOX_EMAIL?.trim() || "or.shvartz70@gmail.com";
 
 const runToken = required("WORKSPACE_INTERNAL_RUN_TOKEN");
 const dbUrl = required("WORKSPACE_DATABASE_URL");
@@ -95,6 +99,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   notification_target TEXT NOT NULL DEFAULT '',
   run_token_hash TEXT NOT NULL,
   google_refresh_token_enc TEXT,
+  mailbox_refresh_token_enc TEXT,
+  mailbox_email TEXT,
   greenhouse_otp_webhook_url TEXT,
   browser_user_data_dir TEXT,
   ledger_path TEXT,
@@ -104,20 +110,29 @@ CREATE TABLE IF NOT EXISTS workspaces (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_refresh_token_enc TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_email TEXT;
 `);
 
 await client.query(
   `INSERT INTO workspaces (
     id, display_name, timezone, schedule_json, enabled, spreadsheet_id, jobs_sheet_gid,
     discovery_board_urls, monthly_budget_ils, run_token_hash, google_refresh_token_enc,
+    mailbox_refresh_token_enc, mailbox_email,
     greenhouse_otp_webhook_url, browser_user_data_dir, ledger_path, apply_attempts_path
-  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
   ON CONFLICT (id) DO UPDATE SET
     spreadsheet_id = EXCLUDED.spreadsheet_id,
     jobs_sheet_gid = EXCLUDED.jobs_sheet_gid,
     discovery_board_urls = EXCLUDED.discovery_board_urls,
     run_token_hash = EXCLUDED.run_token_hash,
     google_refresh_token_enc = EXCLUDED.google_refresh_token_enc,
+    mailbox_refresh_token_enc = EXCLUDED.mailbox_refresh_token_enc,
+    mailbox_email = EXCLUDED.mailbox_email,
+    browser_user_data_dir = EXCLUDED.browser_user_data_dir,
+    ledger_path = EXCLUDED.ledger_path,
+    apply_attempts_path = EXCLUDED.apply_attempts_path,
+    monthly_budget_ils = EXCLUDED.monthly_budget_ils,
     updated_at = NOW()`,
   [
     "internal",
@@ -131,12 +146,14 @@ await client.query(
     Number(process.env.MONTHLY_BUDGET_ILS || 500),
     hashToken(runToken),
     encryptSecret(refreshToken),
+    mailboxRefresh ? encryptSecret(mailboxRefresh) : null,
+    mailboxEmail,
     process.env.GREENHOUSE_OTP_WEBHOOK_URL || null,
-    process.env.BROWSER_USER_DATA_DIR || "/app/data/browser-profile",
-    process.env.LEDGER_PATH || "/app/data/ledger/applications.jsonl",
-    process.env.APPLY_ATTEMPTS_PATH || "/app/data/ledger/apply-attempts.jsonl",
+    process.env.BROWSER_USER_DATA_DIR || "/app/data/browser-profile/internal",
+    process.env.LEDGER_PATH || "/app/data/ledger/internal/applications.jsonl",
+    process.env.APPLY_ATTEMPTS_PATH || "/app/data/ledger/internal/apply-attempts.jsonl",
   ],
 );
 
 await client.end();
-console.log("Seeded workspace internal.");
+console.log("Seeded workspace internal (sheets + mailbox tokens).");

@@ -21,7 +21,11 @@ export type WorkspaceRecord = {
   notificationTarget: string;
   /** SHA-256 hex of workspace run API token. */
   runTokenHash: string;
+  /** Encrypted Google Sheets refresh token. */
   googleRefreshTokenEnc: string | null;
+  /** Encrypted Gmail refresh token for OTP / outcome scans. */
+  mailboxRefreshTokenEnc: string | null;
+  mailboxEmail: string | null;
   greenhouseOtpWebhookUrl: string | null;
   browserUserDataDir: string | null;
   ledgerPath: string | null;

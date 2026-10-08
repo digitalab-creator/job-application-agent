@@ -20,6 +20,9 @@ import { runWorkspaceDiscoverDaily } from "./orchestration/discover-daily.js";
 import { getWorkspace } from "./orchestration/workspace-store.js";
 import { startNativeScheduler } from "./orchestration/scheduler.js";
 import { ensureWorkspaceSchema } from "./orchestration/db.js";
+import { pickWorkspaceApplyBatch } from "./orchestration/pick-jobs.js";
+import { resolveApplyCapability } from "./application/ats-capability.js";
+import type { JobSheetRow } from "./orchestration/sheets/job-sheet.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
 import { choosePersonaFromText } from "./cv/persona-from-text.js";
 import { budgetSnapshot, recordPlatformAllocationIfNeeded } from "./budget/monthly-budget.js";
@@ -151,6 +154,36 @@ const server = http.createServer(async (req, res) => {
         note: body.note?.trim() || "",
       });
       send(res, 200, budgetSnapshot());
+      return;
+    }
+    if (req.method === "POST" && req.url === "/queue/pick") {
+      const body = await readBody(req) as {
+        rows?: JobSheetRow[];
+        excludedCompanies?: string[];
+        pickLimit?: number;
+      };
+      if (!Array.isArray(body.rows)) {
+        send(res, 400, { error: "rows must be an array of sheet row objects." });
+        return;
+      }
+      const excluded = Array.isArray(body.excludedCompanies)
+        ? body.excludedCompanies.map((item) => String(item ?? "").trim()).filter(Boolean)
+        : getExcludedCompanies();
+      const classified = body.rows.map((row) => ({
+        ...row,
+        capability: resolveApplyCapability(String(row["Job URL"] ?? "")),
+      }));
+      const batch = pickWorkspaceApplyBatch(classified, excluded, body.pickLimit);
+      send(res, 200, {
+        selected: batch.selected,
+        pickedTech: batch.pickedTech,
+        pickedMarketing: batch.pickedMarketing,
+        eligible: batch.eligible,
+        capabilities: classified.map((row) => ({
+          url: row["Job URL"],
+          capability: row.capability,
+        })),
+      });
       return;
     }
     if (req.method === "POST" && req.url === "/discover/scan") {
@@ -329,7 +362,17 @@ function parseApply(body: unknown): ApplyInput {
   if (!body || typeof body !== "object") {
     throw new Error("Request body must be a JSON object.");
   }
-  const record = body as { row?: number; submit?: boolean; ignoreLedger?: boolean; job?: ApplyInput["job"] };
+  const record = body as {
+    row?: number;
+    submit?: boolean;
+    ignoreLedger?: boolean;
+    job?: ApplyInput["job"];
+    workspaceId?: string;
+    runSource?: ApplyInput["runSource"];
+    runId?: string;
+    batchId?: string;
+    triggeredAt?: string;
+  };
   const job = record.job;
   if (!job?.url || !job.role || !job.company) {
     throw new Error("job.url, job.role, and job.company are required.");
@@ -337,12 +380,35 @@ function parseApply(body: unknown): ApplyInput {
   if (typeof job.url !== "string") {
     throw new Error("job.url must be a string.");
   }
+  const runSource = parseRunSource(record.runSource);
   return {
     row: record.row,
     submit: record.submit === true,
     ignoreLedger: record.ignoreLedger === true,
+    workspaceId: typeof record.workspaceId === "string" && record.workspaceId.trim()
+      ? record.workspaceId.trim()
+      : "internal",
+    runSource,
+    runId: typeof record.runId === "string" ? record.runId : undefined,
+    batchId: typeof record.batchId === "string" ? record.batchId : undefined,
+    triggeredAt: typeof record.triggeredAt === "string" ? record.triggeredAt : undefined,
     job,
   };
+}
+
+function parseRunSource(value: unknown): ApplyInput["runSource"] {
+  const allowed = new Set([
+    "n8n_schedule",
+    "n8n_webhook",
+    "retry_batch",
+    "manual",
+    "native_schedule",
+    "native_manual",
+  ]);
+  if (typeof value === "string" && allowed.has(value)) {
+    return value as ApplyInput["runSource"];
+  }
+  return "manual";
 }
 
 function readBody(req: http.IncomingMessage): Promise<unknown> {

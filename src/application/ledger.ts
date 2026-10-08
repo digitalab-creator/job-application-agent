@@ -1,11 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { env } from "../config/env.js";
+import { resolveLedgerPath } from "../orchestration/workspace-runtime.js";
 import {
   isTerminalManualBlocker,
   MANUAL_LEDGER_BLOCKERS,
   type LedgerEntry,
 } from "./ledger-policy.js";
+
+function ledgerFilePath(): string {
+  return resolveLedgerPath(env.ledgerPath);
+}
 
 export type { LedgerEntry } from "./ledger-policy.js";
 export { isTerminalManualBlocker, MANUAL_LEDGER_BLOCKERS } from "./ledger-policy.js";
@@ -37,15 +42,17 @@ function sameJobUrl(left: string, right: string): boolean {
 }
 
 export function rememberSubmission(entry: LedgerEntry): void {
-  fs.mkdirSync(path.dirname(env.ledgerPath), { recursive: true });
-  fs.appendFileSync(env.ledgerPath, `${JSON.stringify(entry)}\n`);
+  const filePath = ledgerFilePath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
 }
 
 function readLedger(): LedgerEntry[] {
-  if (!fs.existsSync(env.ledgerPath)) {
+  const filePath = ledgerFilePath();
+  if (!fs.existsSync(filePath)) {
     return [];
   }
-  return fs.readFileSync(env.ledgerPath, "utf8")
+  return fs.readFileSync(filePath, "utf8")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)

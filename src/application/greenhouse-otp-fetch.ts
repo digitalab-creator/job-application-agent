@@ -1,6 +1,8 @@
 import { env } from "../config/env.js";
 import { log } from "../logging/logger.js";
 import { parseGreenhouseOtpFromText } from "./greenhouse-otp.js";
+import { getWorkspaceRuntime } from "../orchestration/workspace-runtime.js";
+import { pollGreenhouseOtpFromGmail } from "../orchestration/gmail-otp.js";
 
 export type GreenhouseOtpPollInput = {
   mailbox: string;
@@ -14,23 +16,40 @@ type OtpWebhookResponse = {
   message?: string;
 };
 
+/**
+ * Prefer workspace Gmail token (native). Fall back to n8n webhook when no mailbox token.
+ */
 export async function pollGreenhouseOtp(input: GreenhouseOtpPollInput): Promise<string | null> {
-  const url = env.greenhouseOtpWebhookUrl.trim();
+  const runtime = getWorkspaceRuntime();
+  const mailbox = (runtime?.mailboxEmail || input.mailbox).trim();
+  if (runtime?.mailboxRefreshToken) {
+    return pollGreenhouseOtpFromGmail({
+      refreshToken: runtime.mailboxRefreshToken,
+      mailbox,
+      notBefore: input.notBefore,
+      company: input.company,
+      timeoutMs: env.greenhouseOtpTimeoutMs,
+      pollIntervalMs: env.greenhouseOtpPollIntervalMs,
+    });
+  }
+
+  const webhookOverride = runtime?.greenhouseOtpWebhookUrl?.trim();
+  const url = (webhookOverride || env.greenhouseOtpWebhookUrl).trim();
   if (!url) {
-    log("GREENHOUSE_OTP_SKIP", { reason: "webhook_url_unset" });
+    log("GREENHOUSE_OTP_SKIP", { reason: "no_mailbox_token_or_webhook" });
     return null;
   }
   const deadline = Date.now() + env.greenhouseOtpTimeoutMs;
   const intervalMs = env.greenhouseOtpPollIntervalMs;
   while (Date.now() < deadline) {
-    const code = await fetchGreenhouseOtpOnce(url, input);
+    const code = await fetchGreenhouseOtpOnce(url, { ...input, mailbox });
     if (code) {
-      log("GREENHOUSE_OTP_RECEIVED", { mailbox: input.mailbox, codeLength: code.length });
+      log("GREENHOUSE_OTP_RECEIVED", { mailbox, source: "webhook", codeLength: code.length });
       return code;
     }
     await sleep(intervalMs);
   }
-  log("GREENHOUSE_OTP_TIMEOUT", { mailbox: input.mailbox, timeoutMs: env.greenhouseOtpTimeoutMs });
+  log("GREENHOUSE_OTP_TIMEOUT", { mailbox, source: "webhook", timeoutMs: env.greenhouseOtpTimeoutMs });
   return null;
 }
 

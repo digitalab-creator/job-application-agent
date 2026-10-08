@@ -7,6 +7,7 @@ import { readJobSheetRows, appendDiscoveredJobs } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
 import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
+import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
 
 export type DiscoverDailyOptions = {
   workspace: WorkspaceRecord;
@@ -22,6 +23,7 @@ export type DiscoverDailyResult = {
 
 export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): Promise<DiscoverDailyResult> {
   const { workspace, runSource, dryRun } = options;
+  return withWorkspaceRuntime(runtimeFromWorkspace(workspace, runSource), async () => {
   const startedAt = new Date().toISOString();
   let added = 0;
   try {
@@ -85,6 +87,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
     await finishRun(workspace, runSource, startedAt, result);
     return result;
   }
+  });
 }
 
 async function finishRun(

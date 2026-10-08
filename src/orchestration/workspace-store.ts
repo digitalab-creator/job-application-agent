@@ -24,6 +24,8 @@ function rowToWorkspace(row: Record<string, unknown>): WorkspaceRecord {
     notificationTarget: String(row.notification_target ?? ""),
     runTokenHash: String(row.run_token_hash),
     googleRefreshTokenEnc: row.google_refresh_token_enc ? String(row.google_refresh_token_enc) : null,
+    mailboxRefreshTokenEnc: row.mailbox_refresh_token_enc ? String(row.mailbox_refresh_token_enc) : null,
+    mailboxEmail: row.mailbox_email ? String(row.mailbox_email) : null,
     greenhouseOtpWebhookUrl: row.greenhouse_otp_webhook_url ? String(row.greenhouse_otp_webhook_url) : null,
     browserUserDataDir: row.browser_user_data_dir ? String(row.browser_user_data_dir) : null,
     ledgerPath: row.ledger_path ? String(row.ledger_path) : null,
@@ -59,10 +61,11 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
         id, display_name, timezone, schedule_json, enabled, spreadsheet_id, jobs_sheet_gid,
         exclude_companies_sheet_name, discovery_board_urls, monthly_budget_ils,
         apply_tech_target, apply_marketing_target, notification_target, run_token_hash,
-        google_refresh_token_enc, greenhouse_otp_webhook_url, browser_user_data_dir,
+        google_refresh_token_enc, mailbox_refresh_token_enc, mailbox_email,
+        greenhouse_otp_webhook_url, browser_user_data_dir,
         ledger_path, apply_attempts_path, last_discover_run_key, last_apply_run_key
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
       )
       ON CONFLICT (id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
@@ -79,6 +82,8 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
         notification_target = EXCLUDED.notification_target,
         run_token_hash = EXCLUDED.run_token_hash,
         google_refresh_token_enc = EXCLUDED.google_refresh_token_enc,
+        mailbox_refresh_token_enc = EXCLUDED.mailbox_refresh_token_enc,
+        mailbox_email = EXCLUDED.mailbox_email,
         greenhouse_otp_webhook_url = EXCLUDED.greenhouse_otp_webhook_url,
         browser_user_data_dir = EXCLUDED.browser_user_data_dir,
         ledger_path = EXCLUDED.ledger_path,
@@ -103,6 +108,8 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
         input.notificationTarget,
         input.runTokenHash,
         input.googleRefreshTokenEnc,
+        input.mailboxRefreshTokenEnc,
+        input.mailboxEmail,
         input.greenhouseOtpWebhookUrl,
         input.browserUserDataDir,
         input.ledgerPath,
