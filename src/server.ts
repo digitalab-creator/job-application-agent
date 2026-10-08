@@ -156,6 +156,12 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, budgetSnapshot());
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/queue/capability")) {
+      const parsed = new URL(req.url, "http://127.0.0.1");
+      const target = parsed.searchParams.get("url") ?? "";
+      send(res, 200, { url: target, capability: resolveApplyCapability(target) });
+      return;
+    }
     if (req.method === "POST" && req.url === "/queue/pick") {
       const body = await readBody(req) as {
         rows?: JobSheetRow[];

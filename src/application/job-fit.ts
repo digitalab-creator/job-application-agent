@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { facts } from "../profile/facts.js";
 import type { Persona } from "../models/types.js";
+import {
+  requirementEvidenceRowSchema,
+  validateRequirementEvidence,
+  type RequirementEvidenceRow,
+} from "./grounded-fit.js";
 
 const APPLY_FIT_THRESHOLD = 70;
 const MUST_HAVE_COVERAGE_THRESHOLD = 0.65;
@@ -24,6 +29,7 @@ const requirementsSchema = z.object({
 export const jobFitAnalysisSchema = z.object({
   requirements: requirementsSchema,
   persona: z.enum(["technical", "marketing", "hybrid"]),
+  requirementEvidence: z.array(requirementEvidenceRowSchema).max(40),
   matchedMustHaves: z.array(z.string()).max(20),
   matchedPreferred: z.array(z.string()).max(20),
   matchedFactIds: z.array(z.string()).max(40),
@@ -58,6 +64,9 @@ export const JOB_FIT_OUTPUT_EXAMPLE = {
     hardBlockers: ["mandatory requirement the candidate cannot meet"],
   },
   persona: "technical | marketing | hybrid",
+  requirementEvidence: [
+    { requirement: "must-have skill", factIds: ["verifiedFacts[].id"], status: "supported | missing" },
+  ],
   matchedMustHaves: ["must-have skill the candidate has"],
   matchedPreferred: ["preferred skill the candidate has"],
   matchedFactIds: ["verifiedFacts[].id supporting the match"],
@@ -73,6 +82,7 @@ export type JobFitResult = {
   decision: "apply" | "skip";
   persona: Persona | null;
   requirements: JobRequirements;
+  requirementEvidence: RequirementEvidenceRow[];
   matchedMustHaves: string[];
   missingMustHaves: string[];
   matchedPreferred: string[];
@@ -86,12 +96,27 @@ export function evaluateJobFit(
   verifiedFacts = facts.filter((fact) => fact.verified),
 ): JobFitResult {
   const factIds = new Set(verifiedFacts.map((fact) => fact.id));
-  const matchedFactIds = analysis.matchedFactIds.filter((id) => factIds.has(id));
-  const matchedMustHaves = unique(analysis.matchedMustHaves);
-  const missingMustHaves = unique(analysis.missingMustHaves);
+  const evidenceCheck = validateRequirementEvidence(analysis.requirementEvidence, factIds);
+  const matchedFactIds = [
+    ...new Set(evidenceCheck.supportedRows.flatMap((row) => row.factIds)),
+    ...analysis.matchedFactIds.filter((id) => factIds.has(id)),
+  ];
+  const matchedMustHaves = unique([
+    ...evidenceCheck.supportedRows.map((row) => row.requirement),
+    ...analysis.matchedMustHaves,
+  ]);
+  const missingMustHaves = unique([
+    ...evidenceCheck.missingRequirements,
+    ...analysis.missingMustHaves,
+  ]);
   const matchedPreferred = unique(analysis.matchedPreferred);
-  const mustHaveCount = matchedMustHaves.length + missingMustHaves.length;
-  const mustHaveCoverage = mustHaveCount === 0 ? 1 : matchedMustHaves.length / mustHaveCount;
+  const mustHaveCount = Math.max(
+    analysis.requirements.mustHaveSkills.length,
+    matchedMustHaves.length + missingMustHaves.length,
+  );
+  const mustHaveCoverage = mustHaveCount === 0
+    ? 1
+    : matchedMustHaves.length / mustHaveCount;
   const preferredCoverage = analysis.requirements.preferredSkills.length === 0
     ? 1
     : matchedPreferred.length / analysis.requirements.preferredSkills.length;
@@ -102,7 +127,13 @@ export function evaluateJobFit(
     .filter((requirement) => /required|must|mandatory|minimum/i.test(requirement))
     .filter((requirement) => !evidenceSupportsPhrase(requirement, candidateEvidence))
     .map((requirement) => `Mandatory education requirement is not verified: ${requirement}`);
-  const hardBlockers = unique([...analysis.requirements.hardBlockers, ...mandatoryEducationMissing]);
+  const hardBlockers = unique([
+    ...analysis.requirements.hardBlockers,
+    ...mandatoryEducationMissing,
+    ...(evidenceCheck.invalidFactIds.length
+      ? [`Unsupported fact ids in requirement evidence: ${evidenceCheck.invalidFactIds.join(", ")}`]
+      : []),
+  ]);
   const fitScore = Math.max(0, Math.min(100, Math.round(
     mustHaveCoverage * 55
       + preferredCoverage * 10
@@ -116,6 +147,8 @@ export function evaluateJobFit(
   const decision = !seniorityBlocked
     && hardBlockers.length === 0
     && matchedFactIds.length > 0
+    && evidenceCheck.supportedRows.length > 0
+    && missingMustHaves.length === 0
     && mustHaveCoverage >= MUST_HAVE_COVERAGE_THRESHOLD
     && fitScore >= APPLY_FIT_THRESHOLD
     ? "apply"
@@ -126,6 +159,7 @@ export function evaluateJobFit(
     decision,
     persona: decision === "skip" && analysis.requirements.roleFamily === "other" ? null : analysis.persona,
     requirements: analysis.requirements,
+    requirementEvidence: evidenceCheck.supportedRows,
     matchedMustHaves,
     missingMustHaves,
     matchedPreferred,
