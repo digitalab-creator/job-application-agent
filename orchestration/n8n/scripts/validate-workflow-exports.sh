@@ -2,7 +2,8 @@
 # Validate exported job n8n workflow JSON under orchestration/n8n/workflows/auto-export/.
 set -euo pipefail
 
-ORCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORCH_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ORCH_ROOT"
 
 EXPORT_DIR="${WORKFLOW_EXPORT_DIR:-$ORCH_ROOT/workflows/auto-export}"
@@ -66,7 +67,6 @@ if errors:
 print(f"Validated {len(files)} workflow export(s) in {export_dir}")
 PY
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for sh in "$SCRIPT_DIR"/*.sh; do
   [[ "$(basename "$sh")" == "$(basename "${BASH_SOURCE[0]}")" ]] && continue
   bash -n "$sh"
