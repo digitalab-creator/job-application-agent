@@ -282,15 +282,30 @@ export async function fillFields(input: {
   return { blockers, answers };
 }
 
-/** Comeet intl-tel-input keeps a separate visible `name=phone` from data-agent-field targets. */
+type IntlTelInstance = {
+  setCountry: (code: string) => void;
+  setNumber: (number: string) => void;
+  getNumber?: () => string;
+};
+
+/**
+ * Comeet intl-tel-input keeps a separate visible `name=phone` from data-agent-field targets.
+ * The server's IP often presets Germany (+49). An Israeli mobile under +49 stays invalid,
+ * so this always switches the visible widget to Israel and writes the national number.
+ */
 export async function syncPhoneInputs(scope: FormScope): Promise<void> {
   const localPhone = candidate.phone.local.replace(/\D/g, "");
   await scope.evaluate(({ international, localPhone: national }) => {
     const pageWindow = window as unknown as {
-      intlTelInputGlobals?: {
-        getInstance?: (node: HTMLInputElement) => { setCountry: (code: string) => void; setNumber: (number: string) => void } | null;
+      intlTelInputGlobals?: { getInstance?: (node: HTMLInputElement) => IntlTelInstance | null };
+      intlTelInput?: { getInstance?: (node: HTMLInputElement) => IntlTelInstance | null };
+      angular?: {
+        element: (node: Element) => {
+          triggerHandler: (name: string) => void;
+          controller?: (name: string) => { $setViewValue: (value: string) => void } | undefined;
+          scope?: () => { $apply: (fn: () => void) => void };
+        };
       };
-      angular?: { element: (node: Element) => { triggerHandler: (name: string) => void } };
     };
     const fallbackNational = national || (international.startsWith("+972") ? `0${international.slice(4)}` : international);
     const candidates = Array.from(
@@ -301,20 +316,56 @@ export async function syncPhoneInputs(scope: FormScope): Promise<void> {
       if (style.display === "none" || style.visibility === "hidden") {
         continue;
       }
-      const tel = pageWindow.intlTelInputGlobals?.getInstance?.(input);
+      const tel = pageWindow.intlTelInputGlobals?.getInstance?.(input)
+        ?? pageWindow.intlTelInput?.getInstance?.(input);
       if (tel) {
         tel.setCountry("il");
         tel.setNumber(international);
-      } else if (!input.value.trim()) {
+      }
+      const digits = (input.value || "").replace(/\D/g, "");
+      if (digits.length < 9) {
         input.value = fallbackNational;
       }
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
       input.dispatchEvent(new Event("blur", { bubbles: true }));
-      pageWindow.angular?.element(input).triggerHandler("input");
-      pageWindow.angular?.element(input).triggerHandler("change");
+      const angularEl = pageWindow.angular?.element(input);
+      angularEl?.triggerHandler("input");
+      angularEl?.triggerHandler("change");
+      const model = angularEl?.controller?.("ngModel");
+      const ngScope = angularEl?.scope?.();
+      if (model && ngScope) {
+        try {
+          ngScope.$apply(() => model.$setViewValue(input.value));
+        } catch {
+          model.$setViewValue(input.value);
+        }
+      }
     }
   }, { international: candidate.phone.international, localPhone });
+  await selectIsraelPhoneCountry(scope, localPhone);
+}
+
+/** Click the flag menu when the plugin API did not move the country off the IP default. */
+async function selectIsraelPhoneCountry(scope: FormScope, localPhone: string): Promise<void> {
+  const flag = scope.locator(".iti__selected-country, .iti__selected-flag").first();
+  if (await flag.count().catch(() => 0) === 0) {
+    return;
+  }
+  const label = `${await flag.getAttribute("title").catch(() => "") ?? ""} ${await flag.getAttribute("aria-label").catch(() => "") ?? ""}`;
+  if (/israel/i.test(label)) {
+    return;
+  }
+  await flag.click({ timeout: 3000, force: true }).catch(() => undefined);
+  const israel = scope.locator(".iti__country, [role='option']").filter({ hasText: /israel/i }).first();
+  if (await israel.count().catch(() => 0)) {
+    await israel.click({ timeout: 3000, force: true }).catch(() => undefined);
+  }
+  const phone = scope.locator('input[name="phone"], input.iti__tel-input').first();
+  if (await phone.count().catch(() => 0)) {
+    await phone.fill(localPhone).catch(() => undefined);
+    await phone.press("Tab").catch(() => undefined);
+  }
 }
 
 async function writeField(scope: FormScope, field: DetectedField, value: string): Promise<void> {

@@ -13,9 +13,13 @@ test("Comeet and Greenhouse are supported_auto", () => {
   );
 });
 
-test("aggregators are manual_only", () => {
-  assert.equal(resolveApplyCapability("https://www.linkedin.com/jobs/view/1"), "manual_only");
-  assert.equal(resolveApplyCapability("https://www.drushim.co.il/job/1"), "manual_only");
+test("job postings on aggregators are resolvable; search pages stay manual", () => {
+  assert.equal(resolveApplyCapability("https://www.linkedin.com/jobs/view/4412564650"), "resolvable");
+  assert.equal(resolveApplyCapability("https://www.drushim.co.il/job/38548191/"), "resolvable");
+  assert.equal(
+    resolveApplyCapability("https://www.gotfriends.co.il/jobslobby/ai/?page=1&total=11"),
+    "manual_only",
+  );
 });
 
 test("malformed URLs are invalid", () => {
