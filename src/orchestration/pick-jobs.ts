@@ -1,4 +1,4 @@
-import { isAutomatableCapability, resolveApplyCapability } from "../application/ats-capability.js";
+import { resolveApplyCapability } from "../application/ats-capability.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
 import { dailyApplyPickLimit } from "../application/apply-policy.js";
 import { DAILY_APPLY_BATCH_LIMIT, selectApplyDailyBatch } from "../discovery/queue-mix.js";
@@ -17,7 +17,7 @@ export function isEligibleApplySheetRow(row: JobSheetRow): boolean {
     return false;
   }
   const url = String(row["Job URL"] ?? "").trim();
-  return isAutomatableCapability(resolveApplyCapability(url));
+  return resolveApplyCapability(url) === "supported_auto";
 }
 
 export function filterEligibleApplyRows(

@@ -27,10 +27,15 @@ def load_token() -> str:
     raise SystemExit("APPLY_API_TOKEN missing in .env")
 
 
-def post_apply(token: str, job: dict, *, submit: bool, ignore_ledger: bool) -> tuple[int, dict]:
+def post_apply(token: str, job: dict, *, submit: bool, ignore_ledger: bool, batch_id: str) -> tuple[int, dict]:
     payload = {
         "submit": submit,
         "ignoreLedger": ignore_ledger,
+        "workspaceId": "internal",
+        "runSource": "retry_batch",
+        "batchId": batch_id,
+        "runId": batch_id,
+        "triggeredAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "job": {
             "company": job["company"],
             "role": job["role"],
@@ -59,7 +64,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sequential batch retry with global flock")
     parser.add_argument("jobs_json", type=Path, help="JSON array of {company, role, url}")
     parser.add_argument("--submit", action="store_true", help="Real submit (default dry-run fill only)")
-    parser.add_argument("--ignore-ledger", action="store_true", default=True)
+    parser.add_argument(
+        "--force-ignore-ledger",
+        action="store_true",
+        help="Bypass submission ledger (dangerous; duplicates possible). Default respects ledger.",
+    )
     parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--out", type=Path, default=Path("/tmp/retry-batch-results.jsonl"))
     args = parser.parse_args()
@@ -82,7 +91,12 @@ def main() -> int:
             )
             return 2
 
-        print(f"retry_batch: {len(jobs)} jobs submit={args.submit}", flush=True)
+        batch_id = f"retry-batch-{int(time.time())}"
+        ignore_ledger = bool(args.force_ignore_ledger)
+        print(
+            f"retry_batch: {len(jobs)} jobs submit={args.submit} ignore_ledger={ignore_ledger}",
+            flush=True,
+        )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text("", encoding="utf-8")
         for i, job in enumerate(jobs, 1):
@@ -97,7 +111,13 @@ def main() -> int:
             while True:
                 print(f"[{i}/{len(jobs)}] START {company}", flush=True)
                 t0 = time.time()
-                code, body = post_apply(token, job, submit=args.submit, ignore_ledger=args.ignore_ledger)
+                code, body = post_apply(
+                    token,
+                    job,
+                    submit=args.submit,
+                    ignore_ledger=ignore_ledger,
+                    batch_id=batch_id,
+                )
                 if code == 409:
                     print(f"[{i}/{len(jobs)}] worker busy — waiting {POLL_SECS}s", flush=True)
                     if time.time() >= deadline:

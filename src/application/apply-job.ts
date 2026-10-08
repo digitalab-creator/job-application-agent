@@ -14,6 +14,8 @@ import { buildCvDocument, CvGenerationError, writeCvPdf } from "../cv/generate.j
 import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { evaluateCvRelevance, validateCvQuality, validatePdfArtifact, type CvRelevanceResult } from "../cv/relevance.js";
+import { saveRedactedFailureArtifact } from "./failure-artifact.js";
+import { validateCvCoversEvidence, type RequirementEvidenceRow } from "./grounded-fit.js";
 import { normalizeSelectedSkills } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
@@ -80,8 +82,8 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   };
   input = { ...input, attemptId, startedAt: started, pipeline };
   const day = todayJerusalem();
-  const jobSlug = slug(`${input.job.company}-${input.job.role}`);
-  const shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
+  let jobSlug = slug(`${input.job.company}-${input.job.role}`);
+  let shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
   const screenshots: string[] = [];
   const parsedUrl = parseHttpUrl(input.job.url);
   if (!parsedUrl) {
@@ -125,6 +127,21 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         confirmationDetected: false,
         blocker: "already_submitted",
         notes: lines(["result=review", "blocker=already_submitted", "Previous confirmation exists. Not submitted again."]),
+        screenshots,
+      });
+    }
+    if (prior?.blocker === "submitted_unconfirmed") {
+      return result(input, {
+        status: "already_submitted",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "submitted_unconfirmed",
+        canonicalJobUrl: prior.canonicalJobUrl,
+        notes: lines([
+          "result=already_submitted",
+          "blocker=submitted_unconfirmed",
+          "A prior submit was sent without confirmation. Resolve manually before auto-retry.",
+        ]),
         screenshots,
       });
     }
@@ -484,6 +501,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
 
+    jobSlug = resolveArtifactSlug(input.job.company, activeRole, page.url());
+    shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
+
     let cv;
     try {
       cv = await prepareCv(
@@ -491,8 +511,10 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         persona,
         bodyText,
         fit.requirements,
+        fit.requirementEvidence,
         day,
         jobSlug,
+        input.attemptId,
       );
     } catch (error) {
       const reason = error instanceof CvGenerationError ? error.message : "cv_generation_failed";
@@ -812,16 +834,45 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       : await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
     screenshots.push(await saveScreenshot(page, shotDir, confirmed.ok ? "confirmation.png" : "blocker.png"));
     if (!confirmed.ok) {
+      try {
+        rememberSubmission({
+          url: input.job.url,
+          company: input.job.company,
+          role: activeRole,
+          confirmationDetected: false,
+          at: new Date().toISOString(),
+          cvPath: cv.cvPath,
+          canonicalJobUrl: page.url(),
+          blocker: "submitted_unconfirmed",
+          stage: "post_submit",
+        });
+      } catch (error) {
+        log("SUBMITTED_UNCONFIRMED_LEDGER_WRITE_FAILED", {
+          message: error instanceof Error ? error.message : "ledger_write_failed",
+        });
+      }
+      saveRedactedFailureArtifact(input.attemptId ?? "unknown", {
+        company: input.job.company,
+        role: activeRole,
+        blocker: "confirmation_not_detected",
+        canonicalJobUrl: page.url(),
+        cvPath: cv.cvPath,
+      });
       return result(input, {
-        status: "review",
+        status: "manual_required",
         submitted: true,
         confirmationDetected: false,
-        blocker: "confirmation_not_detected",
+        terminalOutcome: "confirmation_not_detected",
+        blocker: "submitted_unconfirmed",
         persona,
         ...cv.publicFields,
         answers: filled.answers,
         canonicalJobUrl: page.url(),
-        notes: lines(["result=review", "blocker=confirmation_not_detected", "Submit was sent but no confirmation was detected. Do not retry automatically."]),
+        notes: lines([
+          "result=manual_required",
+          "blocker=submitted_unconfirmed",
+          "Submit was sent but no confirmation was detected. Do not retry automatically.",
+        ]),
         screenshots,
       });
     }
@@ -878,8 +929,10 @@ async function prepareCv(
   persona: Persona,
   jobText: string,
   requirements: import("./job-fit.js").JobRequirements,
+  requirementEvidence: RequirementEvidenceRow[],
   day: string,
   jobSlug: string,
+  attemptId?: string,
 ): Promise<{
   cvPath: string;
   cvSource: CvSource;
@@ -910,22 +963,24 @@ async function prepareCv(
       input.pipeline.cvGenerated = true;
     }
     const structural = validateCvQuality(built.doc, persona);
+    const evidenceCoverage = validateCvCoversEvidence(built.doc, persona, requirementEvidence);
     const relevance = evaluateCvRelevance(built.doc, requirements, persona);
     log("CV_QUALITY_EVALUATED", {
       relevanceScore: relevance.relevanceScore,
-      mustHaveCoverage: relevance.mustHaveCoverage,
-      preferredCoverage: relevance.preferredCoverage,
-      responsibilityCoverage: relevance.responsibilityCoverage,
-      decision: relevance.decision,
+      evidenceCoverageOk: evidenceCoverage.ok,
+      missingEvidenceRequirements: evidenceCoverage.missingRequirements,
       structural: structural.issues,
       attempt,
     });
-    if (!structural.ok || relevance.decision !== "pass") {
-      lastFailure = [...structural.issues, ...relevance.importantMissingTerms].join("; ");
+    if (!structural.ok || !evidenceCoverage.ok) {
+      lastFailure = [
+        ...structural.issues,
+        ...evidenceCoverage.missingRequirements.map((item) => `missing_evidence:${item}`),
+      ].join("; ");
       feedback = [
-        "Candidate fit is valid, but the CV is not yet strong enough for this job.",
-        `Important missing terms: ${relevance.importantMissingTerms.join(", ") || "none"}.`,
-        `Weak sections: ${[...structural.issues, ...relevance.weakSections].join(", ") || "none"}.`,
+        "Candidate fit is valid, but the CV must cite verified facts for each supported requirement.",
+        `Missing evidence for: ${evidenceCoverage.missingRequirements.join(", ") || "none"}.`,
+        `Structural issues: ${structural.issues.join(", ") || "none"}.`,
         "Reprioritize only verified facts and approved skills; do not fabricate missing experience.",
       ].join(" ");
       continue;
@@ -958,7 +1013,19 @@ async function prepareCv(
       },
     };
   }
-  throw new CvGenerationError(`CV failed relevance or rendered-quality gates: ${lastFailure}`);
+  saveRedactedFailureArtifact(attemptId ?? "unknown", {
+    company: input.job.company,
+    role: input.job.role,
+    blocker: "cv_generation_failed",
+    lastFailure,
+  });
+  throw new CvGenerationError(`CV failed grounded evidence or rendered-quality gates: ${lastFailure}`);
+}
+
+function resolveArtifactSlug(company: string, role: string, pageUrl: string): string {
+  const positionId = careersPositionId(pageUrl);
+  const stem = positionId ? `${company}-${role}-${positionId}` : `${company}-${role}`;
+  return slug(stem);
 }
 
 async function humanPause(page: Page, minMs: number, maxMs: number): Promise<void> {

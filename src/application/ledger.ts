@@ -3,6 +3,7 @@ import path from "node:path";
 import { env } from "../config/env.js";
 import { resolveLedgerPath } from "../orchestration/workspace-runtime.js";
 import {
+  isTerminalLedgerEntry,
   isTerminalManualBlocker,
   MANUAL_LEDGER_BLOCKERS,
   type LedgerEntry,
@@ -13,7 +14,12 @@ function ledgerFilePath(): string {
 }
 
 export type { LedgerEntry } from "./ledger-policy.js";
-export { isTerminalManualBlocker, MANUAL_LEDGER_BLOCKERS } from "./ledger-policy.js";
+export {
+  isTerminalLedgerEntry,
+  isTerminalManualBlocker,
+  MANUAL_LEDGER_BLOCKERS,
+  TERMINAL_AUTO_BLOCKERS,
+} from "./ledger-policy.js";
 
 export function alreadySubmitted(url: string): boolean {
   return Boolean(priorTerminalEntry(url)?.confirmationDetected);
@@ -24,7 +30,7 @@ export function priorTerminalEntry(url: string): LedgerEntry | undefined {
   return readLedger()
     .filter((entry) => sameJobUrl(url, entry.url) || (entry.canonicalJobUrl ? sameJobUrl(url, entry.canonicalJobUrl) : false))
     .reverse()
-    .find((entry) => entry.confirmationDetected || isTerminalManualBlocker(entry));
+    .find((entry) => isTerminalLedgerEntry(entry));
 }
 
 function sameJobUrl(left: string, right: string): boolean {

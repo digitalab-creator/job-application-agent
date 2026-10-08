@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import urllib.parse
 import sys
 import urllib.error
 import urllib.request
@@ -83,16 +84,65 @@ def native_runs_today(day: str) -> list[dict]:
 APPLY_EXCLUDED_COMPANIES: tuple[str, ...] = ()
 
 
-def is_automatable_apply_url(url: str) -> bool:
-    """Same gate as n8n Pick Jobs: any real http(s) job link except known junk."""
+_CAPABILITY_CACHE: dict[str, str] = {}
+
+SCHEDULED_RUN_SOURCES = frozenset({"n8n_schedule", "native_schedule"})
+MANUAL_RUN_SOURCES = frozenset({"n8n_webhook", "manual", "native_manual"})
+RETRY_RUN_SOURCES = frozenset({"retry_batch"})
+
+
+def resolve_apply_capability(url: str) -> str:
+    """Worker SSOT — same enum as POST /queue/pick."""
     u = str(url or "").strip()
-    if not re.match(r"^https?://", u, re.I):
-        return False
-    if "/jobs/stampli/" in u.lower() and "0b.273" in u.lower():
-        return False
-    if re.match(r"^https://apply\.workable\.com/comeet/", u, re.I):
-        return False
-    return True
+    if not u:
+        return "invalid"
+    if u in _CAPABILITY_CACHE:
+        return _CAPABILITY_CACHE[u]
+    token = load_token()
+    capability = "invalid"
+    if token:
+        try:
+            query = urllib.parse.urlencode({"url": u})
+            payload = http_json(f"{WORKER_BASE}/queue/capability?{query}", token)
+            if isinstance(payload, dict):
+                capability = str(payload.get("capability") or "invalid")
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, TypeError):
+            capability = "invalid"
+    _CAPABILITY_CACHE[u] = capability
+    return capability
+
+
+def is_automatable_apply_url(url: str) -> bool:
+    return resolve_apply_capability(url) == "supported_auto"
+
+
+def attribution_bucket(run_source: object) -> str:
+    rs = str(run_source or "").strip()
+    if rs in SCHEDULED_RUN_SOURCES:
+        return "scheduled_production"
+    if rs in RETRY_RUN_SOURCES:
+        return "developer_retry"
+    if rs in MANUAL_RUN_SOURCES:
+        return "manual_webhook"
+    if not rs:
+        return "unattributed"
+    return "other"
+
+
+def funnel_stats(attempts: list[dict]) -> dict[str, dict[str, int]]:
+    buckets: dict[str, dict[str, int]] = {}
+    for row in attempts:
+        bucket = attribution_bucket(row.get("runSource"))
+        stats = buckets.setdefault(
+            bucket,
+            {"attempts": 0, "submitted": 0, "confirmed": 0},
+        )
+        stats["attempts"] += 1
+        if row.get("pipeline", {}).get("submitted"):
+            stats["submitted"] += 1
+        if row.get("outcome") == "applied" or row.get("confirmationDetected"):
+            stats["confirmed"] += 1
+    return buckets
 
 
 def normalize_company_key(value: str) -> str:
@@ -763,6 +813,31 @@ def print_report(day: str | None = None) -> int:
     print(f"| Worker container | {'up' if container_running() else 'down/missing'} |")
     print(f"| Daily budget available? | **{'yes' if daily_remaining > 0 else 'no'}** |")
     print()
+
+    buckets = funnel_stats(attempts)
+    if buckets:
+        print("## Run attribution (attempt ledger)")
+        print("| Funnel | Attempts | Submitted | Confirmed | Confirm / submit |")
+        print("|--------|----------|-----------|-----------|------------------|")
+        for name in (
+            "scheduled_production",
+            "manual_webhook",
+            "developer_retry",
+            "unattributed",
+            "other",
+        ):
+            stats = buckets.get(name)
+            if not stats:
+                continue
+            submit_rate = rate(stats["confirmed"], stats["submitted"])
+            print(
+                f"| {name} | {stats['attempts']} | {stats['submitted']} | "
+                f"{stats['confirmed']} | {submit_rate} |"
+            )
+        print(
+            "_Cost and confirmation KPIs for the sell gate should use **scheduled_production** only._"
+        )
+        print()
 
     print("## Quality funnel")
     print(f"- Raw New queue: **{queue['status_new'] if queue else '—'}**")

@@ -20,6 +20,11 @@ function analysis(overrides: Partial<JobFitAnalysis> = {}): JobFitAnalysis {
       hardBlockers: [],
     },
     persona: "technical",
+    requirementEvidence: [
+      { requirement: "Python", factIds: ["screening-python-backend"], status: "supported" },
+      { requirement: "backend APIs", factIds: ["screening-python-backend"], status: "supported" },
+      { requirement: "production AI", factIds: ["caseedge-production", "caseedge-stack"], status: "supported" },
+    ],
     matchedMustHaves: ["Python", "backend APIs", "production AI"],
     matchedPreferred: ["RAG"],
     matchedFactIds: ["screening-python-backend", "caseedge-production", "caseedge-stack"],
@@ -44,6 +49,10 @@ test("central unsupported Java requirement is skipped", () => {
       mustHaveSkills: ["Java", "Spring"],
       hardBlockers: ["Java and Spring are central mandatory requirements."],
     },
+    requirementEvidence: [
+      { requirement: "Java", factIds: [], status: "missing" },
+      { requirement: "Spring", factIds: [], status: "missing" },
+    ],
     matchedMustHaves: [],
     matchedPreferred: [],
     matchedFactIds: [],

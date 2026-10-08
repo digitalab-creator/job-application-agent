@@ -18,6 +18,12 @@ export type LedgerEntry = {
 /** Blockers that mean auto-apply already decided "won't" — do not treat as fixable Review. */
 export const MANUAL_LEDGER_BLOCKERS = new Set(["captcha", "login_required"]);
 
+/** Submitted without confirmation — do not auto-retry until a human clears the ledger row. */
+export const TERMINAL_AUTO_BLOCKERS = new Set([
+  ...MANUAL_LEDGER_BLOCKERS,
+  "submitted_unconfirmed",
+]);
+
 export function isTerminalManualBlocker(entry: LedgerEntry): boolean {
   if (entry.blocker === "login_required") {
     return true;
@@ -26,4 +32,14 @@ export function isTerminalManualBlocker(entry: LedgerEntry): boolean {
     return true;
   }
   return false;
+}
+
+export function isTerminalLedgerEntry(entry: LedgerEntry): boolean {
+  if (entry.confirmationDetected) {
+    return true;
+  }
+  if (entry.blocker && TERMINAL_AUTO_BLOCKERS.has(entry.blocker)) {
+    return true;
+  }
+  return isTerminalManualBlocker(entry);
 }
