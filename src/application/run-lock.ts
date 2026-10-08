@@ -5,9 +5,9 @@ const LOCK_TTL_MS = 50 * 60 * 1000;
 
 export type RunLockResult = { ok: true } | { ok: false; reason: string };
 
-/** One apply workflow at a time. n8n static data is not visible to a second running execution. */
-export function claimApplyRun(): RunLockResult {
-  const file = lockPath();
+/** One apply workflow at a time per workspace (or global when workspaceId omitted). */
+export function claimApplyRun(workspaceId?: string): RunLockResult {
+  const file = lockPath(workspaceId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -29,8 +29,8 @@ export function claimApplyRun(): RunLockResult {
   return { ok: false, reason: "apply_run_in_progress" };
 }
 
-export function releaseApplyRun(): { ok: true } {
-  const file = lockPath();
+export function releaseApplyRun(workspaceId?: string): { ok: true } {
+  const file = lockPath(workspaceId);
   if (fs.existsSync(file)) {
     fs.unlinkSync(file);
   }
@@ -49,6 +49,12 @@ function lockIsStale(file: string): boolean {
   }
 }
 
-function lockPath(): string {
-  return process.env.APPLY_RUN_LOCK_PATH?.trim() || "/app/data/ledger/apply-run.lock";
+function lockPath(workspaceId?: string): string {
+  const base = process.env.APPLY_RUN_LOCK_PATH?.trim() || "/app/data/ledger/apply-run.lock";
+  if (!workspaceId?.trim()) {
+    return base;
+  }
+  const dir = path.dirname(base);
+  const safe = workspaceId.replace(/[^a-zA-Z0-9_-]+/g, "_");
+  return path.join(dir, `apply-run-${safe}.lock`);
 }

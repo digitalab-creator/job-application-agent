@@ -23,6 +23,7 @@ ENV_FILE = ROOT / ".env"
 LEDGER = ROOT / "data/ledger/applications.jsonl"
 ATTEMPTS_LEDGER = ROOT / "data/ledger/apply-attempts.jsonl"
 QUOTA_LEDGER = ROOT / "data/ledger/daily-quota.jsonl"
+NATIVE_RUN_LOG = ROOT / "data/ledger/native-runs.jsonl"
 HEALTH_URL = "http://127.0.0.1:3099/health"
 WORKER_BASE = "http://127.0.0.1:3099"
 CONTAINER = "job-application-agent"
@@ -55,6 +56,27 @@ BLOCKER_WHY: dict[str, str] = {
 
 COMEET_SIZE_ERROR = re.compile(r"reading 'size'", re.I)
 N8N_ENV = n8n_env_file()
+
+
+def orchestration_mode() -> str:
+    if not ENV_FILE.is_file():
+        return "n8n"
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == "ORCHESTRATION_MODE":
+            return value.strip().lower() or "n8n"
+    return "n8n"
+
+
+def native_runs_today(day: str) -> list[dict]:
+    return [
+        row
+        for row in read_jsonl(NATIVE_RUN_LOG)
+        if row_on_day(str(row.get("startedAt", "")), day)
+    ]
 
 
 # Mirror runtime worker config: Google Sheet "Exclude Companies" synced via n8n.
@@ -694,8 +716,10 @@ def print_report(day: str | None = None) -> int:
         }
     )
 
-    apply_runs = [r for r in n8n_runs_today(day) if r.workflow_id == APPLY_WF_ID]
-    discover_runs = [r for r in n8n_runs_today(day) if r.workflow_id == DISCOVER_WF_ID]
+    mode = orchestration_mode()
+    apply_runs = [] if mode == "native" else [r for r in n8n_runs_today(day) if r.workflow_id == APPLY_WF_ID]
+    discover_runs = [] if mode == "native" else [r for r in n8n_runs_today(day) if r.workflow_id == DISCOVER_WF_ID]
+    native_runs = native_runs_today(day) if mode == "native" else []
     discover_states = {
         run.execution_id: discover_execution_state(run.execution_id)
         for run in discover_runs
@@ -796,8 +820,23 @@ def print_report(day: str | None = None) -> int:
             )
         print()
 
-    print("## n8n today")
-    if not apply_runs and not discover_runs:
+    if mode == "native":
+        print("## Native orchestration today")
+        if not native_runs:
+            print("- No native apply/discover runs logged (see data/ledger/native-runs.jsonl).")
+        else:
+            for row in native_runs:
+                summary = row.get("summary") or {}
+                print(
+                    f"- **{row.get('kind')}** workspace `{row.get('workspaceId')}` "
+                    f"**{row.get('status')}** ({row.get('runSource')}) — {summary}"
+                )
+        print()
+
+    print("## n8n today" if mode != "native" else "## n8n today (inactive — ORCHESTRATION_MODE=native)")
+    if mode == "native":
+        print("- Job workflows should stay deactivated after native cutover.")
+    elif not apply_runs and not discover_runs:
         print("- No apply/discover executions found in n8n DB (or postgres unreachable).")
     else:
         for r in discover_runs:

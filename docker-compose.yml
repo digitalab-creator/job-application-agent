@@ -1,4 +1,19 @@
 services:
+  workspace-db:
+    image: postgres:16-alpine
+    container_name: job-application-agent-db
+    restart: unless-stopped
+    profiles:
+      - native
+    environment:
+      POSTGRES_USER: jobagent
+      POSTGRES_PASSWORD: jobagent
+      POSTGRES_DB: jobagent
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - workspace_pg_data:/var/lib/postgresql/data
+
   job-application-agent:
     build: .
     container_name: job-application-agent
@@ -24,3 +39,6 @@ networks:
   n8n_net:
     external: true
     name: n8n_n8n_net
+
+volumes:
+  workspace_pg_data:

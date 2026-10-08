@@ -6,13 +6,15 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "node --test dist/cv/*.test.js dist/application/*.test.js dist/discovery/*.test.js dist/llm/*.test.js dist/budget/*.test.js"
+    "test": "node --test dist/cv/*.test.js dist/application/*.test.js dist/discovery/*.test.js dist/llm/*.test.js dist/budget/*.test.js dist/orchestration/*.test.js"
   },
   "dependencies": {
+    "pg": "^8.16.3",
     "playwright": "1.55.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/pg": "^8.15.5",
     "@types/node": "^22.15.21",
     "typescript": "^5.8.3"
   }
