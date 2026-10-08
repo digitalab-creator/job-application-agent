@@ -16,6 +16,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from n8n_orchestration import n8n_env_file  # noqa: E402
+
 ENV_FILE = ROOT / ".env"
 LEDGER = ROOT / "data/ledger/applications.jsonl"
 ATTEMPTS_LEDGER = ROOT / "data/ledger/apply-attempts.jsonl"
@@ -51,7 +54,7 @@ BLOCKER_WHY: dict[str, str] = {
 }
 
 COMEET_SIZE_ERROR = re.compile(r"reading 'size'", re.I)
-N8N_ENV = Path("/opt/apps/n8n/.env")
+N8N_ENV = n8n_env_file()
 
 
 # Mirror runtime worker config: Google Sheet "Exclude Companies" synced via n8n.

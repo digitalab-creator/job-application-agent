@@ -35,3 +35,9 @@ jobs:
           npm install
           npm run build
           npm test
+
+      - name: Validate job n8n workflow exports
+        run: |
+          set -euo pipefail
+          bash orchestration/n8n/scripts/validate-workflow-exports.sh
+          bash orchestration/n8n/scripts/check-pick-jobs-constants.sh

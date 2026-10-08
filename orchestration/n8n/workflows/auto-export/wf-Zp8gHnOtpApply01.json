@@ -1,0 +1,658 @@
+{
+  "updatedAt": "2026-09-29T21:26:36.462Z",
+  "createdAt": "2026-09-29T20:40:00.000Z",
+  "id": "Zp8gHnOtpApply01",
+  "name": "greenhouse-apply-otp",
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "greenhouse-apply-otp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "gho-webhook-001",
+      "name": "Webhook Greenhouse OTP",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "greenhouse-apply-otp"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst rawBody = item.body !== undefined ? item.body : item;\nconst payload =\n  rawBody && typeof rawBody === 'object' && rawBody.body && typeof rawBody.body === 'object'\n    ? rawBody.body\n    : rawBody;\n\nfunction respond(httpStatus, responseBody) {\n  return [{ json: { respond: true, httpStatus, responseBody } }];\n}\n\nconst secret = String($env.GREENHOUSE_OTP_WEBHOOK_SECRET || $env.APPLY_API_TOKEN || '').trim();\nconst authHeader = String(headers.authorization || headers.Authorization || '').trim();\nconst bearer = authHeader.match(/^Bearer\\s+(.+)$/i)?.[1]?.trim() || '';\n\nif (!secret || bearer !== secret) {\n  return respond(403, { ok: false, message: 'unauthorized' });\n}\n\nconst mailbox = String(payload.mailbox || 'or.shvartz70@gmail.com').trim();\nconst notBefore = String(payload.notBefore || '').trim();\nconst company = String(payload.company || '').trim();\n\nconst gmailQuery = [\n  'newer_than:2d',\n  '(from:greenhouse-mail.io OR from:greenhouse.io OR subject:\"security code\")',\n  mailbox ? `to:${mailbox}` : '',\n  company ? `\"${company.replace(/\"/g, '')}\"` : '',\n].filter(Boolean).join(' ');\n\nconst notBeforeMs = notBefore ? Date.parse(notBefore) : Date.now() - 15 * 60 * 1000;\n\nreturn [{ json: { respond: false, gmailQuery, notBeforeMs } }];\n"
+      },
+      "id": "gho-prepare-001",
+      "name": "Auth And Build Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "gho-if-respond",
+              "leftValue": "={{ $json.respond }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gho-if-001",
+      "name": "Should Respond Early",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.gmailQuery }}"
+            },
+            {
+              "name": "maxResults",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gho-list-001",
+      "name": "Gmail List Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        420
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BC7yrjG534irUWCw",
+          "name": "or Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Auth And Build Query').first().json;\nconst list = $input.first().json;\nconst messages = Array.isArray(list.messages) ? list.messages : [];\nif (!messages.length) {\n  return [{ json: { respond: true, httpStatus: 200, responseBody: { ok: false, message: 'no_messages', gmailQuery: prep.gmailQuery } } }];\n}\nreturn messages.slice(0, 8).map((m) => ({\n  json: { respond: false, messageId: m.id, notBeforeMs: prep.notBeforeMs },\n}));\n"
+      },
+      "id": "gho-explode-001",
+      "name": "Explode Message Ids",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "gho-if-explode",
+              "leftValue": "={{ $json.respond }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gho-if-explode-001",
+      "name": "Explode Respond Early",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.messageId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "format",
+              "value": "full"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gho-get-001",
+      "name": "Gmail Get Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1220,
+        420
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "BC7yrjG534irUWCw",
+          "name": "or Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseOtp(text) {\n  const normalized = String(text || '').replace(/\\s+/g, ' ');\n  const patterns = [\n    /security code field on your application:\\s*([A-Za-z0-9]{8})\\b/i,\n    /verification code(?:\\s+is)?[:\\s]+([A-Za-z0-9]{8})\\b/i,\n    /security code[:\\s]+([A-Za-z0-9]{8})\\b/i,\n    /enter the ([A-Za-z0-9]{8})-character code/i,\n  ];\n  for (const pattern of patterns) {\n    const match = normalized.match(pattern);\n    const candidate = match?.[1]?.trim();\n    if (candidate && /^[A-Za-z0-9]{8}$/.test(candidate)) return candidate;\n  }\n  return null;\n}\n\nfunction decodePart(part) {\n  if (!part?.body?.data) return '';\n  return Buffer.from(part.body.data, 'base64url').toString('utf8');\n}\n\nfunction collectBodies(part, out) {\n  if (!part) return;\n  out.push(decodePart(part));\n  if (Array.isArray(part.parts)) for (const child of part.parts) collectBodies(child, out);\n}\n\nconst prep = $('Auth And Build Query').first().json;\nconst notBeforeMs = prep.notBeforeMs;\nconst items = $input.all();\n\nfor (const item of items) {\n  const full = item.json;\n  const internalDate = Number(full.internalDate || 0);\n  if (internalDate && internalDate < notBeforeMs - 10_000) continue;\n  const hdrs = full.payload?.headers || [];\n  const subject = hdrs.find((h) => h.name === 'Subject')?.value || '';\n  const bodies = [];\n  collectBodies(full.payload, bodies);\n  const text = `${subject}\\n${full.snippet || ''}\\n${bodies.join('\\n')}`;\n  const code = parseOtp(text);\n  if (code) {\n    return [{ json: { respond: true, httpStatus: 200, responseBody: { ok: true, code, messageId: full.id } } }];\n  }\n}\n\nreturn [{ json: { respond: true, httpStatus: 200, responseBody: { ok: false, message: 'no_code_yet' } } }];\n"
+      },
+      "id": "gho-extract-001",
+      "name": "Extract OTP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        420
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.responseBody) }}",
+        "options": {
+          "responseCode": "={{ $json.httpStatus }}"
+        }
+      },
+      "id": "gho-respond-001",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1700,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Greenhouse OTP": {
+      "main": [
+        [
+          {
+            "node": "Auth And Build Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth And Build Query": {
+      "main": [
+        [
+          {
+            "node": "Should Respond Early",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Respond Early": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail List Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail List Messages": {
+      "main": [
+        [
+          {
+            "node": "Explode Message Ids",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explode Message Ids": {
+      "main": [
+        [
+          {
+            "node": "Explode Respond Early",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explode Respond Early": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gmail Get Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Get Message": {
+      "main": [
+        [
+          {
+            "node": "Extract OTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract OTP": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "versionId": "7ffa9067-aa83-46d3-a67f-35a98c54bbd1",
+  "activeVersionId": "7ffa9067-aa83-46d3-a67f-35a98c54bbd1",
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-09-29T20:37:18.657Z",
+      "createdAt": "2026-09-29T20:37:18.657Z",
+      "role": "workflow:owner",
+      "workflowId": "Zp8gHnOtpApply01",
+      "projectId": "jZQwxx5XeYWCtjlU"
+    }
+  ],
+  "activeVersion": {
+    "updatedAt": "2026-09-29T21:26:31.570Z",
+    "createdAt": "2026-09-29T21:26:31.570Z",
+    "versionId": "7ffa9067-aa83-46d3-a67f-35a98c54bbd1",
+    "workflowId": "Zp8gHnOtpApply01",
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "greenhouse-apply-otp",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "gho-webhook-001",
+        "name": "Webhook Greenhouse OTP",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          300
+        ],
+        "webhookId": "greenhouse-apply-otp"
+      },
+      {
+        "parameters": {
+          "jsCode": "const item = $input.first().json;\nconst headers = item.headers || {};\nconst rawBody = item.body !== undefined ? item.body : item;\nconst payload =\n  rawBody && typeof rawBody === 'object' && rawBody.body && typeof rawBody.body === 'object'\n    ? rawBody.body\n    : rawBody;\n\nfunction respond(httpStatus, responseBody) {\n  return [{ json: { respond: true, httpStatus, responseBody } }];\n}\n\nconst secret = String($env.GREENHOUSE_OTP_WEBHOOK_SECRET || $env.APPLY_API_TOKEN || '').trim();\nconst authHeader = String(headers.authorization || headers.Authorization || '').trim();\nconst bearer = authHeader.match(/^Bearer\\s+(.+)$/i)?.[1]?.trim() || '';\n\nif (!secret || bearer !== secret) {\n  return respond(403, { ok: false, message: 'unauthorized' });\n}\n\nconst mailbox = String(payload.mailbox || 'or.shvartz70@gmail.com').trim();\nconst notBefore = String(payload.notBefore || '').trim();\nconst company = String(payload.company || '').trim();\n\nconst gmailQuery = [\n  'newer_than:2d',\n  '(from:greenhouse-mail.io OR from:greenhouse.io OR subject:\"security code\")',\n  mailbox ? `to:${mailbox}` : '',\n  company ? `\"${company.replace(/\"/g, '')}\"` : '',\n].filter(Boolean).join(' ');\n\nconst notBeforeMs = notBefore ? Date.parse(notBefore) : Date.now() - 15 * 60 * 1000;\n\nreturn [{ json: { respond: false, gmailQuery, notBeforeMs } }];\n"
+        },
+        "id": "gho-prepare-001",
+        "name": "Auth And Build Query",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          260,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "gho-if-respond",
+                "leftValue": "={{ $json.respond }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "gho-if-001",
+        "name": "Should Respond Early",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          500,
+          300
+        ]
+      },
+      {
+        "parameters": {
+          "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "gmailOAuth2",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "q",
+                "value": "={{ $json.gmailQuery }}"
+              },
+              {
+                "name": "maxResults",
+                "value": "10"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "gho-list-001",
+        "name": "Gmail List Messages",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          740,
+          420
+        ],
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "BC7yrjG534irUWCw",
+            "name": "or Gmail account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const prep = $('Auth And Build Query').first().json;\nconst list = $input.first().json;\nconst messages = Array.isArray(list.messages) ? list.messages : [];\nif (!messages.length) {\n  return [{ json: { respond: true, httpStatus: 200, responseBody: { ok: false, message: 'no_messages', gmailQuery: prep.gmailQuery } } }];\n}\nreturn messages.slice(0, 8).map((m) => ({\n  json: { respond: false, messageId: m.id, notBeforeMs: prep.notBeforeMs },\n}));\n"
+        },
+        "id": "gho-explode-001",
+        "name": "Explode Message Ids",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          980,
+          420
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "gho-if-explode",
+                "leftValue": "={{ $json.respond }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "gho-if-explode-001",
+        "name": "Explode Respond Early",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1100,
+          420
+        ]
+      },
+      {
+        "parameters": {
+          "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.messageId }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "gmailOAuth2",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "format",
+                "value": "full"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "gho-get-001",
+        "name": "Gmail Get Message",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1220,
+          420
+        ],
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "BC7yrjG534irUWCw",
+            "name": "or Gmail account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "function parseOtp(text) {\n  const normalized = String(text || '').replace(/\\s+/g, ' ');\n  const patterns = [\n    /security code field on your application:\\s*([A-Za-z0-9]{8})\\b/i,\n    /verification code(?:\\s+is)?[:\\s]+([A-Za-z0-9]{8})\\b/i,\n    /security code[:\\s]+([A-Za-z0-9]{8})\\b/i,\n    /enter the ([A-Za-z0-9]{8})-character code/i,\n  ];\n  for (const pattern of patterns) {\n    const match = normalized.match(pattern);\n    const candidate = match?.[1]?.trim();\n    if (candidate && /^[A-Za-z0-9]{8}$/.test(candidate)) return candidate;\n  }\n  return null;\n}\n\nfunction decodePart(part) {\n  if (!part?.body?.data) return '';\n  return Buffer.from(part.body.data, 'base64url').toString('utf8');\n}\n\nfunction collectBodies(part, out) {\n  if (!part) return;\n  out.push(decodePart(part));\n  if (Array.isArray(part.parts)) for (const child of part.parts) collectBodies(child, out);\n}\n\nconst prep = $('Auth And Build Query').first().json;\nconst notBeforeMs = prep.notBeforeMs;\nconst items = $input.all();\n\nfor (const item of items) {\n  const full = item.json;\n  const internalDate = Number(full.internalDate || 0);\n  if (internalDate && internalDate < notBeforeMs - 10_000) continue;\n  const hdrs = full.payload?.headers || [];\n  const subject = hdrs.find((h) => h.name === 'Subject')?.value || '';\n  const bodies = [];\n  collectBodies(full.payload, bodies);\n  const text = `${subject}\\n${full.snippet || ''}\\n${bodies.join('\\n')}`;\n  const code = parseOtp(text);\n  if (code) {\n    return [{ json: { respond: true, httpStatus: 200, responseBody: { ok: true, code, messageId: full.id } } }];\n  }\n}\n\nreturn [{ json: { respond: true, httpStatus: 200, responseBody: { ok: false, message: 'no_code_yet' } } }];\n"
+        },
+        "id": "gho-extract-001",
+        "name": "Extract OTP",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1460,
+          420
+        ],
+        "executeOnce": true
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ JSON.stringify($json.responseBody) }}",
+          "options": {
+            "responseCode": "={{ $json.httpStatus }}"
+          }
+        },
+        "id": "gho-respond-001",
+        "name": "Respond",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          1700,
+          300
+        ]
+      }
+    ],
+    "connections": {
+      "Webhook Greenhouse OTP": {
+        "main": [
+          [
+            {
+              "node": "Auth And Build Query",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Auth And Build Query": {
+        "main": [
+          [
+            {
+              "node": "Should Respond Early",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Should Respond Early": {
+        "main": [
+          [
+            {
+              "node": "Respond",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Gmail List Messages",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail List Messages": {
+        "main": [
+          [
+            {
+              "node": "Explode Message Ids",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Explode Message Ids": {
+        "main": [
+          [
+            {
+              "node": "Explode Respond Early",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Explode Respond Early": {
+        "main": [
+          [
+            {
+              "node": "Respond",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Gmail Get Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail Get Message": {
+        "main": [
+          [
+            {
+              "node": "Extract OTP",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract OTP": {
+        "main": [
+          [
+            {
+              "node": "Respond",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "import",
+    "name": null,
+    "description": null,
+    "autosaved": false
+  },
+  "tags": []
+}

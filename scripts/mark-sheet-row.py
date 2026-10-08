@@ -10,18 +10,19 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from n8n_orchestration import n8n_env_file, read_n8n_api_key  # noqa: E402
+
 N8N = "http://127.0.0.1:5678"
-ENV = Path("/opt/apps/n8n/.env")
+ENV = n8n_env_file()
 CREDENTIAL = {"id": "UsVIraYKqvdQZt4b", "name": "or Google Sheets account"}
 DOC = "1fxnXLQndeiw7xT1r4NWwO01J8rOMY5J2zQcjHm3HqnQ"
 SHEET = "175958148"
 
 
 def api_key() -> str:
-    for line in ENV.read_text(encoding="utf-8").splitlines():
-        if line.startswith("N8N_API_KEY="):
-            return line.split("=", 1)[1].strip()
-    raise SystemExit("missing N8N_API_KEY")
+    return read_n8n_api_key()
 
 
 def call(method: str, path: str, payload: dict | None = None) -> dict:
