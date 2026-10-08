@@ -134,7 +134,7 @@ export function evaluateJobFit(
       ? [`Unsupported fact ids in requirement evidence: ${evidenceCheck.invalidFactIds.join(", ")}`]
       : []),
   ]);
-  const fitScore = Math.max(0, Math.min(100, Math.round(
+  const rawFitScore = Math.max(0, Math.min(100, Math.round(
     mustHaveCoverage * 55
       + preferredCoverage * 10
       + evidenceCoverage * 20
@@ -142,6 +142,10 @@ export function evaluateJobFit(
       - rolePenalty
       - hardBlockers.length * 15,
   )));
+  const groundedEvidence = evidenceCheck.supportedRows.length > 0;
+  const fitScore = groundedEvidence
+    ? rawFitScore
+    : Math.min(rawFitScore, APPLY_FIT_THRESHOLD - 1);
   const seniorityBlocked = analysis.requirements.seniority === "intern"
     || analysis.requirements.seniority === "junior";
   const decision = !seniorityBlocked

@@ -13,6 +13,8 @@ Target mix over time: roughly 65% AI and 35% Growth — prefer labeling true gro
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
 relevant=false for on-site roles outside Israel Central or Tel Aviv District (e.g. Haifa, Jerusalem only) unless remote is stated.
+relevant=false when the title/snippet is clearly browser-extension SDK, client-side fraud/anti-bot R&D, or a specialist Go/Java/.NET role with no overlap to full-stack AI/product engineering.
+Discovery only sees title and snippet — apply-time fit still rejects bad matches; prefer relevant=false over inflating matchScore for niche stacks.
 Do not invent candidate facts. Base only on title and snippet.`;
 
 /** Keep the sheet cell readable. */

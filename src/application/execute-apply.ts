@@ -9,6 +9,7 @@ import { withApplySession } from "../browser/session.js";
 import { recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
 import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./manual-fill-guide.js";
 import { env } from "../config/env.js";
+import { isLinkedInHost, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult } from "./linkedin-easy-apply.js";
 
 export async function executeApply(input: ApplyInput): Promise<ApplicationResult> {
   recordPlatformAllocationIfNeeded();
@@ -43,6 +44,14 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       quota,
       notes: "result=quota_reached",
     };
+    rememberAttempt(input, outcome);
+    return outcome;
+  }
+  if (isLinkedInHost(input.job.url) && !linkedinEasyApplyEnabled()) {
+    log("LINKEDIN_EASY_APPLY_DISABLED", { url: input.job.url });
+    const outcome = linkedinFeatureDisabledResult(input.job.url);
+    outcome.attemptId = input.attemptId;
+    outcome.pipeline = input.pipeline ?? emptyPipeline();
     rememberAttempt(input, outcome);
     return outcome;
   }

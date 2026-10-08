@@ -27,7 +27,9 @@ import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
 import { resolveJobLocationEligible, resolveJobLocationVerdict } from "../discovery/resolve-location-eligibility.js";
 import { postingGoneReason, redirectedAwayReason } from "./posting-gone.js";
 import { fitLocationRejection } from "./fit-location-guard.js";
+import { fetchPostingTextForFit } from "./fetch-posting-text.js";
 import { analyzeFullJobFit } from "./job-fit-llm.js";
+import type { JobFitResult } from "./job-fit.js";
 import {
   declineReasonFromFieldLabels,
   matchesOfficeCommuteSkip,
@@ -38,7 +40,14 @@ import { newAttemptId } from "./attempt-ledger.js";
 import { parseHttpUrl } from "./automatable-url.js";
 import { hostDoesNotExist, isNameNotResolvedError } from "./dead-host.js";
 import { looksLikeRateLimit, noteHostSuccess, noteRateLimit } from "./rate-limit.js";
-import { isLinkedInJobUrl, runLinkedInEasyApply } from "./linkedin-easy-apply.js";
+import { isLinkedInHost, isLinkedInJobUrl, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult, runLinkedInEasyApply } from "./linkedin-easy-apply.js";
+import {
+  captchaApplyContext,
+  noteCaptchaSignalOnApply,
+  noteCaptchaSolverProvider,
+  resetCaptchaApplyContext,
+} from "./captcha-apply-context.js";
+import { noteCaptchaSiteApplyConfirmed } from "./captcha-solver-stats.js";
 import { trySolveActiveCaptcha } from "../browser/captcha-solver.js";
 import type { AttemptPipeline } from "../models/types.js";
 import { applicationStateFromEvidence } from "./application-state.js";
@@ -84,6 +93,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     confirmed: false,
   };
   input = { ...input, attemptId, startedAt: started, pipeline };
+  resetCaptchaApplyContext();
   const day = todayJerusalem();
   let jobSlug = slug(`${input.job.company}-${input.job.role}`);
   let shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
@@ -164,6 +174,16 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
   }
 
+  if (isLinkedInHost(input.job.url) && !linkedinEasyApplyEnabled()) {
+    log("LINKEDIN_EASY_APPLY_DISABLED", { url: input.job.url });
+    return { ...linkedinFeatureDisabledResult(input.job.url), attemptId, pipeline, screenshots };
+  }
+
+  const preflight = await preflightJobFit(input);
+  if (preflight) {
+    return { ...preflight, attemptId, pipeline, screenshots };
+  }
+
   const page = await context.newPage();
   page.setDefaultNavigationTimeout(env.navigationTimeoutMs);
   page.setDefaultTimeout(env.actionTimeoutMs);
@@ -223,6 +243,12 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       state: applicationStateFromEvidence({}),
     });
     pipeline.opened = true;
+    if (isLinkedInHost(page.url()) || isLinkedInHost(input.job.url)) {
+      if (!linkedinEasyApplyEnabled()) {
+        log("LINKEDIN_EASY_APPLY_DISABLED", { url: page.url() });
+        return result(input, linkedinFeatureDisabledResult(input.job.url));
+      }
+    }
     if (isLinkedInJobUrl(page.url()) || isLinkedInJobUrl(input.job.url)) {
       const linkedIn = await runLinkedInEasyApply(page, input, undefined);
       if (linkedIn) {
@@ -456,6 +482,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       stage: "pre_submit",
       signal: preCaptchaSignal,
     });
+    noteCaptchaSignalOnApply(preCaptchaSignal);
     if (await detectLoginWall(page)) {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       rememberManualApply(input, {
@@ -751,7 +778,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         break;
       }
     }
-    const greenhouseAfter = greenhouseJobAppFrame(page) ? await inspectGreenhouseAfterSubmit(page) : null;
+    let greenhouseAfter = greenhouseJobAppFrame(page) ? await inspectGreenhouseAfterSubmit(page) : null;
     let preConfirmed: { ok: boolean; phrase: string } | null = null;
     if (greenhouseAfter) {
       log("GREENHOUSE_AFTER_SUBMIT", {
@@ -765,51 +792,117 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     if (greenhouseAfter?.kind === "form_still_open" || greenhouseAfter?.kind === "validation") {
       preConfirmed = await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
       if (!preConfirmed?.ok) {
-        screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
         const validation = greenhouseAfter.kind === "validation";
         const invisibleCaptcha = greenhouseAfter.recaptcha === "invisible" || greenhouseAfter.recaptcha === "challenge";
-        const why = greenhouseAfter.recaptcha === "challenge"
-          ? "Greenhouse showed a visible reCAPTCHA challenge, so the application was not accepted."
-          : validation
-            ? "Greenhouse kept the form open and showed a validation error. The application was not accepted."
-            : invisibleCaptcha
-              ? "Submit was clicked but Greenhouse did not show confirmation (often invisible reCAPTCHA on Similarweb embeds)."
-              : "The Submit application button is still on the form. The click did not leave the application form.";
-        const blocker = greenhouseAfter.recaptcha === "challenge" || (greenhouseAfter.kind === "form_still_open" && invisibleCaptcha)
-          ? "captcha"
-          : validation
-            ? "form_validation"
-            : "submit_not_accepted";
-        if (blocker === "captcha") {
-          rememberManualApply(input, {
-            blocker: "captcha",
-            cvPath: cv.cvPath,
-            captchaSignal: greenhouseAfter.recaptcha === "challenge" ? "active_challenge" : "passive_widget",
-            stage: "post_submit",
+        const captchaBlocker = greenhouseAfter.recaptcha === "challenge"
+          || (greenhouseAfter.kind === "form_still_open" && invisibleCaptcha);
+        if (captchaBlocker) {
+          const captchaSignal = greenhouseAfter.recaptcha === "challenge" ? "active_challenge" : "passive_widget";
+          noteCaptchaSignalOnApply(captchaSignal);
+          log("CAPTCHA_REQUIRED", {
+            company: input.job.company,
+            stage: "post_submit_greenhouse",
+            signal: captchaSignal,
+            recaptcha: greenhouseAfter.recaptcha,
+          });
+          const solved = await trySolveActiveCaptcha(page, page.url());
+          if (solved.ok) {
+            if (solved.provider) {
+              noteCaptchaSolverProvider(solved.provider);
+            }
+            log("CAPTCHA_SOLVED_CONTINUE", {
+              url: page.url(),
+              provider: solved.provider ?? solved.reason,
+              flow: "greenhouse_resubmit",
+            });
+            await retryGreenhouseSubmitAfterCaptcha(page);
+            greenhouseAfter = await inspectGreenhouseAfterSubmit(page);
+            log("GREENHOUSE_AFTER_SUBMIT", {
+              kind: greenhouseAfter.kind,
+              recaptcha: greenhouseAfter.recaptcha,
+              cheqInvalid: greenhouseAfter.cheqInvalid,
+              excerpt: greenhouseAfter.excerpt.slice(0, 240),
+              flow: "after_captcha_solve",
+            });
+            preConfirmed = await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
+          } else {
+            screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+            noteRateLimit(page.url(), `captcha_unsolved:${solved.reason}`);
+            rememberManualApply(input, {
+              blocker: "captcha",
+              cvPath: cv.cvPath,
+              captchaSignal: captchaSignal === "active_challenge" ? "active_challenge" : "passive_widget",
+              stage: "post_submit",
+              answers: filled.answers,
+              canonicalJobUrl: page.url(),
+            });
+            return result(input, {
+              status: "manual_required",
+              submitted: false,
+              confirmationDetected: false,
+              blocker: "captcha",
+              persona,
+              ...cv.publicFields,
+              answers: filled.answers,
+              canonicalJobUrl: page.url(),
+              notes: lines([
+                "result=manual_required",
+                "blocker=captcha",
+                `captchaSignal=${captchaSignal}`,
+                "Greenhouse CAPTCHA blocked submit. Buster and 2captcha did not clear it.",
+                `solver=${solved.reason}`,
+                `greenhouse_kind=${greenhouseAfter.kind}`,
+                `recaptcha=${greenhouseAfter.recaptcha}`,
+              ]),
+              screenshots,
+            });
+          }
+        }
+        if (!preConfirmed?.ok && (greenhouseAfter.kind === "form_still_open" || greenhouseAfter.kind === "validation")) {
+          screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
+          const why = greenhouseAfter.recaptcha === "challenge"
+            ? "Greenhouse showed a visible reCAPTCHA challenge, so the application was not accepted."
+            : validation
+              ? "Greenhouse kept the form open and showed a validation error. The application was not accepted."
+              : invisibleCaptcha
+                ? "Submit was clicked but Greenhouse did not show confirmation (often invisible reCAPTCHA on Similarweb embeds)."
+                : "The Submit application button is still on the form. The click did not leave the application form.";
+          const blocker = captchaBlocker
+            ? "captcha"
+            : validation
+              ? "form_validation"
+              : "submit_not_accepted";
+          if (blocker === "captcha") {
+            rememberManualApply(input, {
+              blocker: "captcha",
+              cvPath: cv.cvPath,
+              captchaSignal: greenhouseAfter.recaptcha === "challenge" ? "active_challenge" : "passive_widget",
+              stage: "post_submit",
+              answers: filled.answers,
+              canonicalJobUrl: page.url(),
+            });
+          }
+          return result(input, {
+            status: blocker === "captcha" ? "manual_required" : "review",
+            submitted: false,
+            confirmationDetected: false,
+            blocker,
+            persona,
+            ...cv.publicFields,
             answers: filled.answers,
             canonicalJobUrl: page.url(),
+            notes: lines([
+              `result=${blocker === "captcha" ? "manual_required" : "review"}`,
+              `blocker=${blocker}`,
+              `greenhouse_kind=${greenhouseAfter.kind}`,
+              `recaptcha=${greenhouseAfter.recaptcha}`,
+              `cheq_invalid=${greenhouseAfter.cheqInvalid}`,
+              `greenhouse_excerpt=${greenhouseAfter.excerpt}`,
+              why,
+            ]),
+            screenshots,
           });
         }
-        return result(input, {
-          status: blocker === "captcha" ? "manual_required" : "review",
-          submitted: false,
-          confirmationDetected: false,
-          blocker,
-          persona,
-          ...cv.publicFields,
-          answers: filled.answers,
-          canonicalJobUrl: page.url(),
-          notes: lines([
-            `result=${blocker === "captcha" ? "manual_required" : "review"}`,
-            `blocker=${blocker}`,
-            `greenhouse_kind=${greenhouseAfter.kind}`,
-            `recaptcha=${greenhouseAfter.recaptcha}`,
-            `cheq_invalid=${greenhouseAfter.cheqInvalid}`,
-            `greenhouse_excerpt=${greenhouseAfter.excerpt}`,
-            why,
-          ]),
-          screenshots,
-        });
       }
     }
     const postCaptchaSignal = await classifyCaptchaSignal(page);
@@ -819,11 +912,15 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       stage: "post_submit",
       signal: postCaptchaSignal,
     });
+    noteCaptchaSignalOnApply(postCaptchaSignal);
     if (postCaptchaSignal === "active_challenge") {
       log("CAPTCHA_REQUIRED", { company: input.job.company, stage: "post_submit", signal: postCaptchaSignal });
       const solved = await trySolveActiveCaptcha(page, page.url());
       if (solved.ok) {
-        log("CAPTCHA_SOLVED_CONTINUE", { url: page.url() });
+        if (solved.provider) {
+          noteCaptchaSolverProvider(solved.provider);
+        }
+        log("CAPTCHA_SOLVED_CONTINUE", { url: page.url(), provider: solved.provider ?? solved.reason });
       } else {
       screenshots.push(await saveScreenshot(page, shotDir, "blocker.png"));
       noteRateLimit(page.url(), `captcha_unsolved:${solved.reason}`);
@@ -912,6 +1009,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     log("SUBMISSION_CONFIRMED", { company: input.job.company, role: input.job.role });
+    const captchaCtx = captchaApplyContext();
+    if (captchaCtx?.hadCaptcha) {
+      noteCaptchaSiteApplyConfirmed({
+        solverProvider: captchaCtx.solverProvider,
+        passiveOnly: !captchaCtx.solverProvider && captchaCtx.lastSignal === "passive_widget",
+      });
+    }
     pipeline.confirmed = true;
     const appliedAt = new Date().toISOString();
     try {
@@ -1295,6 +1399,26 @@ async function waitForApplyEntry(page: Page, timeoutMs: number): Promise<void> {
   }
 }
 
+async function retryGreenhouseSubmitAfterCaptcha(page: Page): Promise<void> {
+  const frame = greenhouseJobAppFrame(page);
+  if (!frame) {
+    return;
+  }
+  await scrollGreenhouseFormIntoView(page);
+  const submit = frame.getByRole("button", { name: /submit application/i }).first();
+  if (await submit.count().catch(() => 0)) {
+    await submit.click({ timeout: 10_000, force: true }).catch(() => undefined);
+  }
+  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  await page.waitForTimeout(8000);
+  for (const ghFrame of page.frames()) {
+    if (/greenhouse\.io/i.test(ghFrame.url())) {
+      await ghFrame.waitForURL(/application_id=|greenhouse\.io/, { timeout: 12_000 }).catch(() => undefined);
+      break;
+    }
+  }
+}
+
 async function pageHasApplyEmailField(page: Page): Promise<boolean> {
   return pageHasDeepEmailInput(page);
 }
@@ -1408,6 +1532,56 @@ async function resolveGreenhouseEmailVerification(
     });
   }
   return null;
+}
+
+/** HTTP prefetch + fit for supported ATS URLs — skip the browser when the gate would reject anyway. */
+async function preflightJobFit(input: ApplyInput): Promise<ApplicationResult | null> {
+  const prefetched = await fetchPostingTextForFit(input.job.url);
+  if (!prefetched) {
+    return null;
+  }
+  let fit: JobFitResult;
+  try {
+    fit = await analyzeFullJobFit({
+      role: input.job.role,
+      company: input.job.company,
+      jobText: prefetched,
+    });
+  } catch (error) {
+    log("JOB_FIT_PREFLIGHT_SKIPPED", {
+      url: input.job.url,
+      message: error instanceof Error ? error.message : "preflight_fit_failed",
+    });
+    return null;
+  }
+  log("JOB_FIT_PREFLIGHT", {
+    url: input.job.url,
+    score: fit.fitScore,
+    decision: fit.decision,
+    missingMustHaves: fit.missingMustHaves,
+  });
+  if (fit.decision === "apply" && fit.persona) {
+    return null;
+  }
+  return result(input, {
+    status: "not_relevant",
+    terminalOutcome: "not_relevant",
+    submitted: false,
+    confirmationDetected: false,
+    blocker: "full_job_fit_failed",
+    canonicalJobUrl: input.job.url,
+    notes: lines([
+      "result=not_relevant",
+      "reason=full_job_fit_failed",
+      "preflight=true",
+      `fit_score=${fit.fitScore}`,
+      `missing_must_haves=${fit.missingMustHaves.join(", ") || "none"}`,
+      `risks=${fit.risks.join(", ") || "none"}`,
+      fit.reason,
+      "Skipped opening the browser because the job description failed the fit gate (HTTP prefetch).",
+    ]),
+    screenshots: [],
+  });
 }
 
 function rememberManualApply(

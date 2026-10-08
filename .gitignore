@@ -7,7 +7,9 @@ audit/
 data/ledger/
 data/config/
 data/browser-profile/
+vendor/buster/
 .runners/
 scripts/__pycache__/
 *.log
 tmp/deploy/
+tmp/buster-*.zip
