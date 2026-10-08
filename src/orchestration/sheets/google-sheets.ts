@@ -61,19 +61,32 @@ export async function batchUpdateSheet(
   spreadsheetId: string,
   data: Array<{ range: string; values: string[][] }>,
 ): Promise<void> {
-  const token = await googleAccessTokenFromRefresh(refreshToken);
-  const res = await sheetsFetch(token, `/${spreadsheetId}/values:batchUpdate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      valueInputOption: "USER_ENTERED",
-      data: data.map((item) => ({ range: item.range, majorDimension: "ROWS", values: item.values })),
-    }),
-  });
-  if (!res.ok) {
+  let lastError = "Sheets batchUpdate failed";
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const token = await googleAccessTokenFromRefresh(refreshToken);
+    const res = await sheetsFetch(token, `/${spreadsheetId}/values:batchUpdate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        valueInputOption: "USER_ENTERED",
+        data: data.map((item) => ({ range: item.range, majorDimension: "ROWS", values: item.values })),
+      }),
+    });
+    if (res.ok) {
+      return;
+    }
     const text = await res.text();
-    throw new Error(`Sheets batchUpdate failed (${res.status}): ${text.slice(0, 400)}`);
+    lastError = `Sheets batchUpdate failed (${res.status}): ${text.slice(0, 400)}`;
+    if (res.status !== 429 && res.status !== 503) {
+      throw new Error(lastError);
+    }
+    await sleep(Math.min(60_000, 2_000 * attempt * attempt));
   }
+  throw new Error(lastError);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function headerRowToObjects(header: string[], rows: string[][]): SheetRow[] {
