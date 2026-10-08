@@ -21,9 +21,10 @@ export function normalizeJobNavigationUrl(url: string): string {
 /** Company career pages often hide the Greenhouse form. Open the board posting when gh_jid is present. */
 /** Wix and similar portals: open Greenhouse when the careers SPA stays on a job list. */
 export function directGreenhouseUrlsForCareersUrl(url: string): string[] {
-  const wix = url.match(/careers\.wix\.com(?:\/.*)?\/positions\/(\d+)/i);
-  if (wix?.[1]) {
-    const id = wix[1];
+  // `/location/tel-aviv/3789810` is a location hub id, not a Greenhouse posting token — only `/positions/{id}` counts.
+  const wixPosition = url.match(/careers\.wix\.com(?:\/.*)?\/positions\/(\d+)/i);
+  const id = wixPosition?.[1];
+  if (id) {
     return [
       `https://job-boards.greenhouse.io/embed/job_app?for=wix&token=${id}`,
       `https://job-boards.greenhouse.io/wix/jobs/${id}`,

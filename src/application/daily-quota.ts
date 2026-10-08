@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/** Keep aligned with `DAILY_APPLY_BATCH_LIMIT` in discovery/queue-mix.ts (avoid import cycle). */
+const DISCOVERY_QUEUE_BATCH_CAP = 20;
+
 export type QuotaSnapshot = {
   day: string;
   confirmed: number;
@@ -42,7 +45,7 @@ export function quotaSnapshot(): QuotaSnapshot {
     maxAttempts,
     attempted,
     attemptsRemaining: Math.max(0, maxAttempts - attempted),
-    discoverySkipThreshold: DISCOVERY_SKIP_NEW_MULTIPLIER * maxAttempts,
+    discoverySkipThreshold: DISCOVERY_SKIP_NEW_MULTIPLIER * DISCOVERY_QUEUE_BATCH_CAP,
   };
 }
 

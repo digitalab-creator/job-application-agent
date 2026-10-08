@@ -51,6 +51,10 @@ export function normalizeOpenings(
     if (/careers\.wix\.com/i.test(target.hostname) && /\/location\/[^/]+\/\d+$/i.test(path) && !/\/positions\//i.test(path)) {
       continue;
     }
+    // Wix careers chrome (team pages, hiring info) — not open roles.
+    if (/careers\.wix\.com/i.test(target.hostname) && isWixCareersNavPath(path)) {
+      continue;
+    }
     const segments = path.split("/").filter(Boolean);
     const lastSegment = segments.at(-1) ?? "";
     const rawSlug = /^\d+$/.test(lastSegment)
@@ -161,4 +165,23 @@ function safeUrl(value: string): URL | null {
   } catch {
     return null;
   }
+}
+
+/** Site nav on careers.wix.com; titles often contain "Engineer" and poison listing + location gates. */
+export function isWixCareersNavPath(pathname: string): boolean {
+  const path = pathname.replace(/\/$/, "");
+  return /\/team\/|\/teams$|\/early-talent|\/wix-way|\/how-we-hire/i.test(path);
+}
+
+export function isWixLocationJobListPage(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return /careers\.wix\.com/i.test(parsed.hostname) && /\/location\/[^/]+/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function hasWixPositionJobLinks(jobs: ListedJob[]): boolean {
+  return jobs.some((job) => /\/positions\/\d+/i.test(job.href));
 }

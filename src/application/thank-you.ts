@@ -20,6 +20,7 @@ const THANK_YOU_RULES: RegExp[] = [
   /application sent successfully/i,
   /thanks for applying/i,
   /thank you for applying to/i,
+  /thanks!?\s*we(?:'re| are) reviewing your application/i,
   /you have already applied/i,
   /you'?ve already applied/i,
   /previously applied for this job/i,

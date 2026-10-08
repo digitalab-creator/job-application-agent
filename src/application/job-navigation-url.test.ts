@@ -40,3 +40,7 @@ test("Wix position URL can fall back to the Greenhouse board posting", () => {
   assert.deepEqual(urls[1], "https://job-boards.greenhouse.io/wix/jobs/10022791");
   assert.ok(navigationRetryUrls("https://careers.wix.com/location/tel-aviv/positions/10022791").includes(urls[1]!));
 });
+
+test("Wix location hub URL (numeric hub id) does not map to Greenhouse job token", () => {
+  assert.deepEqual(directGreenhouseUrlsForCareersUrl("https://careers.wix.com/location/tel-aviv/3789810"), []);
+});

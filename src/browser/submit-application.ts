@@ -1,7 +1,9 @@
 import type { Page } from "playwright";
 import { greenhouseJobAppFrame } from "../application/greenhouse.js";
 import { SUBMIT_LABEL_PATTERN } from "../application/submit-label.js";
+import { candidate } from "../config/candidate.js";
 import type { FormScope } from "./form-filler.js";
+import { syncPhoneInputs } from "./form-filler.js";
 
 export type SubmitAttempt = {
   clicked: boolean;
@@ -16,7 +18,9 @@ export type SubmitAttempt = {
  */
 export async function submitApplication(page: Page, scope: FormScope): Promise<SubmitAttempt> {
   const target: FormScope = await preferredSubmitScope(page, scope);
-  const prepared = await target.evaluate((pattern) => {
+  await syncPhoneInputs(target);
+  const phoneLocal = candidate.phone.local.replace(/\D/g, "");
+  const prepared = await target.evaluate(({ pattern, phoneLocal: localPhone }) => {
     const rule = new RegExp(pattern, "i");
     const angular = (window as unknown as {
       angular?: {
@@ -59,6 +63,36 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
       return true;
     };
 
+    document.querySelectorAll('input[name="phone"], input.iti__tel-input, input[type="tel"]').forEach((element) => {
+      const input = element as HTMLInputElement;
+      if (input.value.trim().length > 0) {
+        return;
+      }
+      input.value = localPhone;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const phoneHasValue = (field: HTMLInputElement) => {
+      if (field.name === "phone" && field.value.trim().length === 0 && localPhone) {
+        field.value = localPhone;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (field.value.trim().length > 0) {
+        return true;
+      }
+      const tel = (window as unknown as {
+        intlTelInputGlobals?: { getInstance?: (node: HTMLInputElement) => { getNumber?: () => string; isValidNumber?: () => boolean } | null };
+      }).intlTelInputGlobals?.getInstance?.(field);
+      const number = tel?.getNumber?.() ?? "";
+      if (number.trim().length > 0) {
+        field.value = number;
+        return true;
+      }
+      return Boolean(tel?.isValidNumber?.());
+    };
+
     const invalid = Array.from(document.querySelectorAll("input, textarea, select"))
       .filter((element) => {
         const field = element as HTMLInputElement;
@@ -68,11 +102,12 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
         if (!isVisibleField(field)) {
           return false;
         }
-        if (field.value.trim().length > 0) {
+        if (phoneHasValue(field) || field.value.trim().length > 0) {
           field.setCustomValidity("");
         }
         const angularInvalid = Boolean(angular) && field.classList.contains("ng-invalid") && (field.required || field.classList.contains("ng-invalid-required"));
-        return (field.required && field.value.trim().length === 0) || (field.required && !field.checkValidity()) || angularInvalid;
+        const emptyRequired = field.required && !phoneHasValue(field) && field.value.trim().length === 0;
+        return emptyRequired || (field.required && !field.checkValidity()) || angularInvalid;
       })
       .map((element) => {
         const field = element as HTMLInputElement;
@@ -116,18 +151,42 @@ export async function submitApplication(page: Page, scope: FormScope): Promise<S
       return { clicked: false, invalid: [], useDomClick: true };
     }
     return { clicked: true, invalid: [], advanced: false, useDomClick: false };
-  }, SUBMIT_LABEL_PATTERN);
+  }, { pattern: SUBMIT_LABEL_PATTERN, phoneLocal });
 
   if (prepared.clicked || !prepared.useDomClick) {
+    if (!prepared.clicked && prepared.invalid.some((item) => item === "submit_button_missing")) {
+      const shadowClick = await clickSubmitViaPlaywright(page, target);
+      if (shadowClick) {
+        return { clicked: true, invalid: [], advanced: false };
+      }
+    }
     return { clicked: prepared.clicked, invalid: prepared.invalid, advanced: prepared.advanced };
   }
   const button = target.getByRole("button", { name: new RegExp(SUBMIT_LABEL_PATTERN, "i") }).first();
   try {
     await button.click({ timeout: 8000 });
   } catch {
+    const shadowClick = await clickSubmitViaPlaywright(page, target);
+    if (shadowClick) {
+      return { clicked: true, invalid: [], advanced: false };
+    }
     return { clicked: false, invalid: ["submit_button_missing"] };
   }
   return { clicked: true, invalid: [], advanced: false };
+}
+
+/** SmartRecruiters oneclick-ui renders controls inside shadow roots; light-DOM evaluate misses Submit. */
+async function clickSubmitViaPlaywright(page: Page, scope: FormScope): Promise<boolean> {
+  const scopes: FormScope[] = [scope, page, ...page.frames()];
+  const namePattern = /submit|send application|apply for this job|apply now/i;
+  for (const candidate of scopes) {
+    const button = candidate.getByRole("button", { name: namePattern }).first();
+    if (await button.count().catch(() => 0)) {
+      await button.click({ timeout: 10_000 }).catch(() => undefined);
+      return true;
+    }
+  }
+  return false;
 }
 
 async function preferredSubmitScope(page: Page, scope: FormScope): Promise<FormScope> {

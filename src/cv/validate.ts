@@ -1,5 +1,6 @@
 import { HEADLINES, SKILLS, factById, roleById, roles } from "../profile/facts.js";
 import type { CvDocument, Persona } from "../models/types.js";
+import { personaDefaults } from "./persona.js";
 import { roleSignatureErrors } from "./role-signatures.js";
 
 const GUARDED_TERMS = [
@@ -285,4 +286,24 @@ function tokenOverlap(left: string, right: string): number {
 
 export function renderedFactIds(doc: CvDocument): string[] {
   return validateCv(doc, "technical").factIds;
+}
+
+/** Keep skills within quality-gate bounds using the closed SKILL list. */
+export function normalizeSelectedSkills(doc: CvDocument, persona: Persona): void {
+  const allowed = personaDefaults[persona].skills;
+  const picked: string[] = [];
+  for (const skill of doc.selectedSkills) {
+    if (SKILL_SET.has(skill) && !picked.includes(skill)) {
+      picked.push(skill);
+    }
+  }
+  for (const skill of allowed) {
+    if (picked.length >= 3) {
+      break;
+    }
+    if (!picked.includes(skill)) {
+      picked.push(skill);
+    }
+  }
+  doc.selectedSkills = picked.slice(0, 18);
 }

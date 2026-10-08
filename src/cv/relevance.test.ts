@@ -103,6 +103,24 @@ test("Analytics and CRO CV passes on verified measurement evidence", () => {
   assert.equal(result.decision, "pass");
 });
 
+test("xEngineer-style JD phrases match verified AI engineering evidence", () => {
+  const result = evaluateCvRelevance(
+    doc(
+      "technical",
+      ["Python", "AI agents", "Microservices", "REST APIs"],
+      ["caseedge-stack", "caseedge-production"],
+      "Built production AI software, owned end-to-end features, and led technical delivery across cross-functional teams on large-scale SaaS platforms.",
+    ),
+    requirements({
+      mustHaveSkills: ["AI engineering", "end-to-end feature ownership", "complex technical project leadership"],
+      preferredSkills: ["cross-functional communication"],
+      responsibilities: ["AI-enabled website creation and editing", "large-scale editor systems"],
+    }),
+    "technical",
+  );
+  assert.equal(result.decision, "pass");
+});
+
 test("Java-only senior engineering role does not pass a Python CV", () => {
   const result = evaluateCvRelevance(
     doc("technical", ["Python", "RAG"], ["screening-python-backend"], "Built Python backend and AI systems."),

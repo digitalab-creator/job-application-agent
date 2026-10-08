@@ -6,6 +6,7 @@ import { ensureExcludedCompaniesConfig, getExcludedCompanies, setExcludedCompani
 import { ensureExcludedLocationsConfig, getExcludedLocations, setExcludedLocations } from "./application/exclude-location.js";
 import { applyToJob, type ApplyInput } from "./application/apply-job.js";
 import { attemptRecordFromResult, newAttemptId, rememberAttemptOutcome } from "./application/attempt-ledger.js";
+import { applyPolicySnapshot } from "./application/apply-policy.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./application/daily-quota.js";
 import { browserApplyLockHeld, claimBrowserApply, releaseBrowserApply } from "./application/browser-apply-lock.js";
 import { claimApplyRun, releaseApplyRun } from "./application/run-lock.js";
@@ -36,7 +37,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/quota")) {
-      send(res, 200, quotaSnapshot());
+      send(res, 200, applyPolicySnapshot());
       return;
     }
     if (req.method === "GET" && (req.url === "/config/excluded-companies" || req.url?.startsWith("/config/excluded-companies?"))) {
