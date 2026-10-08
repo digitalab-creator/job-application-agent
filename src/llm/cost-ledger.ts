@@ -77,6 +77,7 @@ export function recordExternalSpend(input: {
   ils: number;
   usd?: number;
   note?: string;
+  jobUrl?: string;
 }): CostCall {
   const call: CostCall = {
     at: new Date().toISOString(),
@@ -84,7 +85,7 @@ export function recordExternalSpend(input: {
     month: input.month,
     model: "",
     purpose: input.label,
-    jobUrl: "",
+    jobUrl: input.jobUrl?.trim() ?? "",
     source: input.source,
     promptTokens: 0,
     cachedTokens: 0,

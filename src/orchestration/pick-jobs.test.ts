@@ -48,7 +48,8 @@ test("sheetMatchScore parses numeric match score", () => {
   assert.equal(sheetMatchScore({ "Match Score": "82%" }), 82);
 });
 
-test("LinkedIn job URLs are eligible; search list pages are not", () => {
+test("LinkedIn job URLs stay out of auto-pick while Easy Apply is off", () => {
+  const previous = process.env.LINKEDIN_EASY_APPLY_ENABLED;
   const job: JobSheetRow[] = [
     {
       row_number: 9,
@@ -71,8 +72,19 @@ test("LinkedIn job URLs are eligible; search list pages are not", () => {
       "Job URL": "https://www.gotfriends.co.il/jobslobby/ai/?page=1&total=11",
     },
   ];
-  assert.equal(filterEligibleApplyRows(job, []).length, 1);
-  assert.equal(filterEligibleApplyRows(list, []).length, 0);
+  delete process.env.LINKEDIN_EASY_APPLY_ENABLED;
+  try {
+    assert.equal(filterEligibleApplyRows(job, []).length, 0);
+    assert.equal(filterEligibleApplyRows(list, []).length, 0);
+    process.env.LINKEDIN_EASY_APPLY_ENABLED = "true";
+    assert.equal(filterEligibleApplyRows(job, []).length, 1);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.LINKEDIN_EASY_APPLY_ENABLED;
+    } else {
+      process.env.LINKEDIN_EASY_APPLY_ENABLED = previous;
+    }
+  }
 });
 
 test("pickWorkspaceApplyBatch respects eligibility and mix", () => {

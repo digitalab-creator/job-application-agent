@@ -15,6 +15,39 @@ export function isLinkedInJobUrl(url: string): boolean {
   return /linkedin\.com\/jobs\/view\//i.test(url);
 }
 
+/** Any LinkedIn host, including the sign-in wall. The kill switch uses this, not only Easy Apply URLs. */
+export function isLinkedInHost(url: string): boolean {
+  try {
+    return /(^|\.)linkedin\.com$/i.test(new URL(url).hostname);
+  } catch {
+    return /linkedin\.com/i.test(url);
+  }
+}
+
+/**
+ * Easy Apply stays off unless LINKEDIN_EASY_APPLY_ENABLED is exactly true, 1, or yes.
+ * Unset means off, so a deploy cannot touch the LinkedIn account by accident.
+ */
+export function linkedinEasyApplyEnabled(): boolean {
+  const raw = (process.env.LINKEDIN_EASY_APPLY_ENABLED ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+export function linkedinFeatureDisabledResult(jobUrl: string): ApplicationResult {
+  return {
+    status: "review",
+    jobUrl,
+    submitted: false,
+    confirmationDetected: false,
+    blocker: "feature_disabled",
+    notes: [
+      "result=review",
+      "blocker=feature_disabled",
+      "LinkedIn Easy Apply is off. Set LINKEDIN_EASY_APPLY_ENABLED=true to turn it on. The browser was not opened.",
+    ].join("\n"),
+  };
+}
+
 /**
  * Drive LinkedIn Easy Apply when the button exists.
  * Returns null when this page is not an Easy Apply job (caller continues).
@@ -26,6 +59,10 @@ export async function runLinkedInEasyApply(
 ): Promise<ApplicationResult | null> {
   if (!isLinkedInJobUrl(page.url()) && !isLinkedInJobUrl(input.job.url)) {
     return null;
+  }
+  if (!linkedinEasyApplyEnabled()) {
+    log("LINKEDIN_EASY_APPLY_DISABLED", { url: input.job.url });
+    return linkedinFeatureDisabledResult(input.job.url);
   }
   if (hostIsCooling(page.url() || input.job.url)) {
     return base(input, {

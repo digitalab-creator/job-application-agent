@@ -20,7 +20,7 @@ export type PostingGoneReason =
   | "redirected_to_home"
   | `redirected_away:${string}`;
 
-type GreenhouseTarget = { apiHost: string; slug: string; jobId: string };
+export type GreenhouseTarget = { apiHost: string; slug: string; jobId: string };
 
 /** Parse slug + job id from boards.greenhouse.io / job-boards.greenhouse.io (+ EU) posting or embed URLs. */
 export function greenhouseTarget(url: string): GreenhouseTarget | null {

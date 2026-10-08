@@ -21,6 +21,7 @@ import { getWorkspace } from "./orchestration/workspace-store.js";
 import { startNativeScheduler } from "./orchestration/scheduler.js";
 import { ensureWorkspaceSchema } from "./orchestration/db.js";
 import { pickWorkspaceApplyBatch } from "./orchestration/pick-jobs.js";
+import { captchaSolverStatsSnapshot } from "./application/captcha-solver-stats.js";
 import { resolveApplyCapability } from "./application/ats-capability.js";
 import type { JobSheetRow } from "./orchestration/sheets/job-sheet.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
@@ -122,6 +123,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && req.url?.startsWith("/costs")) {
       send(res, 200, todayCostSummary());
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/metrics/captcha-solvers")) {
+      send(res, 200, captchaSolverStatsSnapshot());
       return;
     }
     if (req.method === "POST" && req.url === "/costs/record") {
@@ -334,6 +339,7 @@ async function healthCheck(): Promise<Record<string, unknown>> {
   const llmConfigured = env.llmApiKey.length > 10;
   recordPlatformAllocationIfNeeded();
   const budget = budgetSnapshot();
+  const captchaSolvers = captchaSolverStatsSnapshot();
   return {
     ok: files.technical && files.marketing && browserOk && llmConfigured,
     technicalCv: files.technical,
@@ -357,6 +363,14 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     excludedLocations: getExcludedLocations().length,
     applyInProgress: browserApplyLockHeld(),
     orchestrationMode: orchestrationMode(),
+    captchaSolvers: {
+      activeChallenges: captchaSolvers.activeChallenges,
+      buster: captchaSolvers.buster,
+      twoCaptcha: captchaSolvers.twoCaptcha,
+      successRate: captchaSolvers.successRate,
+      lastSuccessProvider: captchaSolvers.lastSuccessProvider,
+      lastSuccessAt: captchaSolvers.lastSuccessAt,
+    },
   };
 }
 

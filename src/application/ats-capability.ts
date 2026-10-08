@@ -1,4 +1,5 @@
 import { parseHttpUrl } from "./automatable-url.js";
+import { linkedinEasyApplyEnabled } from "./linkedin-easy-apply.js";
 
 /**
  * Closed capability contract for queue eligibility.
@@ -31,6 +32,9 @@ export function resolveApplyCapability(url: string): AtsCapability {
   }
   if (/^https:\/\/apply\.workable\.com\/comeet\//i.test(href)) {
     return "invalid";
+  }
+  if (/(^|\.)linkedin\.com$/i.test(parsed.hostname) && !linkedinEasyApplyEnabled()) {
+    return "manual_only";
   }
   if (MANUAL_HOST_RE.test(parsed.hostname) || MANUAL_HOST_RE.test(href)) {
     if (isAggregatorListPage(href, parsed.pathname)) {
