@@ -62,6 +62,18 @@ export async function updateJobSheetRow(
   rowNumber: number,
   patch: Record<string, string>,
 ): Promise<void> {
+  await updateJobSheetRows(workspace, [{ rowNumber, patch }]);
+}
+
+/** Batch many row patches into fewer Sheets write requests (quota-friendly). */
+export async function updateJobSheetRows(
+  workspace: WorkspaceRecord,
+  rows: Array<{ rowNumber: number; patch: Record<string, string> }>,
+  chunkSize = 40,
+): Promise<number> {
+  if (rows.length === 0) {
+    return 0;
+  }
   const refresh = workspaceRefreshToken(workspace);
   const headerValues = await readSheetValues(refresh, workspace.spreadsheetId, "1:1");
   const header = headerValues[0] ?? [];
@@ -72,21 +84,31 @@ export async function updateJobSheetRow(
     }
   });
   const updates: Array<{ range: string; values: string[][] }> = [];
-  for (const [key, value] of Object.entries(patch)) {
-    const idx = colIndex.get(key);
-    if (idx === undefined) {
-      continue;
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row.patch)) {
+      const idx = colIndex.get(key);
+      if (idx === undefined) {
+        continue;
+      }
+      updates.push({
+        range: `${columnLetter(idx)}${row.rowNumber}`,
+        values: [[value]],
+      });
     }
-    const col = columnLetter(idx);
-    updates.push({
-      range: `${col}${rowNumber}`,
-      values: [[value]],
-    });
   }
   if (updates.length === 0) {
-    return;
+    return 0;
   }
-  await batchUpdateSheet(refresh, workspace.spreadsheetId, updates);
+  let written = 0;
+  for (let i = 0; i < updates.length; i += chunkSize) {
+    const chunk = updates.slice(i, i + chunkSize);
+    await batchUpdateSheet(refresh, workspace.spreadsheetId, chunk);
+    written += chunk.length;
+    if (i + chunkSize < updates.length) {
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+    }
+  }
+  return written;
 }
 
 export async function appendDiscoveredJobs(
