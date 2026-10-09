@@ -9,7 +9,7 @@ import { uniqueKeyForUrl } from "./job-url-key.js";
 const SYSTEM = `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
 Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"AI|Growth|Hybrid|Other","whyItFits":"one sentence","relevant":true}]}
 category: AI = engineering/product AI roles; Growth = marketing, PPC, growth, performance; Hybrid = mixed; Other = adjacent but still plausible.
-Target mix over time: roughly 65% AI and 35% Growth — prefer labeling true growth/performance roles as Growth, not AI.
+Target mix over time: match the configured queue mix (default 50% AI / 50% Growth) — prefer labeling true growth/performance roles as Growth, not AI.
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
 relevant=false for on-site roles outside Israel Central or Tel Aviv District (e.g. Haifa, Jerusalem only) unless remote is stated.

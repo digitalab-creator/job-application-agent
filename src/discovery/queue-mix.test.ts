@@ -23,7 +23,7 @@ function job(partial: Partial<ScoredDiscoveryJob> & Pick<ScoredDiscoveryJob, "ca
   };
 }
 
-test("heavy tech queue uses marketing-heavy batch target", () => {
+test("heavy tech queue uses configured marketing share for discovery batch", () => {
   const policy = rebalancePolicy(computeNewQueueStats([
     { category: "Applied AI" },
     { category: "Applied AI" },
@@ -32,7 +32,7 @@ test("heavy tech queue uses marketing-heavy batch target", () => {
     { category: "Growth Marketing" },
   ]));
   assert.equal(policy.mode, "heavy_tech");
-  assert.equal(policy.targetMarketingShareOfBatch, 0.6);
+  assert.equal(policy.targetMarketingShareOfBatch, 0.5);
 });
 
 test("tech-heavy policy blocks 80-score Applied AI but allows 90+", () => {
@@ -41,7 +41,7 @@ test("tech-heavy policy blocks 80-score Applied AI but allows 90+", () => {
   assert.equal(passesDiscoveryQuality(job({ category: "Applied AI", matchScore: 92 }), policy), true);
 });
 
-test("apply daily batch targets 13 tech and 7 marketing", () => {
+test("apply daily batch targets 50/50 tech and marketing by default", () => {
   type Row = { category: string; matchScore: number; url: string };
   const rows: Row[] = [];
   for (let i = 0; i < 20; i += 1) {
@@ -52,8 +52,8 @@ test("apply daily batch targets 13 tech and 7 marketing", () => {
   }
   const { selected, pickedTech, pickedMarketing } = selectApplyDailyBatch(rows, (r) => r.matchScore);
   assert.equal(selected.length, 20);
-  assert.equal(pickedTech, 13);
-  assert.equal(pickedMarketing, 7);
+  assert.equal(pickedTech, 10);
+  assert.equal(pickedMarketing, 10);
 });
 
 test("batch selection prioritizes marketing when rebalancing", () => {
