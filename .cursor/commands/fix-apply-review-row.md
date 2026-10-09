@@ -85,6 +85,8 @@ If logs show `REQUEST_FAILED` / redirect errors, treat as **navigation_failed** 
 
 5. **Tell the user:** job link, what broke, what changed, dry-run result, and real apply result if run.
 
+   Real apply (`submit: true` + `row`) updates the Google Sheet from the worker (`executeApply` → `syncApplyOutcomeToJobSheet`). Dry-run does **not** touch the sheet.
+
 6. **Do not** run `/ship` or n8n apply webhooks unless the user requests it.
 
 ## 4. When not to code
