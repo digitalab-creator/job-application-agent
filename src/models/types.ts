@@ -80,7 +80,8 @@ export type AttemptOutcome =
   | "quota_reached"
   | "budget_reached"
   | "already_submitted"
-  | "dry_run";
+  | "dry_run"
+  | "in_progress";
 
 export type AttemptPipeline = {
   urlValidated: boolean;

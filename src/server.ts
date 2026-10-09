@@ -17,7 +17,11 @@ import { cvFileStatus, env, orchestrationMode } from "./config/env.js";
 import { authorizeWorkspaceRun } from "./orchestration/auth.js";
 import { runWorkspaceApplyDaily } from "./orchestration/apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./orchestration/discover-daily.js";
-import { getWorkspace } from "./orchestration/workspace-store.js";
+import { buildFreelanceDigestText, listFreelancePacks, newPacksSinceLastDigest, runFreelanceDigest } from "./freelance/digest.js";
+import { decryptSecret } from "./orchestration/crypto.js";
+import { computeQueueDepthSnapshot } from "./orchestration/queue-depth.js";
+import { getWorkspace, listEnabledWorkspaces } from "./orchestration/workspace-store.js";
+import { readExcludeCompanies, readJobSheetRows } from "./orchestration/sheets/job-sheet.js";
 import { startNativeScheduler } from "./orchestration/scheduler.js";
 import { ensureWorkspaceSchema } from "./orchestration/db.js";
 import { pickWorkspaceApplyBatch } from "./orchestration/pick-jobs.js";
@@ -159,6 +163,65 @@ const server = http.createServer(async (req, res) => {
         note: body.note?.trim() || "",
       });
       send(res, 200, budgetSnapshot());
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/runtime/ledger-paths")) {
+      send(res, 200, {
+        ledgerPath: env.ledgerPath,
+        applyAttemptsPath: env.applyAttemptsPath,
+        nativeRunLogPath: process.env.NATIVE_RUN_LOG_PATH?.trim() || "/app/data/ledger/native-runs.jsonl",
+        orchestrationMode: orchestrationMode(),
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/queue/snapshot")) {
+      const workspaces = await listEnabledWorkspaces();
+      const workspace = workspaces[0];
+      if (!workspace) {
+        send(res, 503, { error: "no_enabled_workspace" });
+        return;
+      }
+      const rows = await readJobSheetRows(workspace);
+      const excluded = await readExcludeCompanies(workspace);
+      send(res, 200, {
+        workspaceId: workspace.id,
+        ledgerPath: workspace.ledgerPath ?? env.ledgerPath,
+        applyAttemptsPath: workspace.applyAttemptsPath ?? env.applyAttemptsPath,
+        ...computeQueueDepthSnapshot(rows, excluded),
+      });
+      return;
+    }
+    if (req.method === "GET" && (req.url === "/freelance/digest/preview" || req.url?.startsWith("/freelance/digest/preview?"))) {
+      const packs = newPacksSinceLastDigest();
+      const body = packs.length > 0 ? buildFreelanceDigestText(packs) : buildFreelanceDigestText(listFreelancePacks());
+      send(res, 200, {
+        packCount: packs.length,
+        sendEnabled: process.env.FREELANCE_DIGEST_SEND?.trim().toLowerCase() === "true",
+        body,
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/freelance/digest/send") {
+      const body = await readBody(req) as { confirm?: string };
+      if (body.confirm !== "SEND_FREELANCE_DIGEST") {
+        send(res, 400, {
+          error: "consent_required",
+          hint: 'POST {"confirm":"SEND_FREELANCE_DIGEST"} and set FREELANCE_DIGEST_SEND=true',
+        });
+        return;
+      }
+      const workspaces = await listEnabledWorkspaces();
+      const workspace = workspaces[0];
+      const enc = workspace?.mailboxRefreshTokenEnc ?? workspace?.googleRefreshTokenEnc;
+      const result = await runFreelanceDigest({
+        refreshToken: enc ? decryptSecret(enc) : undefined,
+        mailboxEmail:
+          workspace?.mailboxEmail
+          ?? workspace?.notificationTarget
+          ?? process.env.FREELANCE_DIGEST_TO?.trim(),
+        forceSend: true,
+      });
+      send(res, result.sent ? 200 : 409, result);
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/queue/capability")) {
@@ -363,6 +426,8 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     excludedLocations: getExcludedLocations().length,
     applyInProgress: browserApplyLockHeld(),
     orchestrationMode: orchestrationMode(),
+    ledgerPath: env.ledgerPath,
+    applyAttemptsPath: env.applyAttemptsPath,
     captchaSolvers: {
       activeChallenges: captchaSolvers.activeChallenges,
       buster: captchaSolvers.buster,

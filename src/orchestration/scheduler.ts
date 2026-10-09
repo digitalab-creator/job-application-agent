@@ -1,5 +1,6 @@
 import { log } from "../logging/logger.js";
 import { orchestrationMode } from "../config/env.js";
+import { localScheduleParts, scheduleSlotKey } from "../time/jerusalem-day.js";
 import { ensureWorkspaceSchema, workspaceDatabaseUrl } from "./db.js";
 import { runWorkspaceApplyDaily } from "./apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
@@ -35,9 +36,13 @@ export async function startNativeScheduler(): Promise<void> {
 export async function tickScheduledWorkspaces(): Promise<void> {
   const workspaces = await listEnabledWorkspaces();
   for (const workspace of workspaces) {
-    const now = localParts(workspace.timezone);
+    const now = localScheduleParts(workspace.timezone);
     const runKey = `${now.date}:${now.hour}`;
     if (now.hour === workspace.schedule.discoverHour) {
+      const slotKey = scheduleSlotKey("discover", workspace.timezone);
+      if (workspace.lastDiscoverRunKey === slotKey) {
+        continue;
+      }
       await maybeRun(workspace.id, `discover:${runKey}`, async () => {
         await runWorkspaceDiscoverDaily({
           workspace,
@@ -47,6 +52,10 @@ export async function tickScheduledWorkspaces(): Promise<void> {
       });
     }
     if (now.hour === workspace.schedule.applyHour) {
+      const slotKey = scheduleSlotKey("apply", workspace.timezone);
+      if (workspace.lastApplyRunKey === slotKey) {
+        continue;
+      }
       await maybeRun(workspace.id, `apply:${runKey}`, async () => {
         await runWorkspaceApplyDaily({
           workspace,
@@ -67,25 +76,4 @@ async function maybeRun(workspaceId: string, key: string, fn: () => Promise<void
   }
   lastTriggered.set(composite, Date.now());
   await fn();
-}
-
-function localParts(timeZone: string): { date: string; hour: number } {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "numeric",
-    hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date());
-  const bag: Record<string, string> = {};
-  for (const part of parts) {
-    if (part.type !== "literal") {
-      bag[part.type] = part.value;
-    }
-  }
-  const date = `${bag.year}-${bag.month}-${bag.day}`;
-  const hour = Number(bag.hour);
-  return { date, hour: Number.isFinite(hour) ? hour : -1 };
 }

@@ -21,8 +21,59 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from n8n_orchestration import n8n_env_file  # noqa: E402
 
 ENV_FILE = ROOT / ".env"
-LEDGER = ROOT / "data/ledger/applications.jsonl"
-ATTEMPTS_LEDGER = ROOT / "data/ledger/apply-attempts.jsonl"
+
+
+def _env_path(name: str, fallback: Path) -> Path:
+    if not ENV_FILE.is_file():
+        return fallback
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith(f"{name}="):
+            raw = line.split("=", 1)[1].strip()
+            if raw:
+                p = Path(raw)
+                return p if p.is_absolute() else (ROOT / p)
+    return fallback
+
+
+def application_ledger_paths() -> list[Path]:
+    paths = [
+        _env_path("LEDGER_PATH", ROOT / "data/ledger/applications.jsonl"),
+        ROOT / "data/ledger/internal/applications.jsonl",
+        ROOT / "data/ledger/applications.jsonl",
+    ]
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(path.resolve()) if path.exists() else str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.is_file():
+            out.append(path)
+    return out or [ROOT / "data/ledger/applications.jsonl"]
+
+
+def attempt_ledger_paths() -> list[Path]:
+    paths = [
+        _env_path("APPLY_ATTEMPTS_PATH", ROOT / "data/ledger/apply-attempts.jsonl"),
+        ROOT / "data/ledger/internal/apply-attempts.jsonl",
+        ROOT / "data/ledger/apply-attempts.jsonl",
+    ]
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(path.resolve()) if path.exists() else str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.is_file():
+            out.append(path)
+    return out or [ROOT / "data/ledger/apply-attempts.jsonl"]
+
+
+LEDGER = application_ledger_paths()[0]
+ATTEMPTS_LEDGER = attempt_ledger_paths()[0]
 QUOTA_LEDGER = ROOT / "data/ledger/daily-quota.jsonl"
 NATIVE_RUN_LOG = ROOT / "data/ledger/native-runs.jsonl"
 HEALTH_URL = "http://127.0.0.1:3099/health"
@@ -188,8 +239,38 @@ def load_n8n_api_key() -> str:
     return ""
 
 
+def native_queue_snapshot() -> dict[str, int | str] | None:
+    token = load_token()
+    if not token:
+        return None
+    payload = http_json(f"{WORKER_BASE}/queue/snapshot", token)
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "workspace_id": str(payload.get("workspaceId", "")),
+        "sheet_rows": int(payload.get("sheetRows", 0)),
+        "status_new": int(payload.get("statusNew", 0)),
+        "eligible_employment": int(payload.get("eligibleEmployment", 0)),
+        "automatable_employment": int(payload.get("automatableEmployment", 0)),
+        "freelance_new": int(payload.get("freelanceNew", 0)),
+        "manual_only": int(payload.get("manualOnlyEmployment", 0)),
+    }
+
+
 def sheet_queue_snapshot() -> dict[str, int] | None:
-    """Best-effort: Read Jobs rows from today's latest apply execution."""
+    """Best-effort: native snapshot first, else n8n apply execution."""
+    if orchestration_mode() == "native":
+        native = native_queue_snapshot()
+        if native:
+            return {
+                "execution_id": 0,
+                "sheet_rows": int(native["sheet_rows"]),
+                "status_new": int(native["status_new"]),
+                "automatable_new": int(native["automatable_employment"]),
+                "pick_jobs_output": int(native["eligible_employment"]),
+                "eligible_employment": int(native["eligible_employment"]),
+                "freelance_new": int(native.get("freelance_new", 0)),
+            }
     api = load_n8n_api_key()
     if not api:
         return None
@@ -317,13 +398,11 @@ def read_jsonl(path: Path) -> list[dict]:
 def row_on_day(at: str, day: str) -> bool:
     if not at:
         return False
-    if str(at).startswith(day):
-        return True
     try:
         dt = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
         return dt.astimezone(TZ).strftime("%Y-%m-%d") == day
     except ValueError:
-        return False
+        return str(at).startswith(day)
 
 
 def confirmed_today(day: str) -> list[dict]:
@@ -335,19 +414,56 @@ def confirmed_today(day: str) -> list[dict]:
     return out
 
 
+def _attempt_rank(row: dict) -> int:
+    if row.get("outcome") == "applied" or row.get("confirmationDetected"):
+        return 3
+    if row.get("outcome") == "in_progress":
+        return 0
+    return 1
+
+
 def attempts_today(day: str) -> list[dict]:
-    source = read_jsonl(ATTEMPTS_LEDGER)
-    if source:
-        out = [
-            row for row in source
-            if row_on_day(str(row.get("finishedAt", "")), day)
-        ]
-        out.sort(key=lambda r: str(r.get("finishedAt", "")))
+    merged: dict[str, dict] = {}
+    for path in attempt_ledger_paths():
+        for row in read_jsonl(path):
+            finished = str(row.get("finishedAt", ""))
+            started = str(row.get("startedAt", ""))
+            if not row_on_day(finished, day) and not row_on_day(started, day):
+                continue
+            key = str(row.get("attemptId") or f"{finished}-{row.get('originalJobUrl', '')}")
+            prev = merged.get(key)
+            if not prev or _attempt_rank(row) >= _attempt_rank(prev):
+                merged[key] = row
+
+    for path in application_ledger_paths():
+        for row in read_jsonl(path):
+            if not row.get("confirmationDetected"):
+                continue
+            at = str(row.get("at", ""))
+            if not row_on_day(at, day):
+                continue
+            key = f"app:{row.get('url', '')}:{at}"
+            if key in merged:
+                continue
+            merged[key] = {
+                "attemptId": key,
+                "startedAt": at,
+                "finishedAt": at,
+                "company": row.get("company", "?"),
+                "role": row.get("role", "?"),
+                "originalJobUrl": row.get("url", ""),
+                "outcome": "applied",
+                "confirmationDetected": True,
+                "pipeline": {"submitted": True, "confirmed": True},
+                "notes": "reconciled_from_applications_ledger",
+            }
+
+    out = list(merged.values())
+    out = [row for row in out if row.get("outcome") != "in_progress" or row.get("confirmationDetected")]
+    out.sort(key=lambda r: str(r.get("finishedAt") or r.get("startedAt") or ""))
+    if out:
         return out
-    # Keep historical reports useful before the attempt ledger was deployed.
-    out = [row for row in read_jsonl(LEDGER) if row_on_day(str(row.get("at", "")), day)]
-    out.sort(key=lambda r: str(r.get("at", "")))
-    return out
+    return [row for row in read_jsonl(LEDGER) if row_on_day(str(row.get("at", "")), day)]
 
 
 def attempt_outcome_label(row: dict) -> str:
@@ -568,10 +684,28 @@ def _first_line(msg: str, limit: int = 140) -> str:
 
 
 def job_attempts_from_events(events: list[dict]) -> list[JobLogAttempt]:
-    """One row per JOB_OPENED, with the best terminal cause from following log events."""
+    """Group log lines by attemptId when present, else fall back to JOB_OPENED sessions."""
+    by_attempt: dict[str, dict] = {}
     sessions: list[dict] = []
     current: dict | None = None
     for ev in events:
+        attempt_id = str(ev.get("attemptId", "")).strip()
+        if attempt_id:
+            session = by_attempt.setdefault(
+                attempt_id,
+                {
+                    "company": str(ev.get("company", "?")),
+                    "role": str(ev.get("role", "?")),
+                    "url": str(ev.get("url", "")),
+                    "evs": [],
+                },
+            )
+            if ev.get("event") == "JOB_OPENED":
+                session["company"] = str(ev.get("company", session["company"]))
+                session["role"] = str(ev.get("role", session["role"]))
+                session["url"] = str(ev.get("url", session["url"]))
+            session["evs"].append(ev)
+            continue
         name = str(ev.get("event", ""))
         if name == "JOB_OPENED":
             current = {
@@ -584,6 +718,8 @@ def job_attempts_from_events(events: list[dict]) -> list[JobLogAttempt]:
             continue
         if current is not None:
             current["evs"].append(ev)
+
+    sessions.extend(by_attempt.values())
 
     attempts: list[JobLogAttempt] = []
     for session in sessions:
@@ -782,11 +918,20 @@ def print_report(day: str | None = None) -> int:
         else attempt_cap * 3
     )
     sheet_new = queue["status_new"] if queue else None
+    depth_new = (
+        queue.get("eligible_employment", sheet_new)
+        if queue
+        else None
+    )
     discover_should_skip = (
-        isinstance(sheet_new, int) and sheet_new > discover_depth_threshold
+        isinstance(depth_new, int) and depth_new > discover_depth_threshold
     )
 
-    eligible_attempts = len(attempts)
+    eligible_attempts = len([r for r in attempts if r.get("outcome") != "in_progress"])
+    in_progress = len([r for r in attempts if r.get("outcome") == "in_progress"])
+    reconciled_apps = len(
+        [r for r in attempts if str(r.get("notes", "")).startswith("reconciled_from_applications")]
+    )
 
     def rate(numerator: int, denominator: int) -> str:
         return f"{(numerator / denominator * 100):.1f}%" if denominator else "n/a"
@@ -794,9 +939,15 @@ def print_report(day: str | None = None) -> int:
     print(f"# Daily apply report — {day}")
     print(f"_Generated {now}_\n")
     print(
-        f"**{len(confirmed)} confirmed from {eligible_attempts} eligible attempts. "
+        f"**{len(confirmed)} confirmed from {eligible_attempts} terminal attempts "
+        f"({in_progress} in-flight, {reconciled_apps} reconciled from applications ledger). "
         f"Daily budget: {daily_spent:.2f}/{daily_budget:.2f} ILS, "
         f"{daily_remaining:.2f} ILS remaining.**\n"
+    )
+    print(
+        "_Execution health: worker container + `/health`. "
+        "Business outcome: confirmed submissions above. "
+        "A non-empty blocker list is not the same as zero confirmations._\n"
     )
 
     print("## Summary")
@@ -840,6 +991,10 @@ def print_report(day: str | None = None) -> int:
         print()
 
     print("## Quality funnel")
+    if queue and queue.get("freelance_new"):
+        print(f"- Freelance `New` (pack lane): **{queue['freelance_new']}**")
+    if queue and queue.get("eligible_employment") is not None:
+        print(f"- Eligible employment `New`: **{queue['eligible_employment']}**")
     print(f"- Raw New queue: **{queue['status_new'] if queue else '—'}**")
     print(f"- Jobs prefiltered: **{queue['pick_jobs_output'] if queue else '—'}**")
     print(f"- Jobs opened: **{opened_attempts}**")
@@ -1038,10 +1193,17 @@ def print_report(day: str | None = None) -> int:
         blockers.append("Worker `/health` not OK — check CV files, browser, LLM config.")
 
     print("## What stopped progress")
+    infra_blockers = [b for b in blockers if "container" in b.lower() or "/health" in b.lower()]
+    ops_blockers = [b for b in blockers if b not in infra_blockers]
+
     if not blockers:
-        print("- No dominant blocker in logs; continue while the calculated daily budget remains open.")
+        print("- No dominant infrastructure blocker in logs.")
+        if len(confirmed) == 0 and eligible_attempts == 0 and job_opened > 0:
+            print("- Browser opened jobs but no terminal ledger rows — check ledger path / persistence.")
     else:
-        for b in blockers:
+        for b in infra_blockers:
+            print(f"- {b}")
+        for b in ops_blockers:
             print(f"- {b}")
     print()
 
@@ -1069,7 +1231,9 @@ def print_report(day: str | None = None) -> int:
         print("- Re-trigger apply after fix: n8n webhook `job-apply-run` or wait for scheduled apply.")
     print()
 
-    return 0 if not blockers else 1
+    if infra_blockers:
+        return 2
+    return 0
 
 
 def main() -> None:

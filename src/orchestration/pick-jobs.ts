@@ -3,6 +3,7 @@ import { hostIsCooling } from "../application/rate-limit.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
 import { dailyApplyPickLimit } from "../application/apply-policy.js";
 import { DAILY_APPLY_BATCH_LIMIT, selectApplyDailyBatch } from "../discovery/queue-mix.js";
+import { isFreelanceOpportunity } from "../freelance/opportunity-kind.js";
 import type { JobSheetRow } from "./sheets/job-sheet.js";
 
 export function sheetMatchScore(row: JobSheetRow): number {
@@ -12,6 +13,9 @@ export function sheetMatchScore(row: JobSheetRow): number {
 }
 
 export function isEligibleApplySheetRow(row: JobSheetRow): boolean {
+  if (isFreelanceOpportunity(row)) {
+    return false;
+  }
   const status = String(row.Status ?? "").trim();
   const retryUpload = status === "Review" && String(row.Notes ?? "").includes("cv_upload_failed");
   if (status !== "New" && !retryUpload) {

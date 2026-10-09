@@ -7,6 +7,11 @@ import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
 import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
 import { directGreenhouseUrlsForCareersUrl, navigationRetryUrls } from "./job-navigation-url.js";
+import {
+  greenhouseNavAttemptsPerUrl,
+  greenhouseNavMaxErrorSignals,
+  shouldSkipGreenhouseTarget,
+} from "./greenhouse-nav-bounds.js";
 import { submitApplication } from "../browser/submit-application.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { saveScreenshot } from "../browser/screenshot.js";
@@ -76,6 +81,7 @@ export type ApplyInput = {
     matchScore?: number;
     category?: string;
     estimatedSalary?: string;
+    opportunityKind?: "employment" | "contract" | "freelance_project";
   };
 };
 
@@ -375,7 +381,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       log("JOB_PAGE_UNCONFIRMED", { url: page.url(), company: input.job.company });
     }
 
-    const salary = publishedSalaryTooLow(bodyText);
+    const skipSalaryFloor =
+      input.job.opportunityKind === "freelance_project" || input.job.opportunityKind === "contract";
+    const salary = skipSalaryFloor ? { tooLow: false, detail: "" } : publishedSalaryTooLow(bodyText);
     if (salary.tooLow) {
       log("JOB_REJECTED_LOW_SALARY", { detail: salary.detail });
       return result(input, {
@@ -1175,14 +1183,30 @@ async function humanPause(page: Page, minMs: number, maxMs: number): Promise<voi
 async function openJob(page: Page, url: string): Promise<void> {
   let lastError: unknown;
   const targets = navigationRetryUrls(url);
+  const maxPerUrl = greenhouseNavAttemptsPerUrl();
+  const maxErrorSignals = greenhouseNavMaxErrorSignals();
+  let greenhouseErrorSignals = 0;
   for (const target of targets) {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (await shouldSkipGreenhouseTarget(target)) {
+      log("NAVIGATION_GREENHOUSE_SKIPPED_REMOVED", { target });
+      continue;
+    }
+    for (let attempt = 1; attempt <= maxPerUrl; attempt += 1) {
       for (const waitUntil of ["domcontentloaded", "commit"] as const) {
         try {
           await page.goto(target, { waitUntil });
           await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
           if (/error=true/i.test(page.url()) || /\/embed\/job_board\b/i.test(page.url())) {
-            log("NAVIGATION_GREENHOUSE_ERROR", { target, landed: page.url() });
+            greenhouseErrorSignals += 1;
+            log("NAVIGATION_GREENHOUSE_ERROR", {
+              target,
+              landed: page.url(),
+              signal: greenhouseErrorSignals,
+              maxErrorSignals,
+            });
+            if (greenhouseErrorSignals >= maxErrorSignals) {
+              throw new Error("navigation_failed_greenhouse_error_cap");
+            }
             continue;
           }
           if (/greenhouse\.io/i.test(target) && !/greenhouse\.io/i.test(page.url())) {

@@ -7,6 +7,7 @@ import type {
   AttemptOutcome,
   AttemptPipeline,
 } from "../models/types.js";
+import { instantOnJerusalemDay } from "../time/jerusalem-day.js";
 import { resolveApplyAttemptsPath } from "../orchestration/workspace-runtime.js";
 
 export function newAttemptId(): string {
@@ -19,6 +20,29 @@ export function newAttemptId(): string {
  * The file is JSONL for easy operational inspection, but replacement is done
  * atomically so a later non-confirmed error cannot overwrite a confirmed send.
  */
+/** Durable start marker — survives a crash before terminal write. */
+export function rememberAttemptStarted(record: ApplyAttemptRecord): ApplyAttemptRecord {
+  const rows = readAttemptRows();
+  const existing = rows.find((row) => row.attemptId === record.attemptId);
+  if (existing?.outcome === "applied") {
+    return existing;
+  }
+  const merged: ApplyAttemptRecord = {
+    ...existing,
+    ...record,
+    finishedAt: record.finishedAt || existing?.finishedAt || record.startedAt,
+    pipeline: record.pipeline ?? existing?.pipeline ?? defaultPipelineFromPartial(record),
+    submitted: record.submitted ?? existing?.submitted ?? false,
+    confirmationDetected: record.confirmationDetected ?? existing?.confirmationDetected ?? false,
+    outcome: isAppliedAttempt(existing) ? "applied" : "in_progress",
+    notes: record.notes || existing?.notes || "stage=started",
+  };
+  const next = rows.filter((row) => row.attemptId !== record.attemptId);
+  next.push(merged);
+  writeAttemptRows(next);
+  return merged;
+}
+
 export function rememberAttemptOutcome(record: ApplyAttemptRecord): ApplyAttemptRecord {
   const rows = readAttemptRows();
   const existing = rows.find((row) => row.attemptId === record.attemptId);
@@ -72,6 +96,9 @@ export function attemptRecordFromResult(
 }
 
 export function inferAttemptOutcome(result: ApplicationResult): AttemptOutcome {
+  if (result.terminalOutcome === "in_progress") {
+    return "in_progress";
+  }
   if (result.confirmationDetected || result.status === "applied") {
     return "applied";
   }
@@ -125,7 +152,28 @@ export function readApplyAttempts(day?: string): ApplyAttemptRecord[] {
   if (!day) {
     return rows;
   }
-  return rows.filter((row) => row.finishedAt.startsWith(day));
+  return rows.filter(
+    (row) =>
+      instantOnJerusalemDay(row.finishedAt, day)
+      || instantOnJerusalemDay(row.startedAt, day),
+  );
+}
+
+function defaultPipelineFromPartial(record: Partial<ApplyAttemptRecord>): AttemptPipeline {
+  const pipeline = record.pipeline;
+  if (pipeline) {
+    return pipeline;
+  }
+  return {
+    urlValidated: false,
+    opened: false,
+    recovered: false,
+    fitPassed: false,
+    cvGenerated: Boolean(record.cvPath),
+    cvQualityPassed: Boolean(record.cvPath),
+    submitted: record.submitted ?? false,
+    confirmed: record.confirmationDetected ?? false,
+  };
 }
 
 function defaultPipeline(result: ApplicationResult): AttemptPipeline {
@@ -165,6 +213,13 @@ function writeAttemptRows(rows: ApplyAttemptRecord[]): void {
   const temporary = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length ? "\n" : ""));
   fs.renameSync(temporary, filePath);
+}
+
+function isAppliedAttempt(row?: ApplyAttemptRecord): boolean {
+  if (!row) {
+    return false;
+  }
+  return row.confirmationDetected || row.outcome === "applied";
 }
 
 function attemptLedgerPath(): string {

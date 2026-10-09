@@ -6,8 +6,12 @@ import { claimApplyRun, releaseApplyRun } from "../application/run-lock.js";
 import { log } from "../logging/logger.js";
 import type { ApplyInput } from "../application/apply-job.js";
 import { appendNativeRunLog } from "./native-run-log.js";
+import { processFreelanceBatch } from "../freelance/process-freelance-batch.js";
+import { scheduleSlotKey } from "../time/jerusalem-day.js";
+import { claimScheduledSlot } from "./schedule-claim.js";
 import { pickWorkspaceApplyBatch, sheetMatchScore } from "./pick-jobs.js";
 import { mapApplyResultToSheetPatch } from "./sheet-result.js";
+import { opportunityKindFromRow } from "../freelance/opportunity-kind.js";
 import { readExcludeCompanies, readJobSheetRows, updateJobSheetRow } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
@@ -26,6 +30,8 @@ export type ApplyDailyResult = {
   status: "ok" | "skipped" | "locked" | "error";
   picked: number;
   attempted: number;
+  confirmed?: number;
+  freelancePacksReady?: number;
   notes: string;
 };
 
@@ -39,11 +45,23 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
     }
     const startedAt = new Date().toISOString();
     let picked = 0;
-    let attempted = 0;
+      let attempted = 0;
+      let confirmed = 0;
     try {
+      const claim = await claimScheduledSlot(workspace, "apply", runSource);
+      if (!claim.ok) {
+        const result: ApplyDailyResult = {
+          status: "skipped",
+          picked: 0,
+          attempted: 0,
+          notes: claim.reason,
+        };
+        return result;
+      }
       const rows = await readJobSheetRows(workspace);
       const excluded = await readExcludeCompanies(workspace);
       setExcludedCompanies(excluded, `workspace:${workspace.id}:sheet`);
+      const freelance = await processFreelanceBatch(workspace, rows, dryRun);
       const batch = pickWorkspaceApplyBatch(rows, excluded);
       picked = batch.selected.length;
       if (picked === 0) {
@@ -51,7 +69,8 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
           status: "skipped",
           picked: 0,
           attempted: 0,
-          notes: `No eligible rows (eligible=${batch.eligible}).`,
+          notes: `No eligible rows (eligible=${batch.eligible}). ${freelance.notes}`,
+          freelancePacksReady: freelance.packsReady,
         };
         await finishRun(workspace, runSource, startedAt, result);
         return result;
@@ -61,7 +80,8 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
           status: "ok",
           picked,
           attempted: 0,
-          notes: `dry_run picked=${picked} tech=${batch.pickedTech} marketing=${batch.pickedMarketing}`,
+          notes: `dry_run picked=${picked} tech=${batch.pickedTech} marketing=${batch.pickedMarketing}. ${freelance.notes}`,
+          freelancePacksReady: freelance.packsReady,
         };
         await finishRun(workspace, runSource, startedAt, result);
         return result;
@@ -88,12 +108,16 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
               matchScore: sheetMatchScore(row),
               category: String(row.Category ?? ""),
               estimatedSalary: String(row["Est. Salary Range"] ?? ""),
+              opportunityKind: opportunityKindFromRow(row),
             },
             attemptId: newAttemptId(),
             startedAt: new Date().toISOString(),
           };
           const outcome = await executeApply(input);
           attempted += 1;
+          if (outcome.confirmationDetected || outcome.status === "applied") {
+            confirmed += 1;
+          }
           if (row.row_number) {
             const patch = mapApplyResultToSheetPatch(row, outcome, workspace.timezone);
             await updateJobSheetRow(workspace, row.row_number, patch);
@@ -106,7 +130,9 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
         status: "ok",
         picked,
         attempted,
-        notes: `attempted=${attempted} picked=${picked}`,
+        confirmed,
+        freelancePacksReady: freelance.packsReady,
+        notes: `attempted=${attempted} confirmed=${confirmed} picked=${picked}. ${freelance.notes}`,
       };
       await finishRun(workspace, runSource, startedAt, result);
       return result;
@@ -129,7 +155,9 @@ async function finishRun(
   result: ApplyDailyResult,
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
-  const runKey = startedAt.slice(0, 16);
+  const runKey = runSource === "native_schedule"
+    ? scheduleSlotKey("apply", workspace.timezone, new Date(startedAt))
+    : startedAt.slice(0, 16);
   await markWorkspaceRunKey(workspace.id, "apply", runKey);
   appendNativeRunLog({
     workspaceId: workspace.id,
