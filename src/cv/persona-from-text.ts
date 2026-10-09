@@ -2,7 +2,7 @@ import type { Persona } from "../models/types.js";
 
 const TECHNICAL = /applied ai|ai engineer|llm|rag|backend|full[- ]?stack|software engineer|ml engineer|automation engineer|data engineer|python|microservices|api design|platform engineer/;
 const MARKETING = /ppc|performance marketing|performance manager|paid acquisition|user acquisition|growth manager|cro\b|performance lead|paid ads|campaign|media buying/;
-const HYBRID = /solutions engineer|solutions architect|product manager|growth engineer|technical growth|martech|marketing operations|revops|revenue operations|marketing technology|ai growth/;
+const HYBRID = /solutions engineer|solutions architect|product manager|growth engineer|technical growth|martech|marketing operations|revops|revenue operations|marketing technology|ai growth|\bgtm\b|gtm engineer|revenue systems/;
 
 export function choosePersonaFromText(role: string, category: string, jobText: string): Persona | null {
   const title = `${role} ${category}`.toLowerCase();

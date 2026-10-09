@@ -21,6 +21,7 @@ import { validateCv } from "../cv/validate.js";
 import { evaluateCvRelevance, validateCvQuality, validatePdfArtifact, type CvRelevanceResult } from "../cv/relevance.js";
 import { saveRedactedFailureArtifact } from "./failure-artifact.js";
 import { validateCvCoversEvidence, type RequirementEvidenceRow } from "./grounded-fit.js";
+import { cvUsedLabelForLeadIdentity, resolveLeadIdentity } from "../cv/lead-identity.js";
 import { normalizeSelectedSkills } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
 import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
@@ -401,6 +402,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         role: activeRole,
         company: input.job.company,
         jobText: bodyText,
+        trackerCategory: input.job.category,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "full_job_fit_failed";
@@ -598,7 +600,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         screenshots,
       });
     }
-    log("CV_SELECTED", { persona, wording: cv.wording, source: cv.cvSource, path: cv.cvPath });
+    log("CV_SELECTED", {
+      persona,
+      leadIdentity: resolveLeadIdentity({ persona, trackerCategory: input.job.category }),
+      wording: cv.wording,
+      source: cv.cvSource,
+      path: cv.cvPath,
+    });
 
     const filled = await fillFields({
       scope,
@@ -606,6 +614,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       persona,
       ctx: {
         persona,
+        trackerCategory: input.job.category,
         salaryMonthly,
         portfolioUrl: cv.portfolioUrl,
         euRole: /europe|eu\b|poland/i.test(bodyText),
@@ -1089,6 +1098,7 @@ async function prepareCv(
   relevance: CvRelevanceResult;
 }> {
   const outputPath = `${env.generatedCvDir}/${day}/${jobSlug}-redacted-candidate.pdf`;
+  const leadIdentity = resolveLeadIdentity({ persona, trackerCategory: input.job.category });
   let feedback = "";
   let lastFailure = "CV did not pass quality gates.";
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1097,10 +1107,11 @@ async function prepareCv(
       role: input.job.role,
       company: input.job.company,
       jobText,
+      trackerCategory: input.job.category,
       feedback,
     });
     normalizeSelectedSkills(built.doc, persona);
-    const validation = validateCv(built.doc, persona);
+    const validation = validateCv(built.doc, persona, leadIdentity);
     if (!validation.ok) {
       lastFailure = validation.errors.join("; ");
       feedback = `Truth gate failed: ${lastFailure}. Fix only those issues.`;
@@ -1109,7 +1120,7 @@ async function prepareCv(
     if (input.pipeline) {
       input.pipeline.cvGenerated = true;
     }
-    const structural = validateCvQuality(built.doc, persona);
+    const structural = validateCvQuality(built.doc, persona, leadIdentity);
     const evidenceCoverage = validateCvCoversEvidence(built.doc, persona, requirementEvidence);
     const relevance = evaluateCvRelevance(built.doc, requirements, persona);
     log("CV_QUALITY_EVALUATED", {
@@ -1142,7 +1153,7 @@ async function prepareCv(
       feedback = `Rendered PDF quality failed: ${lastFailure}. Keep the CV concise and readable.`;
       continue;
     }
-    const cvUsed = built.doc.headlineId === "marketing-full" ? "marketing" : "technical";
+    const cvUsed = cvUsedLabelForLeadIdentity(leadIdentity);
     return {
       cvPath: outputPath,
       cvSource: "generated",
@@ -1570,6 +1581,7 @@ async function preflightJobFit(input: ApplyInput): Promise<ApplicationResult | n
       role: input.job.role,
       company: input.job.company,
       jobText: prefetched,
+      trackerCategory: input.job.category,
     });
   } catch (error) {
     log("JOB_FIT_PREFLIGHT_SKIPPED", {

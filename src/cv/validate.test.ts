@@ -30,6 +30,7 @@ test("a bullet that adds Kubernetes and a new metric is rejected", () => {
 });
 
 test("verbatim hybrid CV passes the truth gates", () => {
+  // hybrid → revenue_martech lead identity (revenue-martech-full headline)
   const doc = buildVerbatim("hybrid");
   const result = validateCv(doc, "hybrid");
   assert.equal(result.ok, true, result.errors.join("\n"));

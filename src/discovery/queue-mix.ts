@@ -1,5 +1,13 @@
+import { marketingShareFromPolicy } from "../config/search-policy.js";
+import { getSearchPolicy } from "../config/search-policy-runtime.js";
 import { DISCOVERY_SKIP_NEW_MULTIPLIER as DISCOVERY_SKIP_MULTIPLIER } from "../application/daily-quota.js";
 import type { ScoredDiscoveryJob } from "./score-jobs.js";
+import {
+  categoryBatchTargets,
+  normalizeTrackerCategory,
+  trackerCategoryQueueSide,
+  trackerMarketingShareFromCategories,
+} from "./tracker-categories.js";
 
 export type QueueSide = "tech" | "marketing" | "other";
 
@@ -21,31 +29,45 @@ export const MARKETING_SHEET_CATEGORIES = new Set([
   "Revenue Systems",
 ]);
 
-const MARKETING_PRIORITY = new Map<string, number>([
-  ["Growth Marketing", 3],
+/** Tie-break boost within a category bucket (higher = prefer when scores tie). */
+const CATEGORY_DISCOVERY_BOOST = new Map<string, number>([
   ["Performance Marketing Leadership", 3],
-  ["Analytics & CRO", 2],
-  ["Product-led Growth", 2],
-  ["Revenue Systems", 1],
+  ["Revenue Systems", 2],
+  ["Marketing Technology", 2],
+  ["Analytics & CRO", 1],
+  ["AI Solutions", 1],
+  ["Applied AI", 1],
 ]);
 
-const BASE_MIN_SCORE = 55;
+function discoveryBaseMinScore(): number {
+  const raw = process.env.DISCOVERY_MIN_MATCH_SCORE?.trim();
+  if (raw) {
+    const env = Number(raw);
+    if (Number.isFinite(env) && env >= 0) {
+      return Math.min(100, Math.floor(env));
+    }
+  }
+  return getSearchPolicy().discoveryMinMatchScore;
+}
 const TECH_HEAVY_MIN_TECH = 85;
 const EXCEPTIONAL_TECH = 90;
 
 /** n8n uses the worker safety cap as its maximum batch size; budget decides the real spend. */
 export const DAILY_APPLY_BATCH_LIMIT = 20;
 
-/** Default marketing share when `QUEUE_MIX_MARKETING_SHARE` is unset (apply + discovery SSOT). */
-export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = 0.5;
+/** Default marketing share when `QUEUE_MIX_MARKETING_SHARE` is unset (derived from tracker category weights). */
+export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = trackerMarketingShareFromCategories();
 
 /** Marketing share of tech+marketing slots (0–1). Env: `QUEUE_MIX_MARKETING_SHARE`. */
 export function queueMixMarketingShare(): number {
-  const parsed = Number(process.env.QUEUE_MIX_MARKETING_SHARE ?? String(QUEUE_MIX_MARKETING_SHARE_DEFAULT));
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    return QUEUE_MIX_MARKETING_SHARE_DEFAULT;
+  const raw = process.env.QUEUE_MIX_MARKETING_SHARE?.trim();
+  if (raw) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+      return parsed;
+    }
   }
-  return parsed;
+  return marketingShareFromPolicy(getSearchPolicy());
 }
 
 export function dailyApplyMarketingTarget(batchLimit = DAILY_APPLY_BATCH_LIMIT): number {
@@ -100,7 +122,12 @@ export type RebalancePolicy = {
 };
 
 export function categorySide(category: string): QueueSide {
-  const c = category.trim();
+  const canonical = normalizeTrackerCategory(category);
+  const fromTracker = trackerCategoryQueueSide(canonical);
+  if (fromTracker === "tech" || fromTracker === "marketing") {
+    return fromTracker;
+  }
+  const c = canonical.trim();
   if (MARKETING_SHEET_CATEGORIES.has(c)) {
     return "marketing";
   }
@@ -122,7 +149,7 @@ export function computeNewQueueStats(rows: Array<{ category?: string }>): NewQue
     }
   }
   const total = tech + marketing;
-  const neutralTechPct = (1 - queueMixMarketingShare()) * 100;
+  const neutralTechPct = (1 - marketingShareFromPolicy(getSearchPolicy())) * 100;
   const techPct = total > 0 ? (tech / total) * 100 : neutralTechPct;
   return { tech, marketing, total, techPct };
 }
@@ -130,6 +157,7 @@ export function computeNewQueueStats(rows: Array<{ category?: string }>): NewQue
 export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
   const techPct = stats.techPct;
   const targetMarketingShareOfBatch = queueMixMarketingShare();
+  const baseMinScore = discoveryBaseMinScore();
   if (techPct > 75) {
     return {
       mode: "heavy_tech",
@@ -138,7 +166,7 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
       targetMarketingShareOfBatch,
       minTechMatchScore: TECH_HEAVY_MIN_TECH,
       exceptionalTechMin: EXCEPTIONAL_TECH,
-      baseMinScore: BASE_MIN_SCORE,
+      baseMinScore,
     };
   }
   if (techPct > 68) {
@@ -149,7 +177,7 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
       targetMarketingShareOfBatch,
       minTechMatchScore: TECH_HEAVY_MIN_TECH,
       exceptionalTechMin: EXCEPTIONAL_TECH,
-      baseMinScore: BASE_MIN_SCORE,
+      baseMinScore,
     };
   }
   return {
@@ -157,9 +185,9 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
     techPct,
     scoringBias: "balanced",
     targetMarketingShareOfBatch,
-    minTechMatchScore: BASE_MIN_SCORE,
+    minTechMatchScore: baseMinScore,
     exceptionalTechMin: EXCEPTIONAL_TECH,
-    baseMinScore: BASE_MIN_SCORE,
+    baseMinScore,
   };
 }
 
@@ -185,30 +213,38 @@ export function selectApplyDailyBatch<T extends { category?: string }>(
   eligibleRows: T[],
   scoreOf: (row: T) => number,
 ): { selected: T[]; pickedTech: number; pickedMarketing: number } {
-  const tech = eligibleRows.filter((row) => categorySide(String(row.category ?? "")) === "tech");
-  const marketing = eligibleRows.filter((row) => categorySide(String(row.category ?? "")) === "marketing");
-  const other = eligibleRows.filter((row) => categorySide(String(row.category ?? "")) === "other");
   const byScore = (a: T, b: T) => scoreOf(b) - scoreOf(a);
-  tech.sort(byScore);
-  marketing.sort(byScore);
+  const targets = categoryBatchTargets(DAILY_APPLY_BATCH_LIMIT);
+  const buckets = new Map<string, T[]>();
+  const other: T[] = [];
+  for (const row of eligibleRows) {
+    const canonical = normalizeTrackerCategory(String(row.category ?? ""));
+    if (targets.has(canonical)) {
+      const list = buckets.get(canonical) ?? [];
+      list.push(row);
+      buckets.set(canonical, list);
+    } else {
+      other.push(row);
+    }
+  }
+  for (const list of buckets.values()) {
+    list.sort(byScore);
+  }
   other.sort(byScore);
 
-  const marketingTarget = dailyApplyMarketingTarget(DAILY_APPLY_BATCH_LIMIT);
-  const techTarget = dailyApplyTechTarget(DAILY_APPLY_BATCH_LIMIT);
-  const pickedMarketingRows = marketing.slice(0, marketingTarget);
-  const pickedTechRows = tech.slice(0, techTarget);
-  const selected: T[] = [...pickedMarketingRows, ...pickedTechRows];
-  const seen = new Set(selected);
-
-  const backfill = [...tech.slice(techTarget), ...marketing.slice(marketingTarget), ...other].sort(
-    byScore,
-  );
+  const selected: T[] = [];
+  const seen = new Set<T>();
+  for (const [canonical, target] of targets) {
+    const list = buckets.get(canonical) ?? [];
+    for (const row of list.slice(0, target)) {
+      selected.push(row);
+      seen.add(row);
+    }
+  }
+  const backfill = [...eligibleRows].filter((row) => !seen.has(row)).sort(byScore);
   for (const row of backfill) {
     if (selected.length >= DAILY_APPLY_BATCH_LIMIT) {
       break;
-    }
-    if (seen.has(row)) {
-      continue;
     }
     seen.add(row);
     selected.push(row);
@@ -235,38 +271,67 @@ export function selectDiscoveryBatch(
   limit: number,
 ): { selected: ScoredDiscoveryJob[]; addedTech: number; addedMarketing: number } {
   const eligible = candidates.filter((job) => passesDiscoveryQuality(job, policy));
-  const marketing = eligible
-    .filter((job) => categorySide(job.category) === "marketing")
-    .sort((a, b) => effectiveMarketingScore(b) - effectiveMarketingScore(a));
-  const tech = eligible
-    .filter((job) => categorySide(job.category) === "tech")
-    .sort((a, b) => b.matchScore - a.matchScore);
-  const other = eligible
-    .filter((job) => categorySide(job.category) === "other")
-    .sort((a, b) => b.matchScore - a.matchScore);
-
-  const targetMkt = Math.min(marketing.length, Math.round(limit * policy.targetMarketingShareOfBatch));
-  const pickedMkt = marketing.slice(0, targetMkt);
-  let remaining = limit - pickedMkt.length;
-  const pickedTech: ScoredDiscoveryJob[] = [];
-  for (const job of tech) {
-    if (remaining <= 0) {
-      break;
+  const targets = categoryBatchTargets(limit);
+  const buckets = new Map<string, ScoredDiscoveryJob[]>();
+  const other: ScoredDiscoveryJob[] = [];
+  for (const job of eligible) {
+    const canonical = normalizeTrackerCategory(job.category);
+    if (targets.has(canonical)) {
+      const list = buckets.get(canonical) ?? [];
+      list.push(job);
+      buckets.set(canonical, list);
+    } else {
+      other.push(job);
     }
-    pickedTech.push(job);
-    remaining -= 1;
+  }
+  const sortBucket = (a: ScoredDiscoveryJob, b: ScoredDiscoveryJob) =>
+    effectiveCategoryScore(b) - effectiveCategoryScore(a);
+  for (const list of buckets.values()) {
+    list.sort(sortBucket);
+  }
+  other.sort((a, b) => b.matchScore - a.matchScore);
+
+  const selected: ScoredDiscoveryJob[] = [];
+  const seen = new Set<ScoredDiscoveryJob>();
+  for (const [canonical, target] of targets) {
+    const list = buckets.get(canonical) ?? [];
+    for (const job of list.slice(0, target)) {
+      selected.push(job);
+      seen.add(job);
+    }
   }
   for (const job of other) {
-    if (remaining <= 0) {
+    if (selected.length >= limit) {
       break;
     }
-    pickedTech.push(job);
-    remaining -= 1;
+    if (seen.has(job)) {
+      continue;
+    }
+    seen.add(job);
+    selected.push(job);
   }
-  const selected = [...pickedMkt, ...pickedTech];
-  const addedMarketing = pickedMkt.length;
-  const addedTech = selected.length - addedMarketing;
-  return { selected, addedTech, addedMarketing };
+  for (const job of eligible) {
+    if (selected.length >= limit) {
+      break;
+    }
+    if (seen.has(job)) {
+      continue;
+    }
+    seen.add(job);
+    selected.push(job);
+  }
+  const trimmed = selected.slice(0, limit);
+  let addedMarketing = 0;
+  let addedTech = 0;
+  for (const job of trimmed) {
+    const side = categorySide(job.category);
+    if (side === "marketing") {
+      addedMarketing += 1;
+    } else if (side === "tech") {
+      addedTech += 1;
+    }
+  }
+  return { selected: trimmed, addedTech, addedMarketing };
 }
 
 export function formatMixReport(input: {
@@ -283,7 +348,9 @@ export function formatMixReport(input: {
     `queue_new_tech_pct=${input.queue.techPct.toFixed(1)}`,
     `queue_new_tech=${input.queue.tech}`,
     `queue_new_mkt=${input.queue.marketing}`,
+    `search_policy_version=${getSearchPolicy().version}`,
     `configured_mkt_share=${(queueMixMarketingShare() * 100).toFixed(0)}%`,
+    `discovery_min_score=${getSearchPolicy().discoveryMinMatchScore}`,
     `target_mkt_share_batch=${(input.policy.targetMarketingShareOfBatch * 100).toFixed(0)}%`,
     `added_tech=${input.addedTech}`,
     `added_mkt=${input.addedMarketing}`,
@@ -292,7 +359,8 @@ export function formatMixReport(input: {
   ].join("\n");
 }
 
-function effectiveMarketingScore(job: ScoredDiscoveryJob): number {
-  const boost = MARKETING_PRIORITY.get(job.category) ?? 0;
+function effectiveCategoryScore(job: ScoredDiscoveryJob): number {
+  const canonical = normalizeTrackerCategory(job.category);
+  const boost = CATEGORY_DISCOVERY_BOOST.get(canonical) ?? 0;
   return job.matchScore + boost;
 }

@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { defaultSearchPolicy, parseSearchConfigSheet, SEARCH_POLICY_DEFAULT_VERSION } from "./search-policy.js";
+
+test("default search policy uses discovery min score 70", () => {
+  const policy = defaultSearchPolicy();
+  assert.equal(policy.discoveryMinMatchScore, 70);
+  assert.equal(policy.version, SEARCH_POLICY_DEFAULT_VERSION);
+});
+
+test("parse Search Config settings and category weights", () => {
+  const policy = parseSearchConfigSheet([
+    ["Key", "Value", "Category", "Share"],
+    ["policy_version", "test-v2", "", ""],
+    ["discovery_min_match_score", "70", "", ""],
+    ["discover_enabled", "true", "", ""],
+    ["skip_discover_when_unresolved_gte", "150", "", ""],
+    ["", "", "Performance Marketing Leadership", "35"],
+    ["", "", "Revenue Systems", "25"],
+    ["", "", "Marketing Technology", "15"],
+    ["", "", "AI Solutions", "10"],
+    ["", "", "Applied AI", "10"],
+    ["", "", "Analytics & CRO", "5"],
+  ]);
+  assert.equal(policy.version, "test-v2");
+  assert.equal(policy.discoveryMinMatchScore, 70);
+  assert.equal(policy.skipDiscoverWhenUnresolvedGte, 150);
+  assert.equal(policy.categoryWeights.get("Performance Marketing Leadership"), 0.35);
+});

@@ -1,6 +1,8 @@
 import { recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
 import { computeQueueDepthSnapshot } from "./queue-depth.js";
+import { withSearchPolicy } from "../config/search-policy-runtime.js";
 import { runDiscovery } from "../discovery/run-discovery.js";
+import { loadSearchPolicyFromSheet } from "./sheets/search-config.js";
 import { log } from "../logging/logger.js";
 import { appendNativeRunLog } from "./native-run-log.js";
 import { appendDiscoveredJobs, readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
@@ -48,11 +50,13 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
       ...depth.mix,
       statusNew: depth.eligibleEmployment,
     };
-    const discovery = await runDiscovery({
+    const searchPolicy = await loadSearchPolicyFromSheet(workspace);
+    const discovery = await withSearchPolicy(searchPolicy, async () => runDiscovery({
       existingUrls,
       newQueueStats,
       boardUrls: workspace.discoveryBoardUrls,
-    });
+      sheetRows: rows,
+    }));
     if (discovery.status !== "ok" || discovery.jobs.length === 0) {
       const result: DiscoverDailyResult = {
         status: discovery.status === "ok" ? "skipped" : discovery.status === "budget_reached" ? "skipped" : "skipped",

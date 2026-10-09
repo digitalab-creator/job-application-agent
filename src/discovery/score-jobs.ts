@@ -4,18 +4,25 @@ import { completeJson } from "../llm/client.js";
 import type { RawBoardJob } from "./scan-boards.js";
 import { sheetCategoryFromDiscovery } from "./category-map.js";
 import { resolveJobLocationVerdict } from "./resolve-location-eligibility.js";
+import { getSearchPolicy } from "../config/search-policy-runtime.js";
+import { CANONICAL_TRACKER_CATEGORIES } from "./tracker-category-weights.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
 
-const SYSTEM = `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
-Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"AI|Growth|Hybrid|Other","whyItFits":"one sentence","relevant":true}]}
-category: AI = engineering/product AI roles; Growth = marketing, PPC, growth, performance; Hybrid = mixed; Other = adjacent but still plausible.
-Target mix over time: match the configured queue mix (default 50% AI / 50% Growth) — prefer labeling true growth/performance roles as Growth, not AI.
+function discoveryScoreSystemPrompt(): string {
+  const categories = CANONICAL_TRACKER_CATEGORIES.join(" | ");
+  const policy = getSearchPolicy();
+  return `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
+Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"<sheet category>","whyItFits":"one sentence","relevant":true}]}
+category MUST be exactly one of these sheet tracker categories: ${categories}
+Do not collapse into generic AI/Growth/Hybrid labels.
+Target mix follows Search Config policy ${policy.version}.
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
 relevant=false for on-site roles outside Israel Central or Tel Aviv District (e.g. Haifa, Jerusalem only) unless remote is stated.
 relevant=false when the title/snippet is clearly browser-extension SDK, client-side fraud/anti-bot R&D, or a specialist Go/Java/.NET role with no overlap to full-stack AI/product engineering.
 Discovery only sees title and snippet — apply-time fit still rejects bad matches; prefer relevant=false over inflating matchScore for niche stacks.
 Do not invent candidate facts. Base only on title and snippet.`;
+}
 
 /** Keep the sheet cell readable. */
 const LOCATION_EVIDENCE_MAX_CHARS = 140;
@@ -61,14 +68,20 @@ export async function scoreDiscoveryJobs(
   const biasLine = scoringBias === "marketing"
     ? "Queue is tech-heavy: label true growth/performance/PPC roles as Growth (not AI). Be strict on pure engineering roles."
     : "Balance AI and Growth labels honestly.";
-  const raw = await completeJson(SYSTEM, JSON.stringify({ company, scoringBias: biasLine, openings: payload }), env.llmModel, "discovery");
+  const raw = await completeJson(
+    discoveryScoreSystemPrompt(),
+    JSON.stringify({ company, scoringBias: biasLine, openings: payload, policyVersion: getSearchPolicy().version }),
+    env.llmModel,
+    "discovery",
+  );
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     return [];
   }
   const out: ScoredDiscoveryJob[] = [];
   for (const row of parsed.data.jobs) {
-    if (!row.relevant || row.matchScore < 55) {
+    const minScore = getSearchPolicy().discoveryMinMatchScore;
+    if (!row.relevant || row.matchScore < minScore) {
       continue;
     }
     const opening = openings[row.index];

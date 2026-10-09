@@ -5,6 +5,7 @@ import {
   hasEmailInputInBrowser,
   readFieldsInBrowser,
 } from "./form-browser.js";
+import { matchFieldOption, matchFieldOptionIndex } from "./match-field-option.js";
 import { answerBlockedField } from "../application/answer-blocked-field.js";
 import { answerFreeText } from "../application/answer-question.js";
 import { decideField, isNarrativeQuestion, type FieldContext } from "../application/field-map.js";
@@ -370,7 +371,7 @@ async function selectIsraelPhoneCountry(scope: FormScope, localPhone: string): P
 
 async function writeField(scope: FormScope, field: DetectedField, value: string): Promise<void> {
   if (field.type === "radio" && field.optionIndexes) {
-    const matchAt = field.options.findIndex((option) => option.toLowerCase() === value.toLowerCase() || option.toLowerCase().includes(value.toLowerCase()));
+    const matchAt = matchFieldOptionIndex(field.options, value);
     const optionIndex = field.optionIndexes[matchAt];
     if (matchAt < 0 || optionIndex === undefined) {
       throw new Error(`No radio option matching ${value}`);
@@ -430,8 +431,7 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
   if (field.id.startsWith("question_")) {
     const questionLocator = scope.locator(`[data-agent-field="${field.index}"]`);
     if (field.tag === "select" && field.options.length > 0) {
-      const match = field.options.find((option) => option.toLowerCase() === value.toLowerCase())
-        ?? field.options.find((option) => option.toLowerCase().includes(value.toLowerCase()));
+      const match = matchFieldOption(field.options, value);
       if (!match) {
         throw new Error(`No option matching ${value} for ${field.label}`);
       }
@@ -443,8 +443,7 @@ async function writeField(scope: FormScope, field: DetectedField, value: string)
   }
   if (field.tag === "select") {
     const labels = field.options;
-    const match = labels.find((option) => option.toLowerCase() === value.toLowerCase())
-      ?? labels.find((option) => option.toLowerCase().includes(value.toLowerCase()));
+    const match = matchFieldOption(labels, value);
     if (!match) {
       throw new Error(`No option matching ${value} for ${field.label}`);
     }

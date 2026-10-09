@@ -1,14 +1,21 @@
 import { candidate } from "./candidate.js";
+import type { LeadIdentity } from "../cv/lead-identity.js";
+import { resolveLeadIdentity } from "../cv/lead-identity.js";
 import type { Persona } from "../models/types.js";
 
-export function screeningMotivation(persona: Persona): string {
-  if (persona === "marketing") {
+export function screeningMotivationForLeadIdentity(identity: LeadIdentity): string {
+  if (identity === "performance") {
     return candidate.screening.motivationMarketing;
   }
-  if (persona === "technical") {
+  if (identity === "applied_ai") {
     return candidate.screening.motivationTechnical;
   }
-  return candidate.screening.motivationHybrid;
+  return candidate.screening.motivationRevenueMartech;
+}
+
+export function screeningMotivation(persona: Persona, trackerCategory?: string): string {
+  const identity = resolveLeadIdentity({ persona, trackerCategory });
+  return screeningMotivationForLeadIdentity(identity);
 }
 
 /** Short ATS motivation fields — not long cover letters or “tell us about yourself”. */

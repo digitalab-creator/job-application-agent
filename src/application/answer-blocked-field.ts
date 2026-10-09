@@ -80,6 +80,7 @@ export async function answerBlockedField(input: {
       platforms: candidate.media.platforms,
       primaryPaidMediaFocus: candidate.media.primaryPaidMediaFocus,
     },
+    workAuthorization: candidate.workAuthorization,
     approvedSkills,
     facts: allowed.map((fact) => ({ id: fact.id, text: fact.text })),
   };

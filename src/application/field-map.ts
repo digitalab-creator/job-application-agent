@@ -1,5 +1,6 @@
 import { candidate, SALARY_MAX, SALARY_MIN } from "../config/candidate.js";
 import { isShortMotivationField, screeningMotivation } from "../config/screening.js";
+import { resolveLeadIdentity } from "../cv/lead-identity.js";
 import type { Persona } from "../models/types.js";
 import { roles } from "../profile/facts.js";
 import { isOfficeCommuteQuestion, officeCommuteAnswerYes } from "./office-commute.js";
@@ -19,6 +20,7 @@ export type FieldDecision =
 
 export type FieldContext = {
   persona: Persona;
+  trackerCategory?: string;
   salaryMonthly: number;
   portfolioUrl: string;
   euRole: boolean;
@@ -289,7 +291,11 @@ function mapKnown(
   if (/city|town|עיר/i.test(label) && !/capacity/i.test(label)) {
     return fill(candidate.location.city);
   }
-  if (/country/i.test(label) && !/authorized|sponsor|eligible/i.test(label)) {
+  const citizenship = mapCitizenshipAndPassports(label, type, options);
+  if (citizenship) {
+    return citizenship;
+  }
+  if (/country/i.test(label) && !/authorized|sponsor|eligible|citizenship|passport|nationalit|אזרחות|דרכון/i.test(label)) {
     return fill(candidate.location.country);
   }
   if (/where are you (currently )?based|currently based|where do you live|current location|מיקום|איפה אתה גר/i.test(label)) {
@@ -304,8 +310,8 @@ function mapKnown(
   if (/expected salary|salary expectation|desired salary|compensation expectation|שכר/i.test(label)) {
     return fill(salaryText(label, ctx.salaryMonthly, ctx.salaryMonthly * 12));
   }
-  if (/sponsor/i.test(label)) {
-    return yesNo(false, type);
+  if (/sponsor|חסות|אשרת עבודה|אשרת-עבודה|visa sponsorship|work permit sponsorship/i.test(label)) {
+    return yesNo(candidate.workAuthorization.sponsorshipIsrael, type);
   }
   if (/authorized|authorised|eligible to work|work authorization|legally (allowed|eligible)|right to work/i.test(label)) {
     if (/united states|\bus\b|u\.s\.|canada|uk\b|united kingdom/i.test(label) && !/israel|eu|europe|eea/i.test(label)) {
@@ -321,13 +327,14 @@ function mapKnown(
     return fill(extra);
   }
   if (/years of .*(experience|software|professional)|years of hands-on|שנות ניסיון/i.test(label)) {
-    if (/ppc|paid|performance|hands-on|media|user acquisition/i.test(label) || ctx.persona === "marketing") {
+    const lead = resolveLeadIdentity({ persona: ctx.persona, trackerCategory: ctx.trackerCategory });
+    if (/ppc|paid|performance|hands-on|media|user acquisition/i.test(label) || lead === "performance") {
       return fill(`${candidate.media.ppcYears} years`);
     }
     return fill("5+ years");
   }
   if (isShortMotivationField(label, blob) && type !== "file") {
-    return fill(screeningMotivation(ctx.persona));
+    return fill(screeningMotivation(ctx.persona, ctx.trackerCategory));
   }
   if (/hebrew/i.test(label) && /language|proficiency|level/i.test(label)) {
     return fill("Native");
@@ -354,6 +361,45 @@ function salaryText(label: string, monthly: number, annual: number): string {
 
 function fill(value: string): FieldDecision {
   return { action: "fill", value, source: "candidate_profile" };
+}
+
+function mapCitizenshipAndPassports(label: string, type: string, options: string[]): FieldDecision | null {
+  const { passports, euCitizen } = candidate.workAuthorization;
+  const hasIsrael = passports.includes("Israel");
+  const hasPoland = passports.includes("Poland");
+
+  if (/dual citi|two citi|multiple citi|שני דרכונים|אזרחות כפולה/i.test(label)) {
+    return yesNo(passports.length > 1, type);
+  }
+  if (/eu citi|eea citi|member of the european|אזרח אירופ|אזרחות אירופ/i.test(label)) {
+    return yesNo(euCitizen, type);
+  }
+  if (/israeli citi|citizen of israel|אזרח ישראל|דרכון ישראלי/i.test(label)) {
+    return yesNo(hasIsrael, type);
+  }
+  if (/polish citi|citizen of poland|אזרח פולין|דרכון פולני/i.test(label)) {
+    return yesNo(hasPoland, type);
+  }
+  if (
+    /which passport|passport country|country of (citizenship|passport)|nationalit|citizenship|אזרחות|לאום|דרכון/i.test(label)
+    && !/sponsor|חסות|אשרת/i.test(label)
+  ) {
+    if (options.length > 0) {
+      const israelOpt = options.find((option) => /israel/i.test(option));
+      const polandOpt = options.find((option) => /poland/i.test(option));
+      if (type === "checkbox-group" && israelOpt && polandOpt) {
+        return { action: "check-options", values: [israelOpt, polandOpt], source: "candidate_profile" };
+      }
+      if (/poland|eu/i.test(label) && polandOpt) {
+        return fill(polandOpt);
+      }
+      if (israelOpt) {
+        return fill(israelOpt);
+      }
+    }
+    return fill(passports.join(" and "));
+  }
+  return null;
 }
 
 function yesNo(yes: boolean, type: string): FieldDecision {

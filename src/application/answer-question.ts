@@ -41,6 +41,7 @@ export async function answerFreeText(input: {
       maxMonthlyBudgetIls: candidate.media.maxMonthlyBudgetIls,
       platforms: candidate.media.platforms,
     },
+    workAuthorization: candidate.workAuthorization,
     approvedSkills,
     facts: allowed.map((fact) => ({ id: fact.id, text: fact.text })),
   };

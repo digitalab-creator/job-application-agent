@@ -356,6 +356,82 @@ test("Haifa office commute skips the job", () => {
   assert.equal(decision.action, "skip_job");
 });
 
+test("citizenship and passport questions use verified dual passports", () => {
+  const dual = decideField({
+    label: "Do you hold dual citizenship?",
+    required: true,
+    type: "select",
+    options: ["Yes", "No"],
+    ctx,
+  });
+  assert.equal(dual.action, "fill");
+  if (dual.action === "fill") {
+    assert.equal(dual.value, "Yes");
+  }
+
+  const eu = decideField({
+    label: "Are you an EU citizen?",
+    required: true,
+    type: "select",
+    options: ["Yes", "No"],
+    ctx,
+  });
+  assert.equal(eu.action, "fill");
+  if (eu.action === "fill") {
+    assert.equal(eu.value, "Yes");
+  }
+
+  const list = decideField({
+    label: "Country of citizenship",
+    required: true,
+    type: "text",
+    options: [],
+    ctx,
+  });
+  assert.equal(list.action, "fill");
+  if (list.action === "fill") {
+    assert.equal(list.value, "Israel and Poland");
+  }
+
+  const hebrew = decideField({
+    label: "האם יש לך דרכון ישראלי?",
+    required: true,
+    type: "radio",
+    options: ["כן", "לא"],
+    ctx,
+  });
+  assert.equal(hebrew.action, "fill");
+  if (hebrew.action === "fill") {
+    assert.equal(hebrew.value, "Yes");
+  }
+});
+
+test("visa sponsorship questions answer No from candidate profile", () => {
+  const english = decideField({
+    label: "Will you now or in the future require visa sponsorship?",
+    required: true,
+    type: "select",
+    options: ["Yes, I will need visa sponsorship", "No"],
+    ctx,
+  });
+  assert.equal(english.action, "fill");
+  if (english.action === "fill") {
+    assert.equal(english.value, "No");
+  }
+
+  const hebrew = decideField({
+    label: "האם תזדקק לחסות אשרת עבודה?",
+    required: true,
+    type: "radio",
+    options: ["כן", "לא"],
+    ctx,
+  });
+  assert.equal(hebrew.action, "fill");
+  if (hebrew.action === "fill") {
+    assert.equal(hebrew.value, "No");
+  }
+});
+
 test("BI analytics 1-10 scale uses grounded self rating", () => {
   const decision = decideField({
     label:

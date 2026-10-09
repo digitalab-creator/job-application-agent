@@ -1,15 +1,18 @@
 import type { CvDocument, Persona } from "../models/types.js";
 import { factById, roleById } from "../profile/facts.js";
+import { headlineForLeadIdentity, resolveLeadIdentity, skillsForLeadIdentity, summaryFactIdForLeadIdentity } from "./lead-identity.js";
 import { personaDefaults, portfolioFor } from "./persona.js";
 
 /** CV made only from approved fact text. No model wording, so it cannot invent a claim. */
 export function buildVerbatim(persona: Persona): CvDocument {
   const defaults = personaDefaults[persona];
+  const leadIdentity = resolveLeadIdentity({ persona });
+  const summaryFactId = summaryFactIdForLeadIdentity(leadIdentity);
   return {
-    headlineId: defaults.headlineId,
-    summary: textOf(defaults.summaryFactId),
-    summaryFactIds: [defaults.summaryFactId],
-    selectedSkills: [...defaults.skills],
+    headlineId: headlineForLeadIdentity(leadIdentity),
+    summary: textOf(summaryFactId),
+    summaryFactIds: [summaryFactId],
+    selectedSkills: [...skillsForLeadIdentity(leadIdentity)],
     educationFactIds: [...defaults.educationFactIds],
     includePortfolio: true,
     portfolioKey: portfolioFor(persona),

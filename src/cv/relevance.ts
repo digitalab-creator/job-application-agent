@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import type { LeadIdentity } from "./lead-identity.js";
+import { headlineForLeadIdentity, resolveLeadIdentity } from "./lead-identity.js";
 import type { CvDocument, Persona } from "../models/types.js";
 import { facts, roles } from "../profile/facts.js";
 import type { JobRequirements } from "../application/job-fit.js";
@@ -57,7 +59,11 @@ export function evaluateCvRelevance(
   };
 }
 
-export function validateCvQuality(doc: CvDocument, persona: Persona): CvQualityResult {
+export function validateCvQuality(
+  doc: CvDocument,
+  persona: Persona,
+  leadIdentity?: LeadIdentity,
+): CvQualityResult {
   const issues: string[] = [];
   if (doc.summary.trim().length < 20) {
     issues.push("summary_empty_or_too_short");
@@ -79,11 +85,9 @@ export function validateCvQuality(doc: CvDocument, persona: Persona): CvQualityR
   if (bulletTexts.some((text) => repeatedPhrase(text))) {
     issues.push("repetitive_bullets");
   }
-  if (persona === "marketing" && doc.headlineId !== "marketing-full") {
-    issues.push("wrong_persona_headline");
-  }
-  if (persona !== "marketing" && doc.headlineId !== "tech-full") {
-    issues.push("wrong_persona_headline");
+  const identity = leadIdentity ?? resolveLeadIdentity({ persona });
+  if (doc.headlineId !== headlineForLeadIdentity(identity)) {
+    issues.push("wrong_lead_identity_headline");
   }
   return { ok: issues.length === 0, issues };
 }
