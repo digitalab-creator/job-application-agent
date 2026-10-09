@@ -53,7 +53,7 @@ export function rememberSubmission(entry: LedgerEntry): void {
   fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
 }
 
-function readLedger(): LedgerEntry[] {
+export function readLedger(): LedgerEntry[] {
   const filePath = ledgerFilePath();
   if (!fs.existsSync(filePath)) {
     return [];

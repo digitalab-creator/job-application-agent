@@ -1,5 +1,5 @@
 import { applyToJob, type ApplyInput } from "./apply-job.js";
-import { attemptRecordFromResult, rememberAttemptOutcome } from "./attempt-ledger.js";
+import { attemptRecordFromResult, rememberAttemptOutcome, rememberAttemptStarted } from "./attempt-ledger.js";
 import { budgetIsOpen, budgetSnapshot } from "../budget/monthly-budget.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./daily-quota.js";
 import { withJobCost } from "../llm/cost-ledger.js";
@@ -13,6 +13,34 @@ import { isLinkedInHost, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult
 
 export async function executeApply(input: ApplyInput): Promise<ApplicationResult> {
   recordPlatformAllocationIfNeeded();
+  if (input.attemptId) {
+    rememberAttemptStarted(
+    attemptRecordFromResult(
+      {
+        attemptId: input.attemptId,
+        startedAt: input.startedAt ?? new Date().toISOString(),
+        company: input.job.company,
+        role: input.job.role,
+        url: input.job.url,
+        workspaceId: input.workspaceId,
+        runSource: input.runSource,
+        runId: input.runId,
+        batchId: input.batchId,
+        triggeredAt: input.triggeredAt,
+      },
+      {
+        status: "review",
+        jobUrl: input.job.url,
+        submitted: false,
+        confirmationDetected: false,
+        terminalOutcome: "in_progress",
+        pipeline: input.pipeline ?? emptyPipeline(),
+        notes: "stage=started",
+      },
+      input.startedAt ?? new Date().toISOString(),
+    ),
+  );
+  }
   if (!budgetIsOpen()) {
     const budget = budgetSnapshot();
     const outcome: ApplicationResult = {
@@ -75,14 +103,15 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
   } catch (error) {
     const message = error instanceof Error ? error.message : "request_failed";
     log("APPLY_EXECUTE_FAILED", { message });
+    const pipeline = input.pipeline ?? emptyPipeline();
     const outcome: ApplicationResult = {
       attemptId: input.attemptId,
       status: "review",
       jobUrl: input.job.url,
-      submitted: false,
-      confirmationDetected: false,
-      terminalOutcome: "request_failed",
-      pipeline: input.pipeline ?? emptyPipeline(),
+      submitted: pipeline.submitted ?? false,
+      confirmationDetected: pipeline.confirmed ?? false,
+      terminalOutcome: pipeline.confirmed ? "applied" : "request_failed",
+      pipeline,
       blocker: "navigation_failed",
       notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
     };

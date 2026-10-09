@@ -21,6 +21,8 @@ export type JobSheetRow = SheetRow & {
   "Applied Date"?: string;
   "Found Date"?: string;
   "Est. Salary Range"?: string;
+  "Opportunity Kind"?: string;
+  "Project Budget"?: string;
 };
 
 function workspaceRefreshToken(workspace: WorkspaceRecord): string {

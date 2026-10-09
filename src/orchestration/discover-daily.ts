@@ -1,14 +1,15 @@
 import { recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
-import { computeNewQueueStats } from "../discovery/queue-mix.js";
+import { computeQueueDepthSnapshot } from "./queue-depth.js";
 import { runDiscovery } from "../discovery/run-discovery.js";
 import { log } from "../logging/logger.js";
 import { appendNativeRunLog } from "./native-run-log.js";
-import { readJobSheetRows, appendDiscoveredJobs } from "./sheets/job-sheet.js";
+import { appendDiscoveredJobs, readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
 import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
+import { scheduleSlotKey } from "../time/jerusalem-day.js";
+import { claimScheduledSlot } from "./schedule-claim.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
-
 export type DiscoverDailyOptions = {
   workspace: WorkspaceRecord;
   runSource: "native_schedule" | "native_manual";
@@ -27,15 +28,25 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
   const startedAt = new Date().toISOString();
   let added = 0;
   try {
+    const claim = await claimScheduledSlot(workspace, "discover", runSource);
+    if (!claim.ok) {
+      const result: DiscoverDailyResult = {
+        status: "skipped",
+        added: 0,
+        notes: claim.reason,
+      };
+      return result;
+    }
     recordPlatformAllocationIfNeeded();
     const rows = await readJobSheetRows(workspace);
+    const excluded = await readExcludeCompanies(workspace);
     const existingUrls = rows
       .map((row) => String(row["Job URL"] ?? "").trim())
       .filter(Boolean);
-    const newRows = rows.filter((row) => String(row.Status ?? "").trim() === "New");
+    const depth = computeQueueDepthSnapshot(rows, excluded);
     const newQueueStats = {
-      ...computeNewQueueStats(newRows.map((row) => ({ category: String(row.Category ?? "") }))),
-      statusNew: newRows.length,
+      ...depth.mix,
+      statusNew: depth.eligibleEmployment,
     };
     const discovery = await runDiscovery({
       existingUrls,
@@ -97,7 +108,9 @@ async function finishRun(
   result: DiscoverDailyResult,
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
-  const runKey = startedAt.slice(0, 16);
+  const runKey = runSource === "native_schedule"
+    ? scheduleSlotKey("discover", workspace.timezone, new Date(startedAt))
+    : startedAt.slice(0, 16);
   await markWorkspaceRunKey(workspace.id, "discover", runKey);
   appendNativeRunLog({
     workspaceId: workspace.id,
