@@ -41,23 +41,19 @@ def ts_share_default() -> float | None:
     return float(m.group(1)) if m else None
 
 batch = ts_const("DAILY_APPLY_BATCH_LIMIT")
-tech = ts_const("DAILY_APPLY_TECH_TARGET")
-mkt = ts_const("DAILY_APPLY_MARKETING_TARGET")
 share_default = ts_share_default()
-if batch is None or tech is None or mkt is None or share_default is None:
+if batch is None or share_default is None:
     raise SystemExit("check-pick-jobs-constants: could not read queue-mix constants")
+if "queueMixMarketingShare" not in qm or "dailyApplyTechTarget" not in qm:
+    raise SystemExit("check-pick-jobs-constants: queue-mix.ts missing mix SSOT helpers")
+
+expected_mkt = round(batch * share_default)
+expected_tech = batch - expected_mkt
 
 errors: list[str] = []
 if f"dailyPickLimit ?? policy.maxAttempts ?? {batch}" not in js and f"?? {batch}" not in js:
     if str(batch) not in js:
         errors.append(f"n8n Pick Jobs should default attempt cap to {batch} (DAILY_APPLY_BATCH_LIMIT)")
-
-expected_mkt = round(batch * share_default)
-expected_tech = batch - expected_mkt
-if expected_mkt != mkt or expected_tech != tech:
-    errors.append(
-        f"queue-mix targets ({tech} tech / {mkt} mkt) differ from default share split ({expected_tech}/{expected_mkt})"
-    )
 
 if "/queue/pick" not in js:
     errors.append("n8n Pick Jobs should POST to worker /queue/pick (mix owned by queue-mix.ts)")
@@ -69,6 +65,6 @@ if errors:
     raise SystemExit(1)
 
 print(
-    f"check-pick-jobs-constants: OK (batch={batch}, tech={tech}, marketing={mkt}, share_default={share_default})"
+    f"check-pick-jobs-constants: OK (batch={batch}, tech={expected_tech}, marketing={expected_mkt}, share_default={share_default})"
 )
 PY
