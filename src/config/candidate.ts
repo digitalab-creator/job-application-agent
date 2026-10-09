@@ -42,10 +42,16 @@ export const candidate = {
     annualAmount: 300000,
   },
   salaryExpectation: {
-    minimum: 21000,
+    /** Lowest monthly figure we may enter on forms (role quotes stay above this). */
+    minimum: 20000,
     maximum: 32000,
     currency: "ILS",
     period: "month" as const,
+    /** Published-ad filtering only — not the number we quote on applications. */
+    opportunityFilter: {
+      excludeBelow: 18000,
+      processingMinimum: 20000,
+    },
   },
   languages: [
     { language: "Hebrew", level: "Native" },

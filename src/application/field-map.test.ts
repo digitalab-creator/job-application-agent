@@ -4,7 +4,7 @@ import { decideField } from "./field-map.js";
 
 const ctx = {
   persona: "technical" as const,
-  salaryMonthly: 32000,
+  salaryMonthly: 29000,
   portfolioUrl: "https://digitalab.co.il/portfolio/?capability=build",
   euRole: false,
 };
@@ -156,7 +156,7 @@ test("Hunt PPC years, budget, platforms, and about-yourself are answered from th
   }
 });
 
-test("expected salary for this senior role stays at the top of the band", () => {
+test("expected salary uses the role-specific monthly quote from apply context", () => {
   const decision = decideField({
     label: "Expected salary",
     required: true,
@@ -166,7 +166,7 @@ test("expected salary for this senior role stays at the top of the band", () => 
   });
   assert.equal(decision.action, "fill");
   if (decision.action === "fill") {
-    assert.equal(decision.value, "ILS 32,000 gross/month");
+    assert.equal(decision.value, "ILS 29,000 gross/month");
   }
 });
 

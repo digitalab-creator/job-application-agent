@@ -29,7 +29,7 @@ import type { LedgerEntry } from "./ledger.js";
 import { isExcludedApplyTarget } from "./exclude-company.js";
 import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledger.js";
 import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
-import { chooseSalary, publishedSalaryTooLow } from "./salary.js";
+import { chooseSalary, classifyPublishedSalary } from "./salary.js";
 import { resolveJobLocationEligible, resolveJobLocationVerdict } from "../discovery/resolve-location-eligibility.js";
 import { postingGoneReason, redirectedAwayReason } from "./posting-gone.js";
 import { fitLocationRejection } from "./fit-location-guard.js";
@@ -384,14 +384,37 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
 
     const skipSalaryFloor =
       input.job.opportunityKind === "freelance_project" || input.job.opportunityKind === "contract";
-    const salary = skipSalaryFloor ? { tooLow: false, detail: "" } : publishedSalaryTooLow(bodyText);
-    if (salary.tooLow) {
-      log("JOB_REJECTED_LOW_SALARY", { detail: salary.detail });
+    const salaryVerdict = skipSalaryFloor
+      ? ({ kind: "ok" as const, detail: "" })
+      : classifyPublishedSalary(bodyText);
+    if (salaryVerdict.kind === "exclude") {
+      log("JOB_REJECTED_LOW_SALARY", { detail: salaryVerdict.detail, tier: "exclude_below_18000" });
       return result(input, {
         status: "not_relevant",
         submitted: false,
         confirmationDetected: false,
-        notes: lines(["result=not_relevant", "reason=salary_below_minimum", salary.detail, "Minimum accepted: ILS 21,000/month."]),
+        notes: lines([
+          "result=not_relevant",
+          "reason=salary_below_exclude_threshold",
+          salaryVerdict.detail,
+          "Excluded: published max below ILS 18,000/month.",
+        ]),
+        screenshots,
+      });
+    }
+    if (salaryVerdict.kind === "manual_review") {
+      log("JOB_SALARY_MANUAL_REVIEW", { detail: salaryVerdict.detail, tier: "18000_to_19999" });
+      return result(input, {
+        status: "review",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: "salary_manual_review_band",
+        notes: lines([
+          "result=review",
+          "reason=salary_manual_review_band",
+          salaryVerdict.detail,
+          "Published salary is ILS 18,000–19,999/month — kept for manual review; no auto-quote of processing minimum.",
+        ]),
         screenshots,
       });
     }
