@@ -35,8 +35,35 @@ const EXCEPTIONAL_TECH = 90;
 
 /** n8n uses the worker safety cap as its maximum batch size; budget decides the real spend. */
 export const DAILY_APPLY_BATCH_LIMIT = 20;
-export const DAILY_APPLY_TECH_TARGET = 13;
-export const DAILY_APPLY_MARKETING_TARGET = 7;
+
+/** Default marketing share when `QUEUE_MIX_MARKETING_SHARE` is unset (apply + discovery SSOT). */
+export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = 0.5;
+
+/** Marketing share of tech+marketing slots (0–1). Env: `QUEUE_MIX_MARKETING_SHARE`. */
+export function queueMixMarketingShare(): number {
+  const parsed = Number(process.env.QUEUE_MIX_MARKETING_SHARE ?? String(QUEUE_MIX_MARKETING_SHARE_DEFAULT));
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    return QUEUE_MIX_MARKETING_SHARE_DEFAULT;
+  }
+  return parsed;
+}
+
+export function dailyApplyMarketingTarget(batchLimit = DAILY_APPLY_BATCH_LIMIT): number {
+  const limit = Math.max(0, Math.floor(batchLimit));
+  if (limit === 0) {
+    return 0;
+  }
+  return Math.min(limit, Math.round(limit * queueMixMarketingShare()));
+}
+
+export function dailyApplyTechTarget(batchLimit = DAILY_APPLY_BATCH_LIMIT): number {
+  const limit = Math.max(0, Math.floor(batchLimit));
+  return Math.max(0, limit - dailyApplyMarketingTarget(limit));
+}
+
+/** Derived at module load from env — used by drift checks and ops dashboards. */
+export const DAILY_APPLY_MARKETING_TARGET = dailyApplyMarketingTarget();
+export const DAILY_APPLY_TECH_TARGET = dailyApplyTechTarget();
 
 /** Skip board scan when sheet `New` rows exceed this multiple of the apply safety cap. */
 export const DISCOVER_SKIP_NEW_MULTIPLIER = DISCOVERY_SKIP_MULTIPLIER;
@@ -95,18 +122,20 @@ export function computeNewQueueStats(rows: Array<{ category?: string }>): NewQue
     }
   }
   const total = tech + marketing;
-  const techPct = total > 0 ? (tech / total) * 100 : 65;
+  const neutralTechPct = (1 - queueMixMarketingShare()) * 100;
+  const techPct = total > 0 ? (tech / total) * 100 : neutralTechPct;
   return { tech, marketing, total, techPct };
 }
 
 export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
   const techPct = stats.techPct;
+  const targetMarketingShareOfBatch = queueMixMarketingShare();
   if (techPct > 75) {
     return {
       mode: "heavy_tech",
       techPct,
       scoringBias: "marketing",
-      targetMarketingShareOfBatch: 0.6,
+      targetMarketingShareOfBatch,
       minTechMatchScore: TECH_HEAVY_MIN_TECH,
       exceptionalTechMin: EXCEPTIONAL_TECH,
       baseMinScore: BASE_MIN_SCORE,
@@ -117,7 +146,7 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
       mode: "moderate_tech",
       techPct,
       scoringBias: "marketing",
-      targetMarketingShareOfBatch: 0.5,
+      targetMarketingShareOfBatch,
       minTechMatchScore: TECH_HEAVY_MIN_TECH,
       exceptionalTechMin: EXCEPTIONAL_TECH,
       baseMinScore: BASE_MIN_SCORE,
@@ -127,7 +156,7 @@ export function rebalancePolicy(stats: NewQueueStats): RebalancePolicy {
     mode: "maintenance",
     techPct,
     scoringBias: "balanced",
-    targetMarketingShareOfBatch: 0.35,
+    targetMarketingShareOfBatch,
     minTechMatchScore: BASE_MIN_SCORE,
     exceptionalTechMin: EXCEPTIONAL_TECH,
     baseMinScore: BASE_MIN_SCORE,
@@ -164,12 +193,14 @@ export function selectApplyDailyBatch<T extends { category?: string }>(
   marketing.sort(byScore);
   other.sort(byScore);
 
-  const pickedMarketingRows = marketing.slice(0, DAILY_APPLY_MARKETING_TARGET);
-  const pickedTechRows = tech.slice(0, DAILY_APPLY_TECH_TARGET);
+  const marketingTarget = dailyApplyMarketingTarget(DAILY_APPLY_BATCH_LIMIT);
+  const techTarget = dailyApplyTechTarget(DAILY_APPLY_BATCH_LIMIT);
+  const pickedMarketingRows = marketing.slice(0, marketingTarget);
+  const pickedTechRows = tech.slice(0, techTarget);
   const selected: T[] = [...pickedMarketingRows, ...pickedTechRows];
   const seen = new Set(selected);
 
-  const backfill = [...tech.slice(DAILY_APPLY_TECH_TARGET), ...marketing.slice(DAILY_APPLY_MARKETING_TARGET), ...other].sort(
+  const backfill = [...tech.slice(techTarget), ...marketing.slice(marketingTarget), ...other].sort(
     byScore,
   );
   for (const row of backfill) {
@@ -252,6 +283,7 @@ export function formatMixReport(input: {
     `queue_new_tech_pct=${input.queue.techPct.toFixed(1)}`,
     `queue_new_tech=${input.queue.tech}`,
     `queue_new_mkt=${input.queue.marketing}`,
+    `configured_mkt_share=${(queueMixMarketingShare() * 100).toFixed(0)}%`,
     `target_mkt_share_batch=${(input.policy.targetMarketingShareOfBatch * 100).toFixed(0)}%`,
     `added_tech=${input.addedTech}`,
     `added_mkt=${input.addedMarketing}`,
