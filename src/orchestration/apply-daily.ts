@@ -9,7 +9,9 @@ import { appendNativeRunLog } from "./native-run-log.js";
 import { processFreelanceBatch } from "../freelance/process-freelance-batch.js";
 import { scheduleSlotKey } from "../time/jerusalem-day.js";
 import { claimScheduledSlot } from "./schedule-claim.js";
+import { withSearchPolicy } from "../config/search-policy-runtime.js";
 import { pickWorkspaceApplyBatch, sheetMatchScore } from "./pick-jobs.js";
+import { loadSearchPolicyFromSheet } from "./sheets/search-config.js";
 import { opportunityKindFromRow } from "../freelance/opportunity-kind.js";
 import { readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
@@ -60,8 +62,9 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
       const rows = await readJobSheetRows(workspace);
       const excluded = await readExcludeCompanies(workspace);
       setExcludedCompanies(excluded, `workspace:${workspace.id}:sheet`);
+      const searchPolicy = await loadSearchPolicyFromSheet(workspace);
       const freelance = await processFreelanceBatch(workspace, rows, dryRun);
-      const batch = pickWorkspaceApplyBatch(rows, excluded);
+      const batch = await withSearchPolicy(searchPolicy, async () => pickWorkspaceApplyBatch(rows, excluded));
       picked = batch.selected.length;
       if (picked === 0) {
         const result: ApplyDailyResult = {

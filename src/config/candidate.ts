@@ -32,6 +32,7 @@ export const candidate = {
     sponsorshipIsrael: false,
     euCitizen: true,
     euCountry: "Poland",
+    passports: ["Israel", "Poland"],
   },
   noticePeriod: "1 week after signing",
   lastSalary: {
@@ -76,15 +77,34 @@ export const candidate = {
   /** Motivation snippets for opaque ATS fields (e.g. SmartRecruiters “human-reason”). Persona picks the line. */
   screening: {
     motivationTechnical:
-      "Applied AI engineer and product builder (RAG, automation, production systems); excited to ship growth-facing product and experiments at scale.",
+      "Applied AI engineer focused on production engineering and demonstrated AI delivery (RAG, APIs, shipped product); excited to own end-to-end systems in production.",
     motivationMarketing:
-      "Performance marketing and full-funnel growth lead (10+ years paid media); I combine acquisition, measurement, and CRO with technical automation.",
+      "Performance marketing lead (10+ years): paid acquisition, budget ownership, measurement, and results across Google, Meta, and full-funnel optimization.",
     motivationHybrid:
-      "Applied AI product builder with 10+ years in performance marketing; pursuing roles that combine shipping product, experiments, and acquisition.",
+      "Revenue & MarTech lead connecting marketing, CRM, data, and operations — built and integrated CRM workflows, APIs, and attribution (not HubSpot).",
+    motivationRevenueMartech:
+      "Revenue & MarTech lead connecting marketing, CRM, data, and operations — built and integrated CRM workflows, APIs, and attribution (not HubSpot).",
+  },
+  /** Hard boundary for CV/job-fit — never claim tools the candidate has not used. */
+  crm: {
+    hasUsedHubSpot: false,
+    summary:
+      "Integrated multiple CRM platforms and built one custom CRM; has not used HubSpot.",
   },
 } as const;
 
 export type PersonaMotivation = keyof typeof candidate.screening;
+
+/** Single source of truth for forms, facts, and LLM payloads about citizenship. */
+export function workAuthorizationSummary(): string {
+  const { passports, euCitizen, euCountry, sponsorshipIsrael } = candidate.workAuthorization;
+  const passportList = passports.join(" and ");
+  const euLine = euCitizen ? ` EU citizen (${euCountry}).` : "";
+  const israelLine = sponsorshipIsrael
+    ? " May require employer visa sponsorship for work in Israel."
+    : " Authorized to work in Israel without employer visa sponsorship.";
+  return `Holds ${passportList} passports.${euLine}${israelLine}`;
+}
 
 export const SALARY_MIN = candidate.salaryExpectation.minimum;
 export const SALARY_MAX = candidate.salaryExpectation.maximum;

@@ -1,35 +1,37 @@
-import type { Persona } from "../models/types.js";
+import type { LeadIdentity } from "./lead-identity.js";
+import { leadIdentityGuidance } from "./lead-identity.js";
 
 export type JobEmphasis = {
   primaryTags: string[];
   deemphasizeTags: string[];
   guidance: string;
+  leadIdentity: LeadIdentity;
 };
 
-/** Steers fact selection so a backend posting does not read like a PPC resume. */
-export function jobEmphasis(role: string, jobText: string, persona: Persona): JobEmphasis {
+export function jobEmphasisForLeadIdentity(identity: LeadIdentity, role: string, jobText: string): JobEmphasis {
   const text = `${role} ${jobText}`.toLowerCase();
-  const backend = /backend|ai\/ml|ml engineer|llm|rag|software engineer|full[- ]?stack|microservice|python engineer|applied ai/;
-  const marketing = /ppc|performance marketing|paid acquisition|growth manager|martech|cro\b|media planning/;
-  if (persona === "marketing" || (marketing.test(text) && !backend.test(text))) {
+  const base = leadIdentityGuidance(identity);
+  if (identity === "performance") {
     return {
-      primaryTags: ["ppc", "measurement", "growth", "martech"],
-      deemphasizeTags: ["rag", "microservices"],
-      guidance:
-        "Lead with paid acquisition, measurement, budgets, and campaign outcomes. Use CaseEdge only as product/go-to-market context, not as a deep backend/RAG story.",
+      leadIdentity: identity,
+      primaryTags: ["ppc", "measurement", "budgets", "cro", "acquisition"],
+      deemphasizeTags: ["rag", "microservices", "llm"],
+      guidance: `${base} Prefer facts tagged ppc, measurement, growth. Use CaseEdge as GTM/product context only when relevant.`,
     };
   }
-  if (backend.test(text) || persona === "technical") {
+  if (identity === "revenue_martech") {
     return {
-      primaryTags: ["ai", "backend", "rag", "fullstack", "microservices", "product", "automation"],
-      deemphasizeTags: ["ppc"],
-      guidance:
-        "Lead with production AI, backend, RAG, OCR, microservices, and shipping product (especially CaseEdge and ROI Me). Do not lead with Cellcom PPC management, agency budgets, or generic paid-media campaign work unless rewritten inside a technical automation fact.",
+      leadIdentity: identity,
+      primaryTags: ["martech", "gtm", "revops", "tracking", "automation", "apis"],
+      deemphasizeTags: [],
+      guidance: `${base} Prefer facts about tracking architecture, workflows, platforms (Budget Watch), and integrations — not a laundry list of campaign tactics.`,
     };
   }
+  const backendHeavy = /backend|llm|rag|software engineer|full[- ]?stack|microservice|python engineer/.test(text);
   return {
-    primaryTags: ["ai", "automation", "ppc", "fullstack"],
-    deemphasizeTags: [],
-    guidance: "Balance technical delivery with growth outcomes. Pick facts that match both sides of the role.",
+    leadIdentity: identity,
+    primaryTags: ["ai", "backend", "rag", "product", "microservices", "automation"],
+    deemphasizeTags: ["ppc", "media planning"],
+    guidance: `${base} Prefer CaseEdge production, stack, and engineering facts.${backendHeavy ? "" : " Include solutions/architecture angles when the role is customer-facing."}`,
   };
 }

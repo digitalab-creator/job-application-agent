@@ -12,6 +12,10 @@ import {
   shouldSkipDiscoveryForQueueDepth,
   type NewQueueStats,
 } from "./queue-mix.js";
+import { marketingShareFromPolicy } from "../config/search-policy.js";
+import { getSearchPolicy } from "../config/search-policy-runtime.js";
+import { countUnresolvedSheetRows } from "../orchestration/sheet-backlog.js";
+import type { JobSheetRow } from "../orchestration/sheets/job-sheet.js";
 import { fetchBoardJobs } from "./scan-boards.js";
 import { scoreDiscoveryJobs, uniqueKeyForUrl } from "./score-jobs.js";
 
@@ -40,6 +44,7 @@ export async function runDiscovery(input: {
   existingUrls: string[];
   newQueueStats?: NewQueueStats;
   boardUrls?: string[];
+  sheetRows?: JobSheetRow[];
 }): Promise<DiscoveryResult> {
   recordPlatformAllocationIfNeeded();
   const budget = budgetSnapshot();
@@ -64,7 +69,40 @@ export async function runDiscovery(input: {
       notes: "Set JOB_DISCOVERY_BOARD_URLS to Comeet board URLs (comma-separated).",
     };
   }
-  const queueStats = input.newQueueStats ?? { tech: 0, marketing: 0, total: 0, techPct: 65 };
+  const searchPolicy = getSearchPolicy();
+  const queueStats = input.newQueueStats ?? {
+    tech: 0,
+    marketing: 0,
+    total: 0,
+    techPct: (1 - marketingShareFromPolicy(searchPolicy)) * 100,
+  };
+  if (!searchPolicy.discoverEnabled) {
+    return {
+      status: "skipped",
+      jobs: [],
+      scannedBoards: 0,
+      llmCostUsd: 0,
+      budget: budgetSnapshot(),
+      notes: `discovery_skipped=search_config\ndiscover_enabled=false\npolicy_version=${searchPolicy.version}`,
+    };
+  }
+  const unresolved = input.sheetRows ? countUnresolvedSheetRows(input.sheetRows) : 0;
+  if (unresolved >= searchPolicy.skipDiscoverWhenUnresolvedGte) {
+    return {
+      status: "skipped",
+      jobs: [],
+      scannedBoards: 0,
+      llmCostUsd: 0,
+      budget: budgetSnapshot(),
+      notes: [
+        "discovery_skipped=unresolved_backlog",
+        `unresolved_review_manual=${unresolved}`,
+        `threshold=${searchPolicy.skipDiscoverWhenUnresolvedGte}`,
+        `policy_version=${searchPolicy.version}`,
+        "Finish Review/Manual applications before adding listings.",
+      ].join("\n"),
+    };
+  }
   const applyBatchCap = DAILY_APPLY_BATCH_LIMIT;
   if (shouldSkipDiscoveryForQueueDepth(queueStats.statusNew, applyBatchCap)) {
     const threshold = applyBatchCap * DISCOVER_SKIP_NEW_MULTIPLIER;
@@ -87,8 +125,14 @@ export async function runDiscovery(input: {
       ].join("\n"),
     };
   }
-  const policy = rebalancePolicy(queueStats);
-  log("DISCOVERY_MIX_POLICY", { mode: policy.mode, techPct: policy.techPct, targetMktBatch: policy.targetMarketingShareOfBatch });
+  const mixPolicy = rebalancePolicy(queueStats);
+  log("DISCOVERY_MIX_POLICY", {
+    searchPolicyVersion: searchPolicy.version,
+    mode: mixPolicy.mode,
+    techPct: mixPolicy.techPct,
+    targetMktBatch: mixPolicy.targetMarketingShareOfBatch,
+    discoveryMinScore: searchPolicy.discoveryMinMatchScore,
+  });
 
   const existing = new Set(
     input.existingUrls
@@ -112,7 +156,7 @@ export async function runDiscovery(input: {
           continue;
         }
         const capped = fresh.slice(0, env.discoveryMaxJobsPerBoard);
-        const scored = await scoreDiscoveryJobs(boardUrl, capped, policy.scoringBias);
+        const scored = await scoreDiscoveryJobs(boardUrl, capped, mixPolicy.scoringBias);
         for (const job of scored) {
           if (!existing.has(job.uniqueKey)) {
             candidates.push(job);
@@ -125,7 +169,7 @@ export async function runDiscovery(input: {
     }
     const { selected, addedTech, addedMarketing } = selectDiscoveryBatch(
       candidates,
-      policy,
+      mixPolicy,
       env.discoveryMaxJobsPerRun,
     );
     for (const job of selected) {
@@ -137,7 +181,7 @@ export async function runDiscovery(input: {
 
   const mixReport = formatMixReport({
     queue: queueStats,
-    policy,
+    policy: mixPolicy,
     addedTech: tracked.result.addedTech,
     addedMarketing: tracked.result.addedMarketing,
   });

@@ -94,6 +94,15 @@ test("Growth Manager CV emphasizes growth outcomes rather than RAG", () => {
   assert.equal(result.decision, "pass");
 });
 
+test("Marketing Technology tracker roles use hybrid MarTech CV evidence", () => {
+  const result = evaluateCvRelevance(
+    doc("hybrid", ["GTM", "Google Ads", "APIs", "Workflow automation"], ["fullpower-tracking", "klogic-workflows", "caseedge-stack"], "Led marketing operations, tracking architecture, and automation across paid and data systems."),
+    requirements({ roleFamily: "hybrid", mustHaveSkills: ["marketing automation", "tracking", "APIs"], preferredSkills: ["Google Ads"], responsibilities: ["Run MarTech stack"] }),
+    "hybrid",
+  );
+  assert.equal(result.decision, "pass");
+});
+
 test("Analytics and CRO CV passes on verified measurement evidence", () => {
   const result = evaluateCvRelevance(
     doc("marketing", ["GA4", "GTM", "Funnel analysis", "Conversion optimization"], ["caseedge-advisory", "caseedge-campaigns"], "Improved funnel performance through tracking, analysis, experimentation, and CRO."),

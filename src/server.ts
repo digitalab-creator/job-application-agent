@@ -31,7 +31,10 @@ import type { JobSheetRow } from "./orchestration/sheets/job-sheet.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
 import { choosePersonaFromText } from "./cv/persona-from-text.js";
 import { budgetSnapshot, recordPlatformAllocationIfNeeded } from "./budget/monthly-budget.js";
+import { marketingShareFromPolicy } from "./config/search-policy.js";
 import { runDiscovery } from "./discovery/run-discovery.js";
+import { countUnresolvedSheetRows } from "./orchestration/sheet-backlog.js";
+import { loadSearchPolicyFromSheet } from "./orchestration/sheets/search-config.js";
 import { recordExternalSpend, todayCostSummary } from "./llm/cost-ledger.js";
 import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
@@ -84,6 +87,23 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && req.url?.startsWith("/quota")) {
       send(res, 200, applyPolicySnapshot());
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/search-policy")) {
+      const workspaceId = new URL(req.url, "http://local").searchParams.get("workspaceId") ?? "internal";
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const policy = await loadSearchPolicyFromSheet(workspace);
+      const rows = await readJobSheetRows(workspace);
+      send(res, 200, {
+        ...policy,
+        categoryWeights: [...policy.categoryWeights.entries()],
+        marketingShare: marketingShareFromPolicy(policy),
+        unresolvedReviewManual: countUnresolvedSheetRows(rows),
+      });
       return;
     }
     if (req.method === "GET" && (req.url === "/config/excluded-companies" || req.url?.startsWith("/config/excluded-companies?"))) {

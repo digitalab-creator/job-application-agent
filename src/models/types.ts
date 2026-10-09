@@ -34,7 +34,7 @@ export type CvRole = {
 export type PortfolioKey = "build" | "marketing" | "automation";
 
 export type CvDocument = {
-  headlineId: "tech-full" | "marketing-full";
+  headlineId: "tech-full" | "marketing-full" | "revenue-martech-full";
   summary: string;
   summaryFactIds: string[];
   selectedSkills: string[];
@@ -136,7 +136,7 @@ export type ApplicationResult = {
   status: ApplicationStatus;
   jobUrl: string;
   canonicalJobUrl?: string;
-  cvUsed?: "technical" | "marketing";
+  cvUsed?: "technical" | "marketing" | "hybrid";
   persona?: Persona;
   cvSource?: CvSource;
   cvWording?: CvWording;

@@ -60,6 +60,9 @@ const MARKETING_SKILLS = [
   "Internal tools",
   "AI-assisted analysis",
   "Workflow automation",
+  "CRM integrations",
+  "Marketing automation",
+  "Webhooks",
 ];
 
 export const personaDefaults: Record<Persona, PersonaDefaults> = {
@@ -103,13 +106,15 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
       "Docker",
       "Dashboards",
       "AI-assisted analysis",
+      "CRM integrations",
+      "Webhooks",
     ],
     roleFactIds: {
       caseedge: ["caseedge-production", "caseedge-stack", "caseedge-advisory"],
       boroda: ["boroda-platform", "boroda-accounts"],
       klogic: ["klogic-pipelines", "klogic-cellcom-mkt"],
       fullpower: ["fullpower-build", "fullpower-tracking"],
-      independent: ["independent-acquisition", "independent-adtech"],
+      independent: ["independent-crm-built", "independent-crm-integrations", "independent-adtech"],
     },
     educationFactIds: ["edu-ml-stanford", "edu-hf"],
   },

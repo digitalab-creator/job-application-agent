@@ -1,5 +1,7 @@
 import { HEADLINES, SKILLS, factById, roleById, roles } from "../profile/facts.js";
 import type { CvDocument, Persona } from "../models/types.js";
+import type { LeadIdentity } from "./lead-identity.js";
+import { headlineForLeadIdentity, resolveLeadIdentity } from "./lead-identity.js";
 import { personaDefaults } from "./persona.js";
 import { roleSignatureErrors } from "./role-signatures.js";
 
@@ -71,15 +73,17 @@ export type ValidationResult = {
   factIds: string[];
 };
 
-export function validateCv(doc: CvDocument, persona: Persona): ValidationResult {
+export function validateCv(
+  doc: CvDocument,
+  persona: Persona,
+  leadIdentity?: LeadIdentity,
+): ValidationResult {
   const errors: string[] = [];
   const factIds = new Set<string>();
-
-  if (persona === "marketing" && doc.headlineId !== "marketing-full") {
-    errors.push("Marketing persona must use the marketing headline.");
-  }
-  if (persona === "technical" && doc.headlineId !== "tech-full") {
-    errors.push("Technical persona must use the technical headline.");
+  const identity = leadIdentity ?? resolveLeadIdentity({ persona });
+  const expectedHeadline = headlineForLeadIdentity(identity);
+  if (doc.headlineId !== expectedHeadline) {
+    errors.push(`Lead identity ${identity} requires headline ${expectedHeadline}.`);
   }
   if (!HEADLINES[doc.headlineId]) {
     errors.push("Headline is not in the approved list.");

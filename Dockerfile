@@ -14,6 +14,8 @@ RUN npm install
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts/fetch-buster.mjs ./scripts/fetch-buster.mjs
+COPY scripts/migrate-tracker-categories.mjs ./scripts/migrate-tracker-categories.mjs
+COPY scripts/apply-queue-classification.mjs ./scripts/apply-queue-classification.mjs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh \
   && node scripts/fetch-buster.mjs

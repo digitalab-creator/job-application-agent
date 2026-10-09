@@ -32,7 +32,7 @@ test("heavy tech queue uses configured marketing share for discovery batch", () 
     { category: "Growth Marketing" },
   ]));
   assert.equal(policy.mode, "heavy_tech");
-  assert.equal(policy.targetMarketingShareOfBatch, 0.5);
+  assert.equal(policy.targetMarketingShareOfBatch, 0.65);
 });
 
 test("tech-heavy policy blocks 80-score Applied AI but allows 90+", () => {
@@ -41,19 +41,34 @@ test("tech-heavy policy blocks 80-score Applied AI but allows 90+", () => {
   assert.equal(passesDiscoveryQuality(job({ category: "Applied AI", matchScore: 92 }), policy), true);
 });
 
-test("apply daily batch targets 50/50 tech and marketing by default", () => {
+test("apply daily batch targets tracker category mix for a full pool", () => {
   type Row = { category: string; matchScore: number; url: string };
   const rows: Row[] = [];
-  for (let i = 0; i < 20; i += 1) {
-    rows.push({ category: "Applied AI", matchScore: 90 - i, url: `https://example.com/t${i}` });
-  }
-  for (let i = 0; i < 10; i += 1) {
-    rows.push({ category: "Growth Marketing", matchScore: 80 - i, url: `https://example.com/m${i}` });
+  const categories = [
+    "Performance Marketing Leadership",
+    "Revenue Systems",
+    "Marketing Technology",
+    "AI Solutions",
+    "Applied AI",
+    "Analytics & CRO",
+  ];
+  for (const category of categories) {
+    for (let i = 0; i < 8; i += 1) {
+      rows.push({
+        category,
+        matchScore: 90 - i,
+        url: `https://example.com/${category.replace(/\s+/g, "-")}-${i}`,
+      });
+    }
   }
   const { selected, pickedTech, pickedMarketing } = selectApplyDailyBatch(rows, (r) => r.matchScore);
   assert.equal(selected.length, 20);
-  assert.equal(pickedTech, 10);
-  assert.equal(pickedMarketing, 10);
+  const perf = selected.filter((r) => r.category === "Performance Marketing Leadership").length;
+  const revenue = selected.filter((r) => r.category === "Revenue Systems").length;
+  assert.equal(perf, 7);
+  assert.equal(revenue, 5);
+  assert.ok(pickedMarketing >= 10);
+  assert.ok(pickedTech >= 5);
 });
 
 test("batch selection prioritizes marketing when rebalancing", () => {
@@ -61,12 +76,13 @@ test("batch selection prioritizes marketing when rebalancing", () => {
   const candidates = [
     job({ category: "Applied AI", matchScore: 95, role: "AI Engineer Tel Aviv" }),
     job({ category: "Applied AI", matchScore: 88, role: "Backend Tel Aviv" }),
-    job({ category: "Growth Marketing", matchScore: 70, role: "Growth Lead Remote" }),
+    job({ category: "Performance Marketing Leadership", matchScore: 70, role: "Growth Lead Remote" }),
     job({ category: "Performance Marketing Leadership", matchScore: 72, role: "PPC Lead TLV" }),
+    job({ category: "Revenue Systems", matchScore: 71, role: "GTM Engineer TLV" }),
   ];
   const { selected, addedMarketing } = selectDiscoveryBatch(candidates, policy, 4);
   assert.ok(addedMarketing >= 2);
-  assert.ok(selected.some((row) => row.category === "Growth Marketing"));
+  assert.ok(selected.some((row) => row.category === "Performance Marketing Leadership"));
 });
 
 test("skip discover when New rows exceed 3× daily apply limit", () => {

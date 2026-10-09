@@ -1,4 +1,4 @@
-import { candidate } from "../config/candidate.js";
+import { candidate, workAuthorizationSummary } from "../config/candidate.js";
 import type { Fact, RoleRecord } from "../models/types.js";
 import { learnedFactById, learnedFacts } from "./learned-facts.js";
 
@@ -87,7 +87,7 @@ export const facts: Fact[] = [
   {
     id: "summary-technical",
     roleId: null,
-    text: "Applied AI engineer and product builder with 6+ years of software experience and 11+ years of business-domain expertise. Built production RAG, OCR, semantic search, automation and microservice systems end-to-end, from architecture and development through deployment and operations.",
+    text: "Applied AI engineer and product builder with 6+ years of software experience and 11+ years of business-domain expertise. Delivers production LLM, RAG, OCR, and backend systems end-to-end — architecture through deployment — with demonstrated shipped product (CaseEdge) and measurable AI delivery in live environments.",
     tags: ["summary", "ai", "backend"],
     personas: ["technical", "hybrid"],
     verified: true,
@@ -95,9 +95,17 @@ export const facts: Fact[] = [
   {
     id: "summary-marketing",
     roleId: null,
-    text: `Hands-on Performance Marketing and Technical Growth Lead with 10+ years of experience managing paid acquisition across Google, Meta, TikTok and Microsoft. Managed budgets ranging from SMB accounts to portfolios up to ILS ${candidate.media.maxMonthlyBudgetIls.toLocaleString("en-US")} per month, combining campaign strategy with measurement, conversion optimization and automation. Built internal optimization systems and AI-assisted workflows that improved decision-making, reduced operational workload and contributed to performance gains of up to 3x lower cost per conversion.`,
+    text: `Performance marketing lead with 10+ years hands-on paid acquisition across Google, Meta, TikTok and Microsoft. Owned budgets from SMB accounts to portfolios up to ILS ${candidate.media.maxMonthlyBudgetIls.toLocaleString("en-US")} per month, with clear accountability for measurement, conversion results, and efficient spend. Combines campaign execution with tracking, CRO, and reporting so performance decisions are grounded in data.`,
     tags: ["summary", "ppc", "measurement"],
     personas: ["marketing", "hybrid"],
+    verified: true,
+  },
+  {
+    id: "summary-revenue-martech",
+    roleId: null,
+    text: "Revenue and marketing systems lead connecting paid marketing, CRM, data pipelines, and operations. Built one custom CRM and integrated multiple other CRM platforms, plus GTM, APIs, webhooks, and workflow automation so marketing, sales, and ops share reliable data.",
+    tags: ["summary", "martech", "revops", "gtm"],
+    personas: ["hybrid", "marketing", "technical"],
     verified: true,
   },
   {
@@ -114,6 +122,38 @@ export const facts: Fact[] = [
     text: "11+ years of business-domain expertise",
     tags: ["years"],
     personas: ["both"],
+    verified: true,
+  },
+  {
+    id: "screening-crm-sales-ops",
+    roleId: null,
+    text: "CRM, marketing automation & sales operations: experience building and integrating lead management, CRM workflows, sales pipelines, and automated follow-up processes.",
+    tags: ["screening", "crm", "martech", "revops", "sales"],
+    personas: ["hybrid", "marketing", "technical"],
+    verified: true,
+  },
+  {
+    id: "screening-crm-integrations",
+    roleId: null,
+    text: "Hands-on experience with APIs, webhooks, marketing attribution, and CRM-related integrations across multiple CRM platforms.",
+    tags: ["screening", "crm", "api", "webhooks", "attribution"],
+    personas: ["hybrid", "marketing", "technical"],
+    verified: true,
+  },
+  {
+    id: "screening-crm-martech-background",
+    roleId: null,
+    text: "Strong technical background in marketing technology, automation, and data-driven optimization for revenue and operations teams.",
+    tags: ["screening", "martech", "automation"],
+    personas: ["hybrid", "marketing", "technical"],
+    verified: true,
+  },
+  {
+    id: "screening-work-authorization",
+    roleId: null,
+    text: workAuthorizationSummary(),
+    tags: ["screening", "work-authorization", "passport", "citizenship"],
+    personas: ["technical", "marketing", "hybrid", "both"],
     verified: true,
   },
   {
@@ -453,6 +493,22 @@ export const facts: Fact[] = [
     verified: true,
   },
   {
+    id: "independent-crm-built",
+    roleId: "independent",
+    text: "Built a custom CRM for lead management, sales pipelines, and automated follow-up, with API and webhook integrations to marketing and operations tools.",
+    tags: ["crm", "martech", "automation", "api", "webhooks"],
+    personas: ["hybrid", "technical", "marketing"],
+    verified: true,
+  },
+  {
+    id: "independent-crm-integrations",
+    roleId: "independent",
+    text: "Integrated multiple third-party CRM and marketing-automation platforms for agency and e-commerce clients.",
+    tags: ["crm", "martech", "integrations"],
+    personas: ["hybrid", "marketing", "technical"],
+    verified: true,
+  },
+  {
     id: "independent-agency",
     roleId: "independent",
     text: "Operated a digital agency and e-commerce projects and managed advertising budgets of up to ILS 1M.",
@@ -665,11 +721,16 @@ export const SKILLS = [
   "APIs",
   "Internal tools",
   "AI-assisted analysis",
+  "CRM integrations",
+  "Marketing automation",
+  "Webhooks",
+  "Sales pipelines",
 ] as const;
 
 export const HEADLINES = {
-  "tech-full": "Applied AI Engineer | AI Solutions Architect | Backend & Product",
-  "marketing-full": "Performance Marketing & Technical Growth Lead | PPC, Measurement & AI Automation",
+  "tech-full": "Applied AI Engineer | Production LLM, Backend Systems & Shipped Delivery",
+  "marketing-full": "Performance Marketing Lead | Acquisition, Budgets, Measurement & Results",
+  "revenue-martech-full": "Revenue & Marketing Systems | GTM, CRM, MarTech & Data Operations",
 } as const;
 
 export function allFacts(): Fact[] {
