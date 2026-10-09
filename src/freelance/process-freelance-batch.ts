@@ -3,7 +3,6 @@ import { resolveApplyCapability } from "../application/ats-capability.js";
 import { executeApply } from "../application/execute-apply.js";
 import { newAttemptId } from "../application/attempt-ledger.js";
 import { sheetMatchScore } from "../orchestration/pick-jobs.js";
-import { mapApplyResultToSheetPatch } from "../orchestration/sheet-result.js";
 import type { JobSheetRow } from "../orchestration/sheets/job-sheet.js";
 import { updateJobSheetRow } from "../orchestration/sheets/job-sheet.js";
 import type { WorkspaceRecord } from "../orchestration/workspace-types.js";
@@ -93,10 +92,6 @@ export async function processFreelanceBatch(
         const outcome = await runApply(row, url);
         if (outcome.confirmationDetected || outcome.status === "applied") {
           autoApplyConfirmed += 1;
-        }
-        if (rowNumber) {
-          const patch = mapApplyResultToSheetPatch(row, outcome, workspace.timezone);
-          await updateJobSheetRow(workspace, rowNumber, patch);
         }
         log("FREELANCE_AUTO_APPLY_DONE", {
           url,

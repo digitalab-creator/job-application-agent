@@ -10,9 +10,8 @@ import { processFreelanceBatch } from "../freelance/process-freelance-batch.js";
 import { scheduleSlotKey } from "../time/jerusalem-day.js";
 import { claimScheduledSlot } from "./schedule-claim.js";
 import { pickWorkspaceApplyBatch, sheetMatchScore } from "./pick-jobs.js";
-import { mapApplyResultToSheetPatch } from "./sheet-result.js";
 import { opportunityKindFromRow } from "../freelance/opportunity-kind.js";
-import { readExcludeCompanies, readJobSheetRows, updateJobSheetRow } from "./sheets/job-sheet.js";
+import { readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
 import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
@@ -117,10 +116,6 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
           attempted += 1;
           if (outcome.confirmationDetected || outcome.status === "applied") {
             confirmed += 1;
-          }
-          if (row.row_number) {
-            const patch = mapApplyResultToSheetPatch(row, outcome, workspace.timezone);
-            await updateJobSheetRow(workspace, row.row_number, patch);
           }
         } finally {
           releaseBrowserApply();

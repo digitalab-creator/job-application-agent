@@ -10,6 +10,7 @@ import { recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
 import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./manual-fill-guide.js";
 import { env } from "../config/env.js";
 import { isLinkedInHost, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult } from "./linkedin-easy-apply.js";
+import { syncApplyOutcomeToJobSheet } from "../orchestration/sync-apply-outcome-to-sheet.js";
 
 export async function executeApply(input: ApplyInput): Promise<ApplicationResult> {
   recordPlatformAllocationIfNeeded();
@@ -56,7 +57,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       notes: "result=budget_reached",
     };
     rememberAttempt(input, outcome);
-    return outcome;
+    return finishApply(input, outcome);
   }
   if (!quotaIsOpen()) {
     const quota = quotaSnapshot();
@@ -73,7 +74,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       notes: "result=quota_reached",
     };
     rememberAttempt(input, outcome);
-    return outcome;
+    return finishApply(input, outcome);
   }
   if (isLinkedInHost(input.job.url) && !linkedinEasyApplyEnabled()) {
     log("LINKEDIN_EASY_APPLY_DISABLED", { url: input.job.url });
@@ -81,7 +82,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     outcome.attemptId = input.attemptId;
     outcome.pipeline = input.pipeline ?? emptyPipeline();
     rememberAttempt(input, outcome);
-    return outcome;
+    return finishApply(input, outcome);
   }
   try {
     const tracked = await withJobCost(
@@ -99,7 +100,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     outcome.budget = compactBudget(budgetSnapshot());
     outcome.notes = [outcome.notes, `llm_cost_usd=${tracked.usd}`].filter(Boolean).join("\n");
     rememberAttempt(input, outcome);
-    return outcome;
+    return finishApply(input, outcome);
   } catch (error) {
     const message = error instanceof Error ? error.message : "request_failed";
     log("APPLY_EXECUTE_FAILED", { message });
@@ -117,8 +118,20 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     };
     rememberQuotaUse({ url: input.job.url, status: outcome.status });
     rememberAttempt(input, outcome);
-    return outcome;
+    return finishApply(input, outcome);
   }
+}
+
+async function finishApply(input: ApplyInput, outcome: ApplicationResult): Promise<ApplicationResult> {
+  try {
+    await syncApplyOutcomeToJobSheet(input, outcome);
+  } catch (error) {
+    log("SHEET_SYNC_UNEXPECTED", {
+      row: input.row ?? null,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return outcome;
 }
 
 function attachManualFillGuide(outcome: ApplicationResult): void {
