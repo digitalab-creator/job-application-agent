@@ -55,8 +55,8 @@ const EXCEPTIONAL_TECH = 90;
 /** n8n uses the worker safety cap as its maximum batch size; budget decides the real spend. */
 export const DAILY_APPLY_BATCH_LIMIT = 20;
 
-/** Default marketing share when `QUEUE_MIX_MARKETING_SHARE` is unset (derived from tracker category weights). */
-export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = trackerMarketingShareFromCategories();
+/** Default marketing-side share (~65%). Must match tracker-category-weights; n8n drift script reads this literal. */
+export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = 0.65;
 
 /** Marketing share of tech+marketing slots (0–1). Env: `QUEUE_MIX_MARKETING_SHARE`. */
 export function queueMixMarketingShare(): number {
