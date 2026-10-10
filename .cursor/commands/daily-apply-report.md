@@ -18,7 +18,23 @@ Optional historical day:
 python3 /opt/apps/job-application-agent/scripts/daily-apply-report.py 2026-09-29
 ```
 
-Exit code **0** = confirmed submissions met `DAILY_APPLY_LIMIT`; **1** = target not met (still print the full report).
+Machine-readable JSON (stdout):
+
+```bash
+python3 /opt/apps/job-application-agent/scripts/daily-apply-report.py --json
+python3 /opt/apps/job-application-agent/scripts/daily-apply-report.py --json 2026-10-07
+```
+
+Exit codes (business outcome — **not** “script ran OK”):
+
+| Code | `business_status.state` | Meaning |
+|------|-------------------------|---------|
+| **0** | `target_met` | Confirmed submissions ≥ daily target (`DAILY_CONFIRMED_APPLICATIONS_TARGET` / legacy `DAILY_APPLY_LIMIT`, default 10) |
+| **1** | `target_missed` | Below target, worker reachable |
+| **2** | `infrastructure_failure` | Container down or `/health` not OK |
+| **3** | `insufficient_evidence` | Cannot trust ledgers/health for the day |
+
+Human markdown report (no `--json`): same metrics, exit code follows the table above.
 
 ## Report to the user
 

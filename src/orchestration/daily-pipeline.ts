@@ -6,6 +6,7 @@ import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
 import { computeQueueDepthSnapshot } from "./queue-depth.js";
 import { readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
+import { maybeTriggerPipelineRepair } from "./pipeline-repair-trigger.js";
 
 export type DailyPipelineResult = {
   status: "ok" | "skipped" | "error";
@@ -98,7 +99,7 @@ export async function runWorkspaceDailyPipeline(input: {
     }
   }
 
-  return {
+  const result: DailyPipelineResult = {
     status: "ok",
     confirmedStart: quota0.confirmed,
     confirmedEnd: confirmed,
@@ -107,4 +108,10 @@ export async function runWorkspaceDailyPipeline(input: {
     applyRuns,
     notes: notes.join("\n"),
   };
+  maybeTriggerPipelineRepair({
+    endOfDay: true,
+    confirmedEnd: result.confirmedEnd,
+    targetConfirmed: result.targetConfirmed,
+  });
+  return result;
 }
