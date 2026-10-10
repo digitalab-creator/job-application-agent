@@ -86,9 +86,9 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     roleFactIds: {
       caseedge: ["caseedge-advisory", "caseedge-campaigns", "caseedge-launched"],
       boroda: ["boroda-accounts", "boroda-watch-mkt", "boroda-cpa", "boroda-mentor"],
-      klogic: ["klogic-cellcom-mkt", "klogic-workflows", "klogic-enterprise"],
+      klogic: ["klogic-cellcom-mkt", "klogic-workflows", "klogic-ai-implementation-lead", "klogic-enterprise"],
       fullpower: ["fullpower-paid", "fullpower-tracking", "fullpower-visibility"],
-      independent: ["independent-acquisition", "independent-markets", "independent-specialized"],
+      independent: ["independent-acquisition", "independent-supervisor-agency", "independent-specialized"],
     },
     educationFactIds: [],
   },
@@ -112,7 +112,7 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     roleFactIds: {
       caseedge: ["caseedge-production", "caseedge-stack", "caseedge-advisory"],
       boroda: ["boroda-platform", "boroda-accounts"],
-      klogic: ["klogic-pipelines", "klogic-cellcom-mkt"],
+      klogic: ["klogic-pipelines", "klogic-ai-implementation-lead", "klogic-cellcom-mkt"],
       fullpower: ["fullpower-build", "fullpower-tracking"],
       independent: ["independent-crm-built", "independent-crm-integrations", "independent-adtech"],
     },

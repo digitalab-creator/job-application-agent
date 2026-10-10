@@ -415,6 +415,14 @@ export const facts: Fact[] = [
     verified: true,
   },
   {
+    id: "klogic-ai-implementation-lead",
+    roleId: "klogic",
+    text: "Led AI implementation for paid media at K Logic, mentoring PPC and analytics staff on adopting AI-assisted workflows, tooling, and measurement practices.",
+    tags: ["leadership", "ai", "ppc"],
+    personas: ["technical", "marketing", "hybrid"],
+    verified: true,
+  },
+  {
     id: "klogic-enterprise",
     roleId: "klogic",
     text: "Combined hands-on campaign management with experimentation, automation and scalable optimization processes for enterprise-level activity.",
@@ -532,6 +540,14 @@ export const facts: Fact[] = [
     text: "Operated a digital agency and e-commerce projects and managed advertising budgets of up to ILS 1M.",
     tags: ["ppc", "ecommerce"],
     personas: ["technical", "both"],
+    verified: true,
+  },
+  {
+    id: "independent-supervisor-agency",
+    roleId: "independent",
+    text: "While freelancing, supervised PPC and media buyers at a performance marketing agency — owning campaign QA, optimization standards, daily priorities, and client-facing delivery for the team.",
+    tags: ["ppc", "leadership"],
+    personas: ["marketing", "hybrid"],
     verified: true,
   },
   {
