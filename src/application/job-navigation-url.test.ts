@@ -30,6 +30,12 @@ test("legacy boards.greenhouse.io job links resolve to job-boards embed first", 
   assert.equal(navigationRetryUrls("https://boards.greenhouse.io/appsflyer/jobs/5471204")[0], urls[0]);
 });
 
+test("legacy boards.greenhouse.io links omit raw boards host when embed alternatives exist", () => {
+  const urls = navigationRetryUrls("https://boards.greenhouse.io/yotpo/jobs/4172038002");
+  assert.equal(urls[0], "https://job-boards.greenhouse.io/embed/job_app?for=yotpo&token=4172038002");
+  assert.ok(!urls.some((u) => /^https:\/\/boards\.greenhouse\.io\//i.test(u)));
+});
+
 test("payoneer embed token URLs stay on job-boards", () => {
   const urls = greenhouseJobPostUrls("https://job-boards.greenhouse.io/embed/job_app?for=payoneer&token=8185354");
   assert.equal(urls[0], "https://job-boards.greenhouse.io/embed/job_app?for=payoneer&token=8185354");

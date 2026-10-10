@@ -108,5 +108,10 @@ export function navigationRetryUrls(url: string): string[] {
   const fromPost = greenhouseJobPostUrls(url);
   const greenhouse = greenhouseBoardUrls(url);
   const directBoard = directGreenhouseUrlsForCareersUrl(url);
-  return [...new Set([...fromPost, ...greenhouse, url.trim(), normalized, ...directBoard].filter(Boolean))];
+  const raw = url.trim();
+  const preferEmbedFirst = fromPost.length > 0 || greenhouse.length > 0 || directBoard.length > 0;
+  const legacyBoard = preferEmbedFirst && /^https:\/\/boards\.greenhouse\.io\//i.test(raw)
+    ? []
+    : [raw, normalized];
+  return [...new Set([...fromPost, ...greenhouse, ...directBoard, ...legacyBoard].filter(Boolean))];
 }
