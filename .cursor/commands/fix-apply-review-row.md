@@ -4,6 +4,10 @@
 
 Root: `/opt/apps/job-application-agent` (only job product repo). Applies via worker `POST /apply` or native `POST /workspaces/:id/apply-run`; n8n apply workflow is archived/inactive.
 
+## Unattended repair safety
+
+`/repair-apply-pipeline` and scheduled triggers **must not** use `ignoreLedger:true` or `submit:true`. Those flags are for **interactive** one-row fixes in this command only. Real apply bypasses duplicate protection — never automate it.
+
 ## 1. Triage (agent must run first)
 
 ```bash

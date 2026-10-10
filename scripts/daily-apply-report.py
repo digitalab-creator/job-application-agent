@@ -1168,6 +1168,9 @@ def print_report(day: str | None = None) -> int:
     )
 
     eligible_attempts = len([r for r in attempts if r.get("outcome") != "in_progress"])
+    failed_blockers = Counter(
+        attempt_outcome_label(r) for r in attempts if not r.get("confirmationDetected")
+    )
     in_progress = len([r for r in attempts if r.get("outcome") == "in_progress"])
     reconciled_apps = len(
         [r for r in attempts if str(r.get("notes", "")).startswith("reconciled_from_applications")]
@@ -1464,10 +1467,6 @@ def print_report(day: str | None = None) -> int:
 
     print_manual_queue_block(day)
 
-    failed_blockers = Counter(
-        attempt_outcome_label(r) for r in attempts if not r.get("confirmationDetected")
-    )
-
     print("## Suggested next steps")
     if any("Comeet careers.js" in b for b in blockers):
         print("- Fix Comeet submit: skip `file` inputs in `submit-application.ts` Angular sync loop; redeploy.")
@@ -1486,13 +1485,127 @@ def print_report(day: str | None = None) -> int:
         print("- Re-trigger apply after fix: n8n webhook `job-apply-run` or wait for scheduled apply.")
     print()
 
-    if infra_blockers:
-        return 2
-    return 0
+    snapshot = _business_snapshot_from_locals(
+        day=day,
+        confirmed_count=len(confirmed),
+        eligible_attempts=eligible_attempts,
+        daily_target=_daily_confirmed_target(),
+        infra_blockers=infra_blockers,
+        health=health,
+        attempts=attempts,
+        queue=queue,
+        opened_attempts=opened_attempts,
+        fit_passed=fit_passed,
+        cv_quality_passed=cv_quality_passed,
+        submitted=submitted,
+        failed_blockers=failed_blockers,
+        daily_remaining=daily_remaining,
+        attempt_cap=attempt_cap,
+    )
+    return _exit_code_for_snapshot(snapshot)
+
+
+def _infra_codes(blockers: list[str]) -> list[str]:
+    codes: list[str] = []
+    for item in blockers:
+        low = item.lower()
+        if "container" in low:
+            codes.append("worker_container_down")
+        elif "/health" in low:
+            codes.append("worker_health_not_ok")
+        else:
+            codes.append(item[:80])
+    return codes
+
+
+def _daily_confirmed_target() -> int:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        from apply_pipeline.config import daily_confirmed_target
+
+        return daily_confirmed_target()
+    except ImportError:
+        return 10
+
+
+def _business_snapshot_from_locals(**kwargs) -> dict:
+    infra = list(kwargs.get("infra_blockers") or [])
+    health = kwargs.get("health") or {}
+    attempts = kwargs.get("attempts") or []
+    insufficient = not health and not attempts and "worker_container_down" in infra
+    failed = kwargs.get("failed_blockers") or {}
+    dominant = sorted(failed.items(), key=lambda item: (-item[1], item[0]))[:8]
+    queue = kwargs.get("queue") or {}
+    attempt_cap = int(kwargs.get("attempt_cap") or 20)
+    daily_remaining = float(kwargs.get("daily_remaining") or 0)
+    recovery: list[str] = []
+    actionable = int(queue.get("automatable_new") or queue.get("eligible_employment") or 0) if queue else 0
+    if daily_remaining > 0 and actionable < attempt_cap:
+        recovery.append("run_discover_or_add_sheet_rows")
+    return {
+        "day": kwargs["day"],
+        "timezone": "Asia/Jerusalem",
+        "daily_target": kwargs["daily_target"],
+        "confirmed_count": kwargs["confirmed_count"],
+        "attempt_count": kwargs["eligible_attempts"],
+        "actionable_queue_size": actionable,
+        "funnel": {
+            "opened": kwargs.get("opened_attempts", 0),
+            "fit_passed": kwargs.get("fit_passed", 0),
+            "cv_quality_passed": kwargs.get("cv_quality_passed", 0),
+            "submitted": kwargs.get("submitted", 0),
+            "confirmed": kwargs["confirmed_count"],
+        },
+        "dominant_blockers": [{"blocker": k, "count": v} for k, v in dominant],
+        "recovery_opportunities": recovery,
+        "infrastructure_failure": bool(infra),
+        "infrastructure_blockers": _infra_codes(infra),
+        "insufficient_evidence": insufficient,
+        "insufficient_evidence_reason": "no_health_and_no_attempts" if insufficient else "",
+    }
+
+
+def _exit_code_for_snapshot(snapshot: dict) -> int:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        from apply_pipeline.business_status import business_status_from_snapshot
+
+        return business_status_from_snapshot(snapshot).exit_code
+    except ImportError:
+        if snapshot.get("infrastructure_failure"):
+            return 2
+        if int(snapshot.get("confirmed_count") or 0) >= int(snapshot.get("daily_target") or 10):
+            return 0
+        return 1
+
+
+def build_json_report(day: str | None = None) -> tuple[dict, int]:
+    """Structured report + exit code without printing markdown."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from apply_pipeline.business_status import business_status_from_snapshot
+    from apply_pipeline.daily_snapshot import gather_daily_snapshot, production_sha
+
+    snapshot = gather_daily_snapshot(day)
+    status = business_status_from_snapshot(snapshot)
+    payload = {
+        **snapshot,
+        "business_status": status.as_dict(),
+        "production_sha": production_sha(),
+    }
+    return payload, status.exit_code
 
 
 def main() -> None:
-    day = sys.argv[1] if len(sys.argv) > 1 else None
+    argv = sys.argv[1:]
+    as_json = False
+    if "--json" in argv:
+        as_json = True
+        argv = [a for a in argv if a != "--json"]
+    day = argv[0] if argv else None
+    if as_json:
+        payload, code = build_json_report(day)
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        raise SystemExit(code)
     raise SystemExit(print_report(day))
 
 
