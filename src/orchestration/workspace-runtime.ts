@@ -1,4 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  internalCandidateProfile,
+  withCandidateProfile,
+  type CandidateProfile,
+} from "../config/candidate.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { decryptSecret } from "./crypto.js";
 
@@ -23,6 +28,7 @@ export type WorkspaceRuntime = {
   mailboxRefreshToken?: string;
   googleRefreshToken?: string;
   greenhouseOtpWebhookUrl?: string | null;
+  profile?: CandidateProfile;
 };
 
 const storage = new AsyncLocalStorage<WorkspaceRuntime>();
@@ -32,7 +38,22 @@ export function getWorkspaceRuntime(): WorkspaceRuntime | undefined {
 }
 
 export function withWorkspaceRuntime<T>(runtime: WorkspaceRuntime, fn: () => Promise<T>): Promise<T> {
-  return storage.run(runtime, fn);
+  const run = () => storage.run(runtime, fn);
+  if (runtime.profile) {
+    return withCandidateProfile(runtime.profile, run);
+  }
+  return run();
+}
+
+/** Workspace row wins. Internal with an empty profile uses the code seed. Any other buyer must have a profile. */
+export function profileForWorkspace(workspace: Pick<WorkspaceRecord, "id" | "profile">): CandidateProfile {
+  if (workspace.profile) {
+    return workspace.profile;
+  }
+  if (workspace.id === "internal") {
+    return internalCandidateProfile;
+  }
+  throw new Error(`Workspace ${workspace.id} has no candidate profile. Store profile_json before applying.`);
 }
 
 export function runtimeFromWorkspace(
@@ -53,6 +74,7 @@ export function runtimeFromWorkspace(
     mailboxRefreshToken: mailboxEnc ? decryptSecret(mailboxEnc) : undefined,
     googleRefreshToken: googleEnc ? decryptSecret(googleEnc) : undefined,
     greenhouseOtpWebhookUrl: workspace.greenhouseOtpWebhookUrl,
+    profile: profileForWorkspace(workspace),
     ...extras,
   };
 }

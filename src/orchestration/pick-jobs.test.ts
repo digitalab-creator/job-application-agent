@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { selectApplyDailyBatch } from "../discovery/queue-mix.js";
 import { filterEligibleApplyRows, pickWorkspaceApplyBatch, sheetMatchScore } from "./pick-jobs.js";
 import type { JobSheetRow } from "./sheets/job-sheet.js";
 
@@ -95,4 +96,15 @@ test("pickWorkspaceApplyBatch respects eligibility and mix", () => {
   assert.equal(batch.selected.length, 2);
   assert.equal(batch.pickedTech, 1);
   assert.equal(batch.pickedMarketing, 1);
+  const sorted = [...eligible].sort(
+    (a, b) =>
+      sheetMatchScore(b) - sheetMatchScore(a)
+      || String(b["Found Date"] ?? "").localeCompare(String(a["Found Date"] ?? "")),
+  );
+  const mapped = sorted.map((row) => ({ row, category: String(row.Category ?? "") }));
+  const ssot = selectApplyDailyBatch(mapped, (item) => sheetMatchScore(item.row));
+  assert.deepEqual(
+    batch.selected.map((row) => row.row_number),
+    ssot.selected.map((item) => item.row.row_number),
+  );
 });

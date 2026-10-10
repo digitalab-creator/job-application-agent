@@ -18,6 +18,8 @@ employer, degree, certification, authorization, language, or years of experience
 The skillInventory list is a hint for spelling only — every supported must-have MUST cite at least one verified fact id
 whose text explicitly covers that skill (e.g. React requires a fact mentioning React or TypeScript frontend work).
 Extract requirements first, then compare them against facts. A missing preferred skill is not a blocker.
+Office software (Google Sheets, Excel, PowerPoint, email) and personality traits (attention to detail, teamwork, communication, adaptability, independence) are preferred skills, never must-have skills and never hard blockers.
+When a verified fact says the candidate trained, mentored, or recruited people in the same function, that fact supports requirements worded as team management, team development, mentoring, or coaching. Cite that fact as supported. Do not mark those requirements missing when such a fact exists.
 For every must-have skill, emit one requirementEvidence row with status supported (and factIds) or missing (empty factIds).
 Mark a hard blocker only when the requirement is genuinely mandatory and incompatible.
 Choose exactly one persona: technical, marketing, or hybrid. Do not default unknown or unrelated roles to technical.

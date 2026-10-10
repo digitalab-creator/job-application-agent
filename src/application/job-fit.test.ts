@@ -61,6 +61,33 @@ test("central unsupported Java requirement is skipped", () => {
   assert.equal(result.decision, "skip");
 });
 
+test("office software and soft traits do not block a supported fit", () => {
+  const result = evaluateJobFit(analysis({
+    missingMustHaves: ["Google Sheets", "High attention to detail"],
+    requirementEvidence: [
+      ...analysis().requirementEvidence,
+      { requirement: "Google Sheets", factIds: [], status: "missing" },
+      { requirement: "High attention to detail", factIds: [], status: "missing" },
+    ],
+  }));
+  assert.equal(result.decision, "apply");
+  assert.equal(result.missingMustHaves.includes("Google Sheets"), false);
+  assert.match(result.risks.join(" "), /Google Sheets/);
+});
+
+test("a verified mentoring fact covers a team-development must-have", () => {
+  const result = evaluateJobFit(analysis({
+    missingMustHaves: ["Team management and development"],
+    requirementEvidence: [
+      ...analysis().requirementEvidence,
+      { requirement: "Team management and development", factIds: [], status: "missing" },
+    ],
+  }));
+  assert.equal(result.decision, "apply");
+  assert.equal(result.missingMustHaves.includes("Team management and development"), false);
+  assert.match(result.risks.join(" "), /mentoring or training/);
+});
+
 test("junior or internship role is never autonomously applied", () => {
   const result = evaluateJobFit(analysis({
     requirements: { ...analysis().requirements, seniority: "intern" },

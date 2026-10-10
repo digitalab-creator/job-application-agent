@@ -1,5 +1,54 @@
-/** Identity the user stated directly. Job facts live in the fact pool, not here. */
-export const candidate = {
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/**
+ * Buyer identity for forms, CV, and fit. Workspace `internal` is seeded from
+ * `internalCandidateProfile`. A run installs another buyer's copy via `withCandidateProfile`.
+ */
+export type CandidateProfile = {
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  phone: { local: string; display: string; international: string };
+  location: { city: string; country: string };
+  workLocation: { willingToCommuteToEligibleOffices: boolean };
+  linkedin: string;
+  github: string;
+  portfolio: { marketing: string; build: string; automation: string };
+  workAuthorization: {
+    israel: boolean;
+    sponsorshipIsrael: boolean;
+    euCitizen: boolean;
+    euCountry: string;
+    passports: string[];
+  };
+  noticePeriod: string;
+  lastSalary: { amount: number; currency: string; period: "month" | "year"; annualAmount: number };
+  salaryExpectation: {
+    minimum: number;
+    maximum: number;
+    currency: string;
+    period: "month" | "year";
+    opportunityFilter: { excludeBelow: number; processingMinimum: number };
+  };
+  languages: Array<{ language: string; level: string }>;
+  media: {
+    ppcYears: number;
+    maxMonthlyBudgetIls: number;
+    primaryPaidMediaFocus: string;
+    platforms: string[];
+  };
+  screening: {
+    motivationTechnical: string;
+    motivationMarketing: string;
+    motivationHybrid: string;
+    motivationRevenueMartech: string;
+  };
+  crm: { hasUsedHubSpot: boolean; summary: string };
+};
+
+/** Seed for workspace `internal` only. Not a product rule for every buyer. */
+export const internalCandidateProfile: CandidateProfile = {
   firstName: "Or",
   lastName: "Shvartz",
   fullName: "Or Shvartz",
@@ -97,13 +146,56 @@ export const candidate = {
     summary:
       "Integrated multiple CRM platforms and built one custom CRM; has not used HubSpot.",
   },
-} as const;
+};
 
-export type PersonaMotivation = keyof typeof candidate.screening;
+export type PersonaMotivation = keyof CandidateProfile["screening"];
+
+const profileStore = new AsyncLocalStorage<CandidateProfile>();
+
+/** Profile for the current run, or the internal seed when no workspace is installed. */
+export function activeCandidate(): CandidateProfile {
+  return profileStore.getStore() ?? internalCandidateProfile;
+}
+
+export function withCandidateProfile<T>(profile: CandidateProfile, fn: () => Promise<T>): Promise<T> {
+  return profileStore.run(profile, fn);
+}
+
+/**
+ * Reads follow the active workspace profile. Call sites keep `candidate.email`
+ * and still see the buyer for this run.
+ */
+export const candidate: CandidateProfile = new Proxy(internalCandidateProfile, {
+  get(_target, prop, receiver) {
+    return Reflect.get(activeCandidate(), prop, receiver);
+  },
+});
+
+export function parseCandidateProfile(value: unknown): CandidateProfile | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const row = value as Partial<CandidateProfile>;
+  if (!row.email?.trim() || !row.fullName?.trim() || !row.phone?.international?.trim()) {
+    return null;
+  }
+  if (!row.salaryExpectation || !row.media || !row.screening || !row.workAuthorization) {
+    return null;
+  }
+  return row as CandidateProfile;
+}
+
+export function salaryMinimum(): number {
+  return activeCandidate().salaryExpectation.minimum;
+}
+
+export function salaryMaximum(): number {
+  return activeCandidate().salaryExpectation.maximum;
+}
 
 /** Single source of truth for forms, facts, and LLM payloads about citizenship. */
 export function workAuthorizationSummary(): string {
-  const { passports, euCitizen, euCountry, sponsorshipIsrael } = candidate.workAuthorization;
+  const { passports, euCitizen, euCountry, sponsorshipIsrael } = activeCandidate().workAuthorization;
   const passportList = passports.join(" and ");
   const euLine = euCitizen ? ` EU citizen (${euCountry}).` : "";
   const israelLine = sponsorshipIsrael
@@ -111,6 +203,3 @@ export function workAuthorizationSummary(): string {
     : " Authorized to work in Israel without employer visa sponsorship.";
   return `Holds ${passportList} passports.${euLine}${israelLine}`;
 }
-
-export const SALARY_MIN = candidate.salaryExpectation.minimum;
-export const SALARY_MAX = candidate.salaryExpectation.maximum;

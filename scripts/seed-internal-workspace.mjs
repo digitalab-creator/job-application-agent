@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
 );
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_refresh_token_enc TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_email TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS profile_json JSONB;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_outcome_run_key TEXT;
 `);
 
 await client.query(

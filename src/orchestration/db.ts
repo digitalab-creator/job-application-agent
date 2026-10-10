@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { internalCandidateProfile } from "../config/candidate.js";
 import { log } from "../logging/logger.js";
 
 let pool: Pool | null = null;
@@ -56,6 +57,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   apply_attempts_path TEXT,
   last_discover_run_key TEXT,
   last_apply_run_key TEXT,
+  last_outcome_run_key TEXT,
+  profile_json JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -74,6 +77,15 @@ CREATE INDEX IF NOT EXISTS orchestration_runs_workspace_started ON orchestration
 
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_refresh_token_enc TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_email TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS profile_json JSONB;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_outcome_run_key TEXT;
+
+CREATE TABLE IF NOT EXISTS email_message_dedupe (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  gmail_message_id TEXT NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (workspace_id, gmail_message_id)
+);
 `;
 
 export async function ensureWorkspaceSchema(): Promise<void> {
@@ -84,6 +96,17 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   try {
     await withDb(async (client) => {
       await client.query(WORKSPACES_DDL);
+      const seeded = await client.query(
+        `UPDATE workspaces
+         SET profile_json = $1::jsonb, updated_at = NOW()
+         WHERE id = 'internal'
+           AND (profile_json IS NULL OR profile_json = '{}'::jsonb)
+         RETURNING id`,
+        [JSON.stringify(internalCandidateProfile)],
+      );
+      if ((seeded.rowCount ?? 0) > 0) {
+        log("WORKSPACE_PROFILE_SEEDED", { workspaceId: "internal" });
+      }
     });
     log("WORKSPACE_SCHEMA_READY", {});
   } catch (error) {

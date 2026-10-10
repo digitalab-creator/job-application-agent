@@ -3,7 +3,7 @@
   "createdAt": "2026-09-28T08:20:57.578Z",
   "id": "oreaKVjt7ifi0i6a",
   "name": "Discover jobs (daily)",
-  "active": true,
+  "active": false,
   "isArchived": false,
   "nodes": [
     {
