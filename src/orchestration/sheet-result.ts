@@ -15,6 +15,13 @@ const STATUS_LABELS: Record<string, string> = {
   manual_required: "Manual",
 };
 
+const BLOCKER_STATUS: Record<string, string> = {
+  access_blocked: "Review",
+  job_description_unavailable: "Review",
+  login_wall: "Manual",
+  non_specific_posting: "Not Relevant",
+};
+
 export function mapApplyResultToSheetPatch(
   src: JobSheetRow,
   res: ApplicationResult,
@@ -31,7 +38,8 @@ export function mapApplyResultToSheetPatch(
   const status =
     res.blocker === "captcha"
       ? "Manual"
-      : (STATUS_LABELS[res.status] ?? "Review");
+      : (res.blocker && BLOCKER_STATUS[res.blocker])
+        ?? (STATUS_LABELS[res.status] ?? "Review");
   const notes = [
     res.notes || "Worker returned no notes.",
     res.attemptId ? `attempt_id=${res.attemptId}` : "",

@@ -26,4 +26,19 @@ test("parse Search Config settings and category weights", () => {
   assert.equal(policy.discoveryMinMatchScore, 70);
   assert.equal(policy.skipDiscoverWhenUnresolvedGte, 150);
   assert.equal(policy.categoryWeights.get("Performance Marketing Leadership"), 0.35);
+  assert.equal(policy.configSource, "sheet_category_table");
+});
+
+test("parse live Search Config column headers (Search Category / Preference / Value)", () => {
+  const policy = parseSearchConfigSheet([
+    ["Search Category", "Titles / Keywords", "Preference", "Value"],
+    ["discovery_min_match_score", "", "", "72"],
+    ["discover_enabled", "", "", "true"],
+    ["Performance Marketing Leadership", "ppc", "", "35"],
+    ["Applied AI", "ai engineer", "", "15"],
+  ]);
+  assert.equal(policy.discoveryMinMatchScore, 72);
+  assert.equal(policy.discoverEnabled, true);
+  assert.ok(policy.categoryWeights.get("Performance Marketing Leadership") ?? 0 > 0);
+  assert.ok(policy.parseWarnings.length >= 0);
 });

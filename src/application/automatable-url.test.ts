@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isAutomatableApplyUrl, parseHttpUrl } from "./automatable-url.js";
+import { extractHttpUrlFromCell, isAutomatableApplyUrl, parseHttpUrl } from "./automatable-url.js";
 
 test("Comeet, Workable, LinkedIn, and company career pages are attempted", () => {
   assert.equal(
@@ -35,4 +35,11 @@ test("URL validation rejects malformed and non-web schemes before navigation", (
   const parsed = parseHttpUrl("https://jobs.example/apply");
   assert.ok(parsed);
   assert.equal(parsed.hostname, "jobs.example");
+});
+
+test("extractHttpUrlFromCell pulls URL before trailing notes", () => {
+  const url = extractHttpUrlFromCell(
+    "https://boards.greenhouse.io/acme/jobs/1 see also company site",
+  );
+  assert.equal(url, "https://boards.greenhouse.io/acme/jobs/1");
 });

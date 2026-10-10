@@ -1,3 +1,4 @@
+import { extractHttpUrlFromCell } from "../application/automatable-url.js";
 import { resolveApplyCapability } from "../application/ats-capability.js";
 import { hostIsCooling } from "../application/rate-limit.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
@@ -21,7 +22,7 @@ export function isEligibleApplySheetRow(row: JobSheetRow): boolean {
   if (status !== "New" && !retryUpload) {
     return false;
   }
-  const url = String(row["Job URL"] ?? "").trim();
+  const url = extractHttpUrlFromCell(String(row["Job URL"] ?? "")) ?? String(row["Job URL"] ?? "").trim();
   if (hostIsCooling(url)) {
     return false;
   }

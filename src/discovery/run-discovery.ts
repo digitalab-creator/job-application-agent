@@ -14,7 +14,10 @@ import {
 } from "./queue-mix.js";
 import { marketingShareFromPolicy } from "../config/search-policy.js";
 import { getSearchPolicy } from "../config/search-policy-runtime.js";
-import { countUnresolvedSheetRows } from "../orchestration/sheet-backlog.js";
+import {
+  countUnresolvedSheetRows,
+  shouldSkipDiscoveryForUnresolvedBacklog,
+} from "../orchestration/sheet-backlog.js";
 import type { JobSheetRow } from "../orchestration/sheets/job-sheet.js";
 import { fetchBoardJobs } from "./scan-boards.js";
 import { scoreDiscoveryJobs, uniqueKeyForUrl } from "./score-jobs.js";
@@ -45,6 +48,8 @@ export async function runDiscovery(input: {
   newQueueStats?: NewQueueStats;
   boardUrls?: string[];
   sheetRows?: JobSheetRow[];
+  /** Automatable employment rows in Status=New (supported ATS auto-apply). */
+  actionableAutomatable?: number;
 }): Promise<DiscoveryResult> {
   recordPlatformAllocationIfNeeded();
   const budget = budgetSnapshot();
@@ -86,8 +91,16 @@ export async function runDiscovery(input: {
       notes: `discovery_skipped=search_config\ndiscover_enabled=false\npolicy_version=${searchPolicy.version}`,
     };
   }
+  const applyBatchCap = DAILY_APPLY_BATCH_LIMIT;
   const unresolved = input.sheetRows ? countUnresolvedSheetRows(input.sheetRows) : 0;
-  if (unresolved >= searchPolicy.skipDiscoverWhenUnresolvedGte) {
+  const actionableAutomatable = input.actionableAutomatable ?? 0;
+  const pauseDiscoveryBacklog = shouldSkipDiscoveryForUnresolvedBacklog({
+    unresolvedReviewManual: unresolved,
+    actionableAutomatable,
+    threshold: searchPolicy.skipDiscoverWhenUnresolvedGte,
+    minActionableToPauseDiscovery: applyBatchCap,
+  });
+  if (pauseDiscoveryBacklog) {
     return {
       status: "skipped",
       jobs: [],
@@ -97,13 +110,14 @@ export async function runDiscovery(input: {
       notes: [
         "discovery_skipped=unresolved_backlog",
         `unresolved_review_manual=${unresolved}`,
+        `actionable_automatable=${actionableAutomatable}`,
         `threshold=${searchPolicy.skipDiscoverWhenUnresolvedGte}`,
+        `min_actionable_to_pause=${applyBatchCap}`,
         `policy_version=${searchPolicy.version}`,
-        "Finish Review/Manual applications before adding listings.",
+        "Review/Manual backlog is high while actionable New supply is still sufficient — finish manual work before adding listings.",
       ].join("\n"),
     };
   }
-  const applyBatchCap = DAILY_APPLY_BATCH_LIMIT;
   if (shouldSkipDiscoveryForQueueDepth(queueStats.statusNew, applyBatchCap)) {
     const threshold = applyBatchCap * DISCOVER_SKIP_NEW_MULTIPLIER;
     log("DISCOVERY_SKIPPED_QUEUE_DEPTH", {

@@ -4,6 +4,7 @@ import { localScheduleParts, scheduleSlotKey } from "../time/jerusalem-day.js";
 import { ensureWorkspaceSchema, workspaceDatabaseUrl } from "./db.js";
 import { runWorkspaceApplyDaily } from "./apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
+import { runWorkspaceDailyPipeline } from "./daily-pipeline.js";
 import { listEnabledWorkspaces } from "./workspace-store.js";
 
 const DEBOUNCE_MS = 2 * 60 * 1000;
@@ -38,7 +39,8 @@ export async function tickScheduledWorkspaces(): Promise<void> {
   for (const workspace of workspaces) {
     const now = localScheduleParts(workspace.timezone);
     const runKey = `${now.date}:${now.hour}`;
-    if (now.hour === workspace.schedule.discoverHour) {
+    const integratedPipeline = process.env.NATIVE_INTEGRATED_DAILY_PIPELINE !== "false";
+    if (!integratedPipeline && now.hour === workspace.schedule.discoverHour) {
       const slotKey = scheduleSlotKey("discover", workspace.timezone);
       if (workspace.lastDiscoverRunKey === slotKey) {
         continue;
@@ -57,12 +59,21 @@ export async function tickScheduledWorkspaces(): Promise<void> {
         continue;
       }
       await maybeRun(workspace.id, `apply:${runKey}`, async () => {
-        await runWorkspaceApplyDaily({
-          workspace,
-          runSource: "native_schedule",
-          submit: true,
-          dryRun: false,
-        });
+        if (integratedPipeline) {
+          await runWorkspaceDailyPipeline({
+            workspace,
+            runSource: "native_schedule",
+            submit: true,
+            dryRun: false,
+          });
+        } else {
+          await runWorkspaceApplyDaily({
+            workspace,
+            runSource: "native_schedule",
+            submit: true,
+            dryRun: false,
+          });
+        }
       });
     }
   }

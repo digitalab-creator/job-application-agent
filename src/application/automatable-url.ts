@@ -18,6 +18,25 @@ export function isAutomatableApplyUrl(url: string): boolean {
   return true;
 }
 
+/** Pull the first http(s) URL from a sheet cell (trailing notes, Hebrew text, etc.). */
+export function extractHttpUrlFromCell(value: string): string | null {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+  const direct = parseHttpUrl(trimmed);
+  if (direct) {
+    return direct.toString();
+  }
+  const match = trimmed.match(/https?:\/\/[^\s<>"')\]]+/i);
+  if (!match) {
+    return null;
+  }
+  const candidate = match[0].replace(/[.,;]+$/, "");
+  const parsed = parseHttpUrl(candidate);
+  return parsed ? parsed.toString() : null;
+}
+
 /** Validate before any Playwright navigation. The browser must never receive malformed input. */
 export function parseHttpUrl(value: string): URL | null {
   const trimmed = String(value || "").trim();
