@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildVerbatim } from "./verbatim.js";
-import { unsupportedAnswer, validateCv } from "./validate.js";
+import { cvMayCiteFact, unsupportedAnswer, validateCv } from "./validate.js";
+
+test("marketing CV may not cite a technical-only Boroda fact", () => {
+  assert.equal(cvMayCiteFact("boroda-adoption", "marketing"), false);
+  assert.equal(cvMayCiteFact("boroda-accounts", "marketing"), true);
+  assert.equal(cvMayCiteFact("boroda-adoption", "hybrid"), true);
+});
 
 test("verbatim technical CV passes the truth gates", () => {
   const doc = buildVerbatim("technical");

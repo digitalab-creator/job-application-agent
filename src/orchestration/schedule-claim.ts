@@ -4,7 +4,7 @@ import type { WorkspaceRecord } from "./workspace-types.js";
 
 export async function claimScheduledSlot(
   workspace: WorkspaceRecord,
-  kind: "apply" | "discover",
+  kind: "apply" | "discover" | "outcome",
   runSource: "native_schedule" | "native_manual",
 ): Promise<{ ok: true; slotKey: string } | { ok: false; reason: string }> {
   if (runSource === "native_manual") {
@@ -12,7 +12,11 @@ export async function claimScheduledSlot(
   }
   const slotKey = scheduleSlotKey(kind, workspace.timezone);
   const fresh = await getWorkspace(workspace.id);
-  const last = kind === "discover" ? fresh?.lastDiscoverRunKey : fresh?.lastApplyRunKey;
+  const last = kind === "discover"
+    ? fresh?.lastDiscoverRunKey
+    : kind === "outcome"
+      ? fresh?.lastOutcomeRunKey
+      : fresh?.lastApplyRunKey;
   if (last === slotKey) {
     return { ok: false, reason: `slot_already_completed:${slotKey}` };
   }

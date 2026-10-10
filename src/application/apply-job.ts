@@ -20,7 +20,7 @@ import { portfolioUrlForDoc } from "../cv/portfolio.js";
 import { validateCv } from "../cv/validate.js";
 import { evaluateCvRelevance, validateCvQuality, validatePdfArtifact, type CvRelevanceResult } from "../cv/relevance.js";
 import { saveRedactedFailureArtifact } from "./failure-artifact.js";
-import { validateCvCoversEvidence, type RequirementEvidenceRow } from "./grounded-fit.js";
+import { citeSupportedEvidence, validateCvCoversEvidence, type RequirementEvidenceRow } from "./grounded-fit.js";
 import { cvUsedLabelForLeadIdentity, resolveLeadIdentity } from "../cv/lead-identity.js";
 import { normalizeSelectedSkills } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
@@ -1143,6 +1143,7 @@ async function prepareCv(
       trackerCategory: input.job.category,
       feedback,
     });
+    citeSupportedEvidence(built.doc, persona, requirementEvidence);
     normalizeSelectedSkills(built.doc, persona);
     const validation = validateCv(built.doc, persona, leadIdentity);
     if (!validation.ok) {

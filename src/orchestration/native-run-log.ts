@@ -4,7 +4,7 @@ import { log } from "../logging/logger.js";
 
 export type NativeRunLogEntry = {
   workspaceId: string;
-  kind: "apply" | "discover";
+  kind: "apply" | "discover" | "outcome";
   runSource: "native_schedule" | "native_manual";
   startedAt: string;
   finishedAt: string;

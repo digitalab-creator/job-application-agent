@@ -1,4 +1,4 @@
-import { candidate, SALARY_MAX, SALARY_MIN } from "../config/candidate.js";
+import { candidate, salaryMaximum, salaryMinimum } from "../config/candidate.js";
 import { isShortMotivationField, screeningMotivation } from "../config/screening.js";
 import { resolveLeadIdentity } from "../cv/lead-identity.js";
 import type { Persona } from "../models/types.js";
@@ -347,10 +347,12 @@ function mapKnown(
 
 function salaryText(label: string, monthly: number, annual: number): string {
   const amount = /per year|annual|שנתי/i.test(label) ? annual : monthly;
-  if (amount > SALARY_MAX * 12) {
+  const min = salaryMinimum();
+  const max = salaryMaximum();
+  if (amount > max * 12) {
     throw new Error("Salary answer exceeded the approved annual maximum.");
   }
-  if (!/per year|annual|שנתי/i.test(label) && (amount < SALARY_MIN || amount > SALARY_MAX) && amount !== candidate.lastSalary.amount) {
+  if (!/per year|annual|שנתי/i.test(label) && (amount < min || amount > max) && amount !== candidate.lastSalary.amount) {
     throw new Error("Monthly salary answer is outside the approved band.");
   }
   if (/per year|annual|שנתי/i.test(label)) {

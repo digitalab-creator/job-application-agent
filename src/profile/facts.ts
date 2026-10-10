@@ -1,10 +1,18 @@
-import { candidate, workAuthorizationSummary } from "../config/candidate.js";
+import { activeCandidate, workAuthorizationSummary } from "../config/candidate.js";
 import type { Fact, RoleRecord } from "../models/types.js";
 import { learnedFactById, learnedFacts } from "./learned-facts.js";
 
-const budgetMillions = candidate.media.maxMonthlyBudgetIls / 1_000_000;
-const budgetLabel = Number.isInteger(budgetMillions) ? String(budgetMillions) : String(budgetMillions);
-const mediaHandsOnText = `About ${candidate.media.ppcYears} years of hands-on PPC experience. Managed media budgets of up to ILS ${budgetLabel} million (${candidate.media.maxMonthlyBudgetIls}) per month. Hands-on platforms: ${candidate.media.platforms.join(", ")}. Primary paid media focus: ${candidate.media.primaryPaidMediaFocus}.`;
+function mediaHandsOnText(): string {
+  const profile = activeCandidate();
+  const budgetMillions = profile.media.maxMonthlyBudgetIls / 1_000_000;
+  const budgetLabel = Number.isInteger(budgetMillions) ? String(budgetMillions) : String(budgetMillions);
+  return `About ${profile.media.ppcYears} years of hands-on PPC experience. Managed media budgets of up to ILS ${budgetLabel} million (${profile.media.maxMonthlyBudgetIls}) per month. Hands-on platforms: ${profile.media.platforms.join(", ")}. Primary paid media focus: ${profile.media.primaryPaidMediaFocus}.`;
+}
+
+function summaryMarketingText(): string {
+  const amount = activeCandidate().media.maxMonthlyBudgetIls;
+  return `Performance marketing lead with 10+ years hands-on paid acquisition across Google, Meta, TikTok and Microsoft. Owned budgets from SMB accounts to portfolios up to ILS ${amount.toLocaleString("en-US")} per month, with clear accountability for measurement, conversion results, and efficient spend. Combines campaign execution with tracking, CRO, and reporting so performance decisions are grounded in data.`;
+}
 
 /**
  * CV lines are copied from the two baseline CVs.
@@ -95,7 +103,9 @@ export const facts: Fact[] = [
   {
     id: "summary-marketing",
     roleId: null,
-    text: `Performance marketing lead with 10+ years hands-on paid acquisition across Google, Meta, TikTok and Microsoft. Owned budgets from SMB accounts to portfolios up to ILS ${candidate.media.maxMonthlyBudgetIls.toLocaleString("en-US")} per month, with clear accountability for measurement, conversion results, and efficient spend. Combines campaign execution with tracking, CRO, and reporting so performance decisions are grounded in data.`,
+    get text() {
+      return summaryMarketingText();
+    },
     tags: ["summary", "ppc", "measurement"],
     personas: ["marketing", "hybrid"],
     verified: true,
@@ -151,7 +161,9 @@ export const facts: Fact[] = [
   {
     id: "screening-work-authorization",
     roleId: null,
-    text: workAuthorizationSummary(),
+    get text() {
+      return workAuthorizationSummary();
+    },
     tags: ["screening", "work-authorization", "passport", "citizenship"],
     personas: ["technical", "marketing", "hybrid", "both"],
     verified: true,
@@ -207,7 +219,9 @@ export const facts: Fact[] = [
   {
     id: "media-hands-on",
     roleId: null,
-    text: mediaHandsOnText,
+    get text() {
+      return mediaHandsOnText();
+    },
     tags: ["years", "ppc", "platforms"],
     personas: ["marketing", "hybrid", "both"],
     verified: true,
@@ -215,7 +229,9 @@ export const facts: Fact[] = [
   {
     id: "screening-motivation-technical",
     roleId: null,
-    text: candidate.screening.motivationTechnical,
+    get text() {
+      return activeCandidate().screening.motivationTechnical;
+    },
     tags: ["screening", "motivation"],
     personas: ["technical", "hybrid"],
     verified: true,
@@ -223,7 +239,9 @@ export const facts: Fact[] = [
   {
     id: "screening-motivation-marketing",
     roleId: null,
-    text: candidate.screening.motivationMarketing,
+    get text() {
+      return activeCandidate().screening.motivationMarketing;
+    },
     tags: ["screening", "motivation"],
     personas: ["marketing", "hybrid"],
     verified: true,

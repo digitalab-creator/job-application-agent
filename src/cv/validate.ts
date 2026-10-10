@@ -229,6 +229,12 @@ function factAllowed(personas: string[], persona: Persona): boolean {
   return personas.includes(persona) || personas.includes("both");
 }
 
+/** Same allowlist the CV truth gate uses. The model must not be shown facts this rejects. */
+export function cvMayCiteFact(factId: string, persona: Persona): boolean {
+  const fact = factById(factId);
+  return fact ? factAllowed(fact.personas, persona) : false;
+}
+
 function mentions(haystack: string, term: string): boolean {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(^|[^A-Za-z0-9])${escaped}([^A-Za-z0-9]|$)`, "i").test(haystack);

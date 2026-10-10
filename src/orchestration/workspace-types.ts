@@ -1,7 +1,11 @@
+import type { CandidateProfile } from "../config/candidate.js";
+
 export type WorkspaceSchedule = {
   /** Local hour (0–23) in workspace timezone. */
   discoverHour: number;
   applyHour: number;
+  /** Local hour for the mailbox outcome scan. */
+  outcomeHour: number;
 };
 
 export type WorkspaceRecord = {
@@ -30,16 +34,20 @@ export type WorkspaceRecord = {
   browserUserDataDir: string | null;
   ledgerPath: string | null;
   applyAttemptsPath: string | null;
+  /** Buyer identity. Null until seeded. Workspace `internal` falls back to the code seed. */
+  profile: CandidateProfile | null;
   lastDiscoverRunKey: string | null;
   lastApplyRunKey: string | null;
+  lastOutcomeRunKey: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type WorkspaceUpsertInput = Omit<
   WorkspaceRecord,
-  "createdAt" | "updatedAt" | "lastDiscoverRunKey" | "lastApplyRunKey"
+  "createdAt" | "updatedAt" | "lastDiscoverRunKey" | "lastApplyRunKey" | "lastOutcomeRunKey"
 > & {
   lastDiscoverRunKey?: string | null;
   lastApplyRunKey?: string | null;
+  lastOutcomeRunKey?: string | null;
 };

@@ -1,12 +1,5 @@
-import {
-  candidate,
-  SALARY_MAX,
-  SALARY_MIN,
-} from "../config/candidate.js";
+import { activeCandidate, salaryMaximum, salaryMinimum } from "../config/candidate.js";
 import type { Persona } from "../models/types.js";
-
-const FILTER_EXCLUDE_BELOW = candidate.salaryExpectation.opportunityFilter.excludeBelow;
-const FILTER_PROCESSING_MIN = candidate.salaryExpectation.opportunityFilter.processingMinimum;
 
 const PERFORMANCE_TITLE =
   /ppc|performance marketing|performance manager|paid acquisition|user acquisition|growth manager|paid ads|campaign|media buying|\bcro\b|\bsem\b/;
@@ -54,8 +47,10 @@ export function chooseSalary(role: string, persona: Persona): number {
 }
 
 function assertSalaryInBand(amount: number): number {
-  if (amount < SALARY_MIN || amount > SALARY_MAX) {
-    throw new Error(`Salary ${amount} is outside ${SALARY_MIN}-${SALARY_MAX}`);
+  const min = salaryMinimum();
+  const max = salaryMaximum();
+  if (amount < min || amount > max) {
+    throw new Error(`Salary ${amount} is outside ${min}-${max}`);
   }
   return amount;
 }
@@ -82,16 +77,18 @@ export function classifyPublishedSalary(pageText: string): PublishedSalaryVerdic
     return { kind: "ok", detail: "" };
   }
   const monthlyMax = Math.min(...maxes);
-  if (monthlyMax < FILTER_EXCLUDE_BELOW) {
+  const excludeBelow = activeCandidate().salaryExpectation.opportunityFilter.excludeBelow;
+  const processingMin = activeCandidate().salaryExpectation.opportunityFilter.processingMinimum;
+  if (monthlyMax < excludeBelow) {
     return {
       kind: "exclude",
-      detail: `Published salary max ${monthlyMax} ILS/month is below ${FILTER_EXCLUDE_BELOW}.`,
+      detail: `Published salary max ${monthlyMax} ILS/month is below ${excludeBelow}.`,
     };
   }
-  if (monthlyMax < FILTER_PROCESSING_MIN) {
+  if (monthlyMax < processingMin) {
     return {
       kind: "manual_review",
-      detail: `Published salary max ${monthlyMax} ILS/month is between ${FILTER_EXCLUDE_BELOW} and ${FILTER_PROCESSING_MIN - 1} (manual review).`,
+      detail: `Published salary max ${monthlyMax} ILS/month is between ${excludeBelow} and ${processingMin - 1} (manual review).`,
     };
   }
   return { kind: "ok", detail: "" };

@@ -42,7 +42,7 @@ export function localScheduleParts(timeZone: string, date = new Date()): { date:
 }
 
 export function scheduleSlotKey(
-  kind: "apply" | "discover",
+  kind: "apply" | "discover" | "outcome",
   timeZone: string,
   date = new Date(),
 ): string {

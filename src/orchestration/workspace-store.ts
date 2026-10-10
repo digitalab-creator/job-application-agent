@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { parseCandidateProfile } from "../config/candidate.js";
 import { withDb } from "./db.js";
 import type { WorkspaceRecord, WorkspaceSchedule, WorkspaceUpsertInput } from "./workspace-types.js";
 
@@ -12,6 +13,7 @@ function rowToWorkspace(row: Record<string, unknown>): WorkspaceRecord {
     schedule: {
       discoverHour: Number(schedule.discoverHour ?? 8),
       applyHour: Number(schedule.applyHour ?? 9),
+      outcomeHour: Number(schedule.outcomeHour ?? 18),
     },
     enabled: Boolean(row.enabled),
     spreadsheetId: String(row.spreadsheet_id),
@@ -30,8 +32,10 @@ function rowToWorkspace(row: Record<string, unknown>): WorkspaceRecord {
     browserUserDataDir: row.browser_user_data_dir ? String(row.browser_user_data_dir) : null,
     ledgerPath: row.ledger_path ? String(row.ledger_path) : null,
     applyAttemptsPath: row.apply_attempts_path ? String(row.apply_attempts_path) : null,
+    profile: parseCandidateProfile(row.profile_json),
     lastDiscoverRunKey: row.last_discover_run_key ? String(row.last_discover_run_key) : null,
     lastApplyRunKey: row.last_apply_run_key ? String(row.last_apply_run_key) : null,
+    lastOutcomeRunKey: row.last_outcome_run_key ? String(row.last_outcome_run_key) : null,
     createdAt: new Date(String(row.created_at)).toISOString(),
     updatedAt: new Date(String(row.updated_at)).toISOString(),
   };
@@ -63,9 +67,10 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
         apply_tech_target, apply_marketing_target, notification_target, run_token_hash,
         google_refresh_token_enc, mailbox_refresh_token_enc, mailbox_email,
         greenhouse_otp_webhook_url, browser_user_data_dir,
-        ledger_path, apply_attempts_path, last_discover_run_key, last_apply_run_key
+        ledger_path, apply_attempts_path, profile_json, last_discover_run_key, last_apply_run_key,
+        last_outcome_run_key
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
       )
       ON CONFLICT (id) DO UPDATE SET
         display_name = EXCLUDED.display_name,
@@ -88,8 +93,10 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
         browser_user_data_dir = EXCLUDED.browser_user_data_dir,
         ledger_path = EXCLUDED.ledger_path,
         apply_attempts_path = EXCLUDED.apply_attempts_path,
+        profile_json = EXCLUDED.profile_json,
         last_discover_run_key = EXCLUDED.last_discover_run_key,
         last_apply_run_key = EXCLUDED.last_apply_run_key,
+        last_outcome_run_key = EXCLUDED.last_outcome_run_key,
         updated_at = NOW()
       RETURNING *`,
       [
@@ -114,8 +121,10 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
         input.browserUserDataDir,
         input.ledgerPath,
         input.applyAttemptsPath,
+        input.profile ? JSON.stringify(input.profile) : null,
         input.lastDiscoverRunKey ?? null,
         input.lastApplyRunKey ?? null,
+        input.lastOutcomeRunKey ?? null,
       ],
     );
     return rowToWorkspace(res.rows[0] as Record<string, unknown>);
@@ -124,10 +133,14 @@ export async function upsertWorkspace(input: WorkspaceUpsertInput): Promise<Work
 
 export async function markWorkspaceRunKey(
   workspaceId: string,
-  kind: "discover" | "apply",
+  kind: "discover" | "apply" | "outcome",
   runKey: string,
 ): Promise<void> {
-  const column = kind === "discover" ? "last_discover_run_key" : "last_apply_run_key";
+  const column = kind === "discover"
+    ? "last_discover_run_key"
+    : kind === "outcome"
+      ? "last_outcome_run_key"
+      : "last_apply_run_key";
   await withDb(async (client) => {
     await client.query(`UPDATE workspaces SET ${column} = $2, updated_at = NOW() WHERE id = $1`, [
       workspaceId,

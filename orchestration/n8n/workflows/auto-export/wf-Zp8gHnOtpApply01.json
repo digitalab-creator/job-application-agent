@@ -3,7 +3,7 @@
   "createdAt": "2026-09-29T20:40:00.000Z",
   "id": "Zp8gHnOtpApply01",
   "name": "greenhouse-apply-otp",
-  "active": true,
+  "active": false,
   "isArchived": false,
   "nodes": [
     {

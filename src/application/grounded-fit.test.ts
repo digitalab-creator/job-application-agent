@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildVerbatim } from "../cv/verbatim.js";
-import { validateCvCoversEvidence, validateRequirementEvidence } from "./grounded-fit.js";
+import { citeSupportedEvidence, validateCvCoversEvidence, validateRequirementEvidence } from "./grounded-fit.js";
 
 test("validateRequirementEvidence rejects invented fact ids", () => {
   const result = validateRequirementEvidence(
@@ -10,6 +10,25 @@ test("validateRequirementEvidence rejects invented fact ids", () => {
   );
   assert.equal(result.supportedRows.length, 0);
   assert.deepEqual(result.invalidFactIds, ["fake-fact"]);
+});
+
+test("citeSupportedEvidence adds a profile fact and a missing role fact verbatim", () => {
+  const doc = buildVerbatim("marketing");
+  const independent = doc.experience.find((role) => role.roleId === "independent");
+  assert.ok(independent);
+  independent.bullets = [];
+  citeSupportedEvidence(doc, "marketing", [
+    { requirement: "High-level written English", factIds: ["lang-english-fluent"], status: "supported" },
+    { requirement: "PPC leadership", factIds: ["independent-acquisition"], status: "supported" },
+  ]);
+  assert.ok(doc.summaryFactIds.includes("lang-english-fluent"));
+  assert.equal(independent.bullets.length, 1);
+  assert.deepEqual(independent.bullets[0]?.factIds, ["independent-acquisition"]);
+  const coverage = validateCvCoversEvidence(doc, "marketing", [
+    { requirement: "High-level written English", factIds: ["lang-english-fluent"], status: "supported" },
+    { requirement: "PPC leadership", factIds: ["independent-acquisition"], status: "supported" },
+  ]);
+  assert.equal(coverage.ok, true);
 });
 
 test("validateCvCoversEvidence requires supported facts on the CV", () => {

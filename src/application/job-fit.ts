@@ -10,6 +10,22 @@ import {
 const APPLY_FIT_THRESHOLD = 70;
 const MUST_HAVE_COVERAGE_THRESHOLD = 0.65;
 
+/** Office software and personality traits are never a hard skip. Real skills still are. */
+const NON_HARD_REQUIREMENT =
+  /\b(google sheets|microsoft excel|excel|microsoft office|ms office|attention to detail|teamwork|communication skills|interpersonal|adaptability|fast learner|work ethic|independent|organized execution|self[- ]starter)\b/i;
+
+function isNonHardRequirement(requirement: string): boolean {
+  return NON_HARD_REQUIREMENT.test(requirement);
+}
+
+const TEAM_DEVELOPMENT_REQUIREMENT =
+  /\b(team management|team development|people management|mentoring|coaching)\b/i;
+const MENTORING_EVIDENCE = /\b(mentor(?:ed|ing)?|trained|training|recruitment)\b/i;
+
+function coveredByMentoringFact(requirement: string, factText: string): boolean {
+  return TEAM_DEVELOPMENT_REQUIREMENT.test(requirement) && MENTORING_EVIDENCE.test(factText);
+}
+
 const requirementsSchema = z.object({
   roleFamily: z.enum(["technical", "marketing", "hybrid", "product", "operations", "other"]),
   seniority: z.enum(["intern", "junior", "mid", "senior", "lead", "manager", "director", "unknown"]),
@@ -105,10 +121,16 @@ export function evaluateJobFit(
     ...evidenceCheck.supportedRows.map((row) => row.requirement),
     ...analysis.matchedMustHaves,
   ]);
-  const missingMustHaves = unique([
+  const reportedMissing = unique([
     ...evidenceCheck.missingRequirements,
     ...analysis.missingMustHaves,
   ]);
+  const softGaps = reportedMissing.filter(isNonHardRequirement);
+  const factText = verifiedFacts.map((fact) => fact.text).join("\n");
+  const mentoringGaps = reportedMissing.filter((requirement) => coveredByMentoringFact(requirement, factText));
+  const missingMustHaves = reportedMissing.filter(
+    (requirement) => !isNonHardRequirement(requirement) && !coveredByMentoringFact(requirement, factText),
+  );
   const matchedPreferred = unique(analysis.matchedPreferred);
   const mustHaveCount = Math.max(
     analysis.requirements.mustHaveSkills.length,
@@ -167,7 +189,12 @@ export function evaluateJobFit(
     matchedMustHaves,
     missingMustHaves,
     matchedPreferred,
-    risks: unique([...analysis.risks, ...mandatoryEducationMissing]),
+    risks: unique([
+      ...analysis.risks,
+      ...mandatoryEducationMissing,
+      ...softGaps.map((gap) => `Unverified office or soft trait, not a hard skip: ${gap}`),
+      ...mentoringGaps.map((gap) => `Covered by a verified mentoring or training fact: ${gap}`),
+    ]),
     strongestEvidence: unique(analysis.strongestEvidence),
     reason: analysis.reason,
   };
