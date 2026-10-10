@@ -1,4 +1,5 @@
 import type { AnswerRecord } from "../models/types.js";
+import type { SubmissionScope } from "../models/types.js";
 
 export type LedgerEntry = {
   url: string;
@@ -6,6 +7,10 @@ export type LedgerEntry = {
   role: string;
   confirmationDetected: boolean;
   at: string;
+  submissionScope?: SubmissionScope;
+  agencyId?: string;
+  postingId?: string;
+  dedupKey?: string;
   cvPath?: string;
   blocker?: string;
   /** Any explicit captcha blocker is terminal; the human queue owns the next attempt. */

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveApplyAttemptsPath, resolveLedgerPath } from "../orchestration/workspace-runtime.js";
+import { countsAsConfirmedEmployerApplication } from "./submission-scope.js";
 
 /** Keep aligned with `DAILY_APPLY_BATCH_LIMIT` in discovery/queue-mix.ts (avoid import cycle). */
 const DISCOVERY_QUEUE_BATCH_CAP = 20;
@@ -23,9 +24,15 @@ type QuotaRow = {
   status: string;
 };
 
-/** Only a confirmed send is counted for reporting; it no longer blocks applies. */
-export function countsTowardDailyLimit(status: string): boolean {
-  return status === "applied";
+/** Only a confirmed direct employer application counts toward the employer apply target. */
+export function countsTowardDailyLimit(status: string, submissionScope?: string): boolean {
+  if (status !== "applied") {
+    return false;
+  }
+  if (!submissionScope || submissionScope === "direct_employer_application") {
+    return true;
+  }
+  return countsAsConfirmedEmployerApplication(submissionScope as import("../models/types.js").SubmissionScope);
 }
 
 export function dailyApplyMaxAttempts(): number {
@@ -55,8 +62,8 @@ export function quotaIsOpen(): boolean {
   return snapshot.attemptsRemaining > 0;
 }
 
-export function rememberQuotaUse(input: { url: string; status: string }): void {
-  if (!countsTowardDailyLimit(input.status)) {
+export function rememberQuotaUse(input: { url: string; status: string; submissionScope?: string }): void {
+  if (!countsTowardDailyLimit(input.status, input.submissionScope)) {
     return;
   }
   const row: QuotaRow = {
@@ -94,8 +101,16 @@ function confirmedUrlsToday(day: string): string[] {
       continue;
     }
     try {
-      const entry = JSON.parse(trimmed) as { url?: string; confirmationDetected?: boolean; at?: string };
+      const entry = JSON.parse(trimmed) as {
+        url?: string;
+        confirmationDetected?: boolean;
+        at?: string;
+        submissionScope?: string;
+      };
       if (!entry.confirmationDetected || !entry.url || !entry.at) {
+        continue;
+      }
+      if (!countsTowardDailyLimit("applied", entry.submissionScope)) {
         continue;
       }
       if (jerusalemDay(new Date(entry.at)) !== day) {

@@ -25,6 +25,13 @@ export function alreadySubmitted(url: string): boolean {
   return Boolean(priorTerminalEntry(url)?.confirmationDetected);
 }
 
+export function priorTerminalByDedupKey(dedupKey: string): LedgerEntry | undefined {
+  return readLedger()
+    .filter((entry) => entry.dedupKey === dedupKey)
+    .reverse()
+    .find((entry) => isTerminalLedgerEntry(entry));
+}
+
 /** Prior confirmed send, or a terminal manual blocker (captcha / login). */
 export function priorTerminalEntry(url: string): LedgerEntry | undefined {
   return readLedger()
