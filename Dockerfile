@@ -17,6 +17,7 @@ COPY scripts/fetch-buster.mjs ./scripts/fetch-buster.mjs
 COPY scripts/migrate-tracker-categories.mjs ./scripts/migrate-tracker-categories.mjs
 COPY scripts/apply-queue-classification.mjs ./scripts/apply-queue-classification.mjs
 COPY scripts/reconcile-historical-queue.mjs ./scripts/reconcile-historical-queue.mjs
+COPY scripts/audit-manual-queue.mjs ./scripts/audit-manual-queue.mjs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh \
   && node scripts/fetch-buster.mjs
