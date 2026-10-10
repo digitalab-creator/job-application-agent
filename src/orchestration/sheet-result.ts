@@ -3,6 +3,8 @@ import type { JobSheetRow } from "./sheets/job-sheet.js";
 
 const STATUS_LABELS: Record<string, string> = {
   applied: "Applied",
+  agency_registered: "Agency Registered",
+  agency_job_referred: "Agency Referred",
   closed: "Closed",
   not_relevant: "Not Relevant",
   no_suitable_replacement: "Not Relevant",
@@ -47,7 +49,7 @@ export function mapApplyResultToSheetPatch(
     .filter(Boolean)
     .join("\n");
   const appliedDate =
-    status === "Applied"
+    status === "Applied" || status === "Agency Referred"
       ? (String(res.appliedAt ?? "").slice(0, 10) || today)
       : String(src["Applied Date"] ?? "");
   return {

@@ -24,10 +24,21 @@ import { validateCvCoversEvidence, type RequirementEvidenceRow } from "./grounde
 import { cvUsedLabelForLeadIdentity, resolveLeadIdentity } from "../cv/lead-identity.js";
 import { normalizeSelectedSkills } from "../cv/validate.js";
 import { log } from "../logging/logger.js";
-import type { ApplicationResult, CvSource, Persona } from "../models/types.js";
+import type { ApplicationResult, CvSource, Persona, SubmissionScope } from "../models/types.js";
 import type { LedgerEntry } from "./ledger.js";
 import { isExcludedApplyTarget } from "./exclude-company.js";
 import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledger.js";
+import {
+  detectGotFriendsConfirmation,
+  prepareGotFriendsJobApplyPage,
+  readGotFriendsFormEvidence,
+  resolveGotFriendsScopeFromEvidence,
+} from "./gotfriends.js";
+import { enrichLedgerEntryForScope, shouldSkipApplyForScopeDedup } from "./submission-dedup.js";
+import {
+  agencyContextFromUrl,
+  countsAsConfirmedEmployerApplication,
+} from "./submission-scope.js";
 import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
 import { chooseSalary, classifyPublishedSalary } from "./salary.js";
 import { resolveJobLocationEligible, resolveJobLocationVerdict } from "../discovery/resolve-location-eligibility.js";
@@ -144,6 +155,22 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     });
   }
   if (input.submit && !input.ignoreLedger) {
+    const scopeSkip = shouldSkipApplyForScopeDedup(input.job.url, input.workspaceId);
+    if (scopeSkip.skip) {
+      return result(input, {
+        status: "already_submitted",
+        submitted: false,
+        confirmationDetected: false,
+        blocker: scopeSkip.reason ?? "already_submitted",
+        notes: lines([
+          "result=already_submitted",
+          `blocker=${scopeSkip.reason ?? "already_submitted"}`,
+          scopeSkip.hit ? `dedup_key=${scopeSkip.hit.key}` : "",
+          "A prior confirmed submission exists for this scope. Not submitted again.",
+        ].filter(Boolean)),
+        screenshots,
+      });
+    }
     const prior = priorTerminalEntry(input.job.url);
     if (prior?.confirmationDetected || alreadySubmitted(input.job.url)) {
       return result(input, {
@@ -287,6 +314,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       });
     }
     screenshots.push(await saveScreenshot(page, shotDir, "job-page.png"));
+    await prepareGotFriendsJobApplyPage(page);
     if (earlyExit?.kind === "login_wall") {
       log("JOB_LOGIN_WALL", { url: page.url(), company: input.job.company });
       return await loginWallResult(input, screenshots, page.url());
@@ -735,7 +763,9 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         log("GREENHOUSE_FINALIZE_FAILED", { message: error instanceof Error ? error.message : "finalize_presubmit_failed", stage: "pre_submit" });
       });
     }
-    const applyPost = watchApplyPost(page);
+    const gotfriendsHost = /gotfriends\.co\.il/i.test(page.url());
+    const applyPost = gotfriendsHost ? null : watchApplyPost(page);
+    const gfEvidenceBeforeSubmit = gotfriendsHost ? await readGotFriendsFormEvidence(page) : null;
     let activeScope = scope;
     let submitAttempt = await submitApplication(page, activeScope);
     log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
@@ -1011,13 +1041,22 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     if (otpResolved) {
       return otpResolved;
     }
-    const confirmed = preConfirmed?.ok
+    let confirmed = preConfirmed?.ok
       ? preConfirmed
-      : await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (await applyPost) ?? seen);
+      : gotfriendsHost
+        ? await detectGotFriendsConfirmation(page)
+        : await detectConfirmation(page).then(async (seen) => seen.ok ? seen : (applyPost ? await applyPost : null) ?? seen);
+    const agencyCtx = agencyContextFromUrl(input.job.url);
+    const resolvedScope: SubmissionScope = gotfriendsHost
+      ? resolveGotFriendsScopeFromEvidence(gfEvidenceBeforeSubmit, input.job.url)
+      : agencyCtx.agencyId
+        ? agencyCtx.intendedScope
+        : "direct_employer_application";
+    const confirmedStatus = statusForSubmissionScope(resolvedScope);
     screenshots.push(await saveScreenshot(page, shotDir, confirmed.ok ? "confirmation.png" : "blocker.png"));
     if (!confirmed.ok) {
       try {
-        rememberSubmission({
+        rememberSubmission(enrichLedgerEntryForScope({
           url: input.job.url,
           company: input.job.company,
           role: activeRole,
@@ -1027,7 +1066,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
           canonicalJobUrl: page.url(),
           blocker: "submitted_unconfirmed",
           stage: "post_submit",
-        });
+        }, {
+          url: input.job.url,
+          workspaceId: input.workspaceId,
+          scope: resolvedScope,
+          agencyId: agencyCtx.agencyId,
+          postingId: agencyCtx.postingId,
+        }));
       } catch (error) {
         log("SUBMITTED_UNCONFIRMED_LEDGER_WRITE_FAILED", {
           message: error instanceof Error ? error.message : "ledger_write_failed",
@@ -1069,7 +1114,7 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     pipeline.confirmed = true;
     const appliedAt = new Date().toISOString();
     try {
-      rememberSubmission({
+      rememberSubmission(enrichLedgerEntryForScope({
         url: input.job.url,
         company: input.job.company,
         role: activeRole,
@@ -1077,7 +1122,13 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         at: appliedAt,
         cvPath: cv.cvPath,
         canonicalJobUrl: page.url(),
-      });
+      }, {
+        url: input.job.url,
+        workspaceId: input.workspaceId,
+        scope: resolvedScope,
+        agencyId: agencyCtx.agencyId,
+        postingId: agencyCtx.postingId,
+      }));
     } catch (error) {
       log("CONFIRMED_LEDGER_WRITE_FAILED", { message: error instanceof Error ? error.message : "ledger_write_failed" });
     }
@@ -1087,23 +1138,33 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
       log("CONFIRMED_AUDIT_WRITE_FAILED", { message: error instanceof Error ? error.message : "audit_write_failed" });
     }
     return result(input, {
-      status: "applied",
+      status: confirmedStatus,
       submitted: true,
       confirmationDetected: true,
+      submissionScope: resolvedScope,
+      agencyId: agencyCtx.agencyId ?? undefined,
+      postingId: agencyCtx.postingId ?? undefined,
       appliedAt,
       persona,
       ...cv.publicFields,
       answers: filled.answers,
       canonicalJobUrl: page.url(),
+      terminalOutcome: countsAsConfirmedEmployerApplication(resolvedScope)
+        ? "applied"
+        : resolvedScope === "agency_registration"
+          ? "agency_registered"
+          : "agency_job_referred",
       notes: lines([
         "AUTO_APPLY",
-        "result=applied",
+        `result=${confirmedStatus}`,
+        `submission_scope=${resolvedScope}`,
         `cv=${cv.publicFields.cvUsed}`,
         `cv_source=${cv.cvSource}`,
         `ats=${atsLabel(input.job.url)}`,
         `salary_answer=${salaryMonthly}`,
         "confirmation=true",
         `confirmation_text=${confirmed.phrase}`,
+        agencyCtx.postingId ? `agency_posting_id=${agencyCtx.postingId}` : "",
         listingNote?.line ?? "",
       ].filter(Boolean)),
       screenshots,
@@ -1657,18 +1718,35 @@ async function preflightJobFit(input: ApplyInput): Promise<ApplicationResult | n
   });
 }
 
+function statusForSubmissionScope(scope: SubmissionScope): ApplicationResult["status"] {
+  if (scope === "agency_registration") {
+    return "agency_registered";
+  }
+  if (scope === "agency_job_interest") {
+    return "agency_job_referred";
+  }
+  return "applied";
+}
+
 function rememberManualApply(
   input: ApplyInput,
   extra: Pick<LedgerEntry, "blocker" | "cvPath" | "captchaSignal" | "stage" | "answers" | "canonicalJobUrl">,
 ): void {
-  rememberSubmission({
+  const agencyCtx = agencyContextFromUrl(input.job.url);
+  rememberSubmission(enrichLedgerEntryForScope({
     url: input.job.url,
     company: input.job.company,
     role: input.job.role,
     confirmationDetected: false,
     at: new Date().toISOString(),
     ...extra,
-  });
+  }, {
+    url: input.job.url,
+    workspaceId: input.workspaceId,
+    scope: agencyCtx.intendedScope,
+    agencyId: agencyCtx.agencyId,
+    postingId: agencyCtx.postingId,
+  }));
 }
 
 function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): ApplicationResult {

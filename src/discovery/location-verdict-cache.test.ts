@@ -12,14 +12,14 @@ import {
 test("location cache key prefers job URL pathname", () => {
   assert.equal(
     locationCacheKey("https://www.comeet.com/jobs/foo/bar/role/AA.11"),
-    "/jobs/foo/bar/role/aa.11",
+    "www.comeet.com/jobs/foo/bar/role/aa.11",
   );
 });
 
 test("location cache key keeps gh_jid so postings sharing one path stay separate", () => {
   const lisbon = locationCacheKey("https://www.riskified.com/job-description/?gh_jid=8831790002");
   const telAviv = locationCacheKey("https://www.riskified.com/job-description/?gh_jid=8805197002");
-  assert.equal(telAviv, "/job-description?gh_jid=8805197002");
+  assert.equal(telAviv, "www.riskified.com/job-description?gh_jid=8805197002");
   assert.notEqual(lisbon, telAviv);
 });
 

@@ -49,8 +49,15 @@ export type CvSource = "generated" | "static_fallback";
 
 export type CvWording = "llm" | "verbatim";
 
+export type SubmissionScope =
+  | "direct_employer_application"
+  | "agency_registration"
+  | "agency_job_interest";
+
 export type ApplicationStatus =
   | "applied"
+  | "agency_registered"
+  | "agency_job_referred"
   | "closed"
   | "not_relevant"
   | "invalid_url"
@@ -65,6 +72,8 @@ export type ApplicationStatus =
 
 export type AttemptOutcome =
   | "applied"
+  | "agency_registered"
+  | "agency_job_referred"
   | "manual_required"
   | "closed"
   | "no_suitable_replacement"
@@ -115,6 +124,9 @@ export type ApplyAttemptRecord = {
   blocker?: string;
   submitted: boolean;
   confirmationDetected: boolean;
+  submissionScope?: SubmissionScope;
+  agencyId?: string;
+  postingId?: string;
   pipeline: AttemptPipeline;
   notes: string;
   /** Paying customer / operator workspace. Default `internal`. */
@@ -146,6 +158,9 @@ export type ApplicationResult = {
   ats?: string;
   submitted: boolean;
   confirmationDetected: boolean;
+  submissionScope?: SubmissionScope;
+  agencyId?: string;
+  postingId?: string;
   appliedAt?: string;
   blocker?: string;
   notes: string;

@@ -7,9 +7,11 @@ import { greenhouseJobId } from "../application/openings.js";
 export function uniqueKeyForUrl(url: string): string {
   try {
     const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
     const path = parsed.pathname.replace(/\/$/, "").toLowerCase();
     const ghJid = greenhouseJobId(parsed);
-    return ghJid ? `${path}?gh_jid=${ghJid}` : path;
+    const base = `${host}${path}`;
+    return ghJid ? `${base}?gh_jid=${ghJid}` : base;
   } catch {
     return url.toLowerCase();
   }
