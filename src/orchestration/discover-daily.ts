@@ -56,6 +56,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
       newQueueStats,
       boardUrls: workspace.discoveryBoardUrls,
       sheetRows: rows,
+      actionableAutomatable: depth.automatableEmployment,
     }));
     if (discovery.status !== "ok" || discovery.jobs.length === 0) {
       const result: DiscoverDailyResult = {

@@ -98,11 +98,14 @@ const server = http.createServer(async (req, res) => {
       }
       const policy = await loadSearchPolicyFromSheet(workspace);
       const rows = await readJobSheetRows(workspace);
+      const depth = computeQueueDepthSnapshot(rows, await readExcludeCompanies(workspace));
       send(res, 200, {
         ...policy,
         categoryWeights: [...policy.categoryWeights.entries()],
         marketingShare: marketingShareFromPolicy(policy),
         unresolvedReviewManual: countUnresolvedSheetRows(rows),
+        actionableAutomatable: depth.automatableEmployment,
+        eligibleEmployment: depth.eligibleEmployment,
       });
       return;
     }

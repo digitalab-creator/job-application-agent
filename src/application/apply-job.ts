@@ -43,7 +43,11 @@ import {
 } from "./skip-job-screening.js";
 import { detectConfirmation, detectEmailVerification, detectLoginWall, classifyCaptchaSignal } from "./verify-submission.js";
 import { newAttemptId } from "./attempt-ledger.js";
-import { parseHttpUrl } from "./automatable-url.js";
+import { extractHttpUrlFromCell, parseHttpUrl } from "./automatable-url.js";
+import {
+  classifyPostingContent,
+  postingContentBlocksFit,
+} from "./posting-content-quality.js";
 import { hostDoesNotExist, isNameNotResolvedError } from "./dead-host.js";
 import { looksLikeRateLimit, noteHostSuccess, noteRateLimit } from "./rate-limit.js";
 import { isLinkedInHost, isLinkedInJobUrl, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult, runLinkedInEasyApply } from "./linkedin-easy-apply.js";
@@ -105,7 +109,8 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
   let jobSlug = slug(`${input.job.company}-${input.job.role}`);
   let shotDir = `${env.screenshotDir}/${day}/${jobSlug}`;
   const screenshots: string[] = [];
-  const parsedUrl = parseHttpUrl(input.job.url);
+  const normalizedUrl = extractHttpUrlFromCell(input.job.url) ?? input.job.url;
+  const parsedUrl = parseHttpUrl(normalizedUrl);
   if (!parsedUrl) {
     log("INVALID_JOB_URL", { url: input.job.url });
     return result(input, {
@@ -417,6 +422,11 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
         ]),
         screenshots,
       });
+    }
+
+    const contentVerdict = classifyPostingContent(bodyText, page.url());
+    if (postingContentBlocksFit(contentVerdict)) {
+      return postingContentBlockedResult(input, contentVerdict, page.url(), screenshots);
     }
 
     let fit;
@@ -1598,6 +1608,10 @@ async function preflightJobFit(input: ApplyInput): Promise<ApplicationResult | n
   if (!prefetched) {
     return null;
   }
+  const contentVerdict = classifyPostingContent(prefetched, input.job.url);
+  if (postingContentBlocksFit(contentVerdict)) {
+    return postingContentBlockedResult(input, contentVerdict, input.job.url, []);
+  }
   let fit: JobFitResult;
   try {
     fit = await analyzeFullJobFit({
@@ -1665,6 +1679,47 @@ function result(input: ApplyInput, extra: Omit<ApplicationResult, "jobUrl">): Ap
     recoveredFrom: input.recoveredFrom,
     ...extra,
   };
+}
+
+function postingContentBlockedResult(
+  input: ApplyInput,
+  verdict: ReturnType<typeof classifyPostingContent>,
+  canonicalJobUrl: string,
+  screenshots: string[],
+): ApplicationResult {
+  const blocker = verdict.kind === "search_results" || verdict.kind === "careers_directory"
+    ? "non_specific_posting"
+    : verdict.kind === "access_blocked"
+      ? "access_blocked"
+      : verdict.kind === "login_wall"
+        ? "login_wall"
+        : "job_description_unavailable";
+  const status = verdict.kind === "search_results" || verdict.kind === "careers_directory"
+    ? "not_relevant"
+    : "review";
+  const terminalOutcome = status === "not_relevant" ? "not_relevant" : "request_failed";
+  log("POSTING_CONTENT_BLOCKED", {
+    url: input.job.url,
+    kind: verdict.kind,
+    blocker,
+    reason: verdict.reason,
+  });
+  return result(input, {
+    status,
+    terminalOutcome,
+    submitted: false,
+    confirmationDetected: false,
+    blocker,
+    canonicalJobUrl,
+    notes: lines([
+      status === "not_relevant" ? "result=not_relevant" : "result=review",
+      `blocker=${blocker}`,
+      `posting_content=${verdict.kind}`,
+      verdict.reason,
+      "Job fit was not evaluated because the page did not contain a complete job description.",
+    ]),
+    screenshots,
+  });
 }
 
 type EarlyExit = { kind: "login_wall" } | { kind: "gone"; reason: string };
