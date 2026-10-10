@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { evaluateJobFit, type JobFitAnalysis } from "./job-fit.js";
+import { facts } from "../profile/facts.js";
 
 function analysis(overrides: Partial<JobFitAnalysis> = {}): JobFitAnalysis {
   return {
@@ -86,6 +87,18 @@ test("a verified mentoring fact covers a team-development must-have", () => {
   assert.equal(result.decision, "apply");
   assert.equal(result.missingMustHaves.includes("Team management and development"), false);
   assert.match(result.risks.join(" "), /mentoring or training/);
+});
+
+test("supervisor wording in verified facts covers team management must-haves", () => {
+  const withSupervisor = facts.filter((fact) => fact.verified);
+  const result = evaluateJobFit(analysis({
+    missingMustHaves: ["Team management and development"],
+    requirementEvidence: [
+      ...analysis().requirementEvidence,
+      { requirement: "Team management and development", factIds: [], status: "missing" },
+    ],
+  }), withSupervisor);
+  assert.equal(result.missingMustHaves.includes("Team management and development"), false);
 });
 
 test("junior or internship role is never autonomously applied", () => {

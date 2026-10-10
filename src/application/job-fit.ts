@@ -20,7 +20,7 @@ function isNonHardRequirement(requirement: string): boolean {
 
 const TEAM_DEVELOPMENT_REQUIREMENT =
   /\b(team management|team development|people management|mentoring|coaching)\b/i;
-const MENTORING_EVIDENCE = /\b(mentor(?:ed|ing)?|trained|training|recruitment)\b/i;
+const MENTORING_EVIDENCE = /\b(mentor(?:ed|ing)?|trained|training|recruitment|supervis(?:ed|ing|or)?)\b/i;
 
 function coveredByMentoringFact(requirement: string, factText: string): boolean {
   return TEAM_DEVELOPMENT_REQUIREMENT.test(requirement) && MENTORING_EVIDENCE.test(factText);
