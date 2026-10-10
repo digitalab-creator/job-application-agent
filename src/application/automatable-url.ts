@@ -24,17 +24,16 @@ export function extractHttpUrlFromCell(value: string): string | null {
   if (!trimmed) {
     return null;
   }
-  const direct = parseHttpUrl(trimmed);
-  if (direct) {
-    return direct.toString();
-  }
   const match = trimmed.match(/https?:\/\/[^\s<>"')\]]+/i);
-  if (!match) {
-    return null;
+  if (match) {
+    const candidate = match[0].replace(/[.,;]+$/, "");
+    const parsed = parseHttpUrl(candidate);
+    if (parsed) {
+      return parsed.toString();
+    }
   }
-  const candidate = match[0].replace(/[.,;]+$/, "");
-  const parsed = parseHttpUrl(candidate);
-  return parsed ? parsed.toString() : null;
+  const direct = parseHttpUrl(trimmed);
+  return direct ? direct.toString() : null;
 }
 
 /** Validate before any Playwright navigation. The browser must never receive malformed input. */

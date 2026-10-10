@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { withSearchPolicy } from "../config/search-policy-runtime.js";
 import { defaultSearchPolicy } from "../config/search-policy.js";
-import { runDiscovery } from "./run-discovery.js";
+
+function seedMinimalApplyEnv(): void {
+  process.env.APPLY_API_TOKEN ??= "unit-test-token";
+  process.env.TECHNICAL_CV_PATH ??= "/tmp/technical-cv.pdf";
+  process.env.MARKETING_CV_PATH ??= "/tmp/marketing-cv.pdf";
+  process.env.LLM_API_KEY ??= "unit-test-llm-key";
+}
 
 test("discovery runs when unresolved backlog is high but actionable New queue is empty", async () => {
+  seedMinimalApplyEnv();
+  const { runDiscovery } = await import("./run-discovery.js");
   const policy = defaultSearchPolicy();
   const result = await withSearchPolicy(policy, async () => runDiscovery({
     existingUrls: [],
