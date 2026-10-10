@@ -1,7 +1,7 @@
 export type JobPageStatus = "ACTIVE_JOB" | "CLOSED" | "NOT_FOUND" | "CAREERS_PAGE" | "LOGIN_WALL" | "UNKNOWN";
 
-const CLOSED = /no longer (available|accepting)|position (has been |is )?closed|this job has expired|no longer accepting applications|position has been filled|job (is )?not available|we're sorry, but there are currently no open positions/i;
-const NOT_FOUND = /\b404\b|page not found|job not found/i;
+const CLOSED = /no longer (available|accepting)|position (has been |is )?closed|this job has expired|no longer accepting applications|position has been filled|job (is )?not available|we're sorry, but there are currently no open positions|המשרה (?:אינה פעילה|נסגרה|אוישה|הוסרה)|המודעה הוסרה|לא ניתן להגיש מועמדות/i;
+const NOT_FOUND = /\b404\b|page not found|job not found|הדף לא נמצא/i;
 /** ATS "this posting is gone" landing URLs (Workable not_found / oops, Greenhouse error). */
 const REMOVED_POSTING_URL = /[?&](?:not_found|error)=true\b|apply\.workable\.com\/oops\b/i;
 /** Sign-in interstitials: the page says nothing about the job, so no job-level verdict is possible. */
