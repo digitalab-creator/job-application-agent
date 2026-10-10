@@ -24,10 +24,18 @@ import { computeQueueDepthSnapshot } from "./orchestration/queue-depth.js";
 import { getWorkspace, listEnabledWorkspaces } from "./orchestration/workspace-store.js";
 import { readExcludeCompanies, readJobSheetRows } from "./orchestration/sheets/job-sheet.js";
 import { startNativeScheduler } from "./orchestration/scheduler.js";
-import { ensureWorkspaceSchema } from "./orchestration/db.js";
+import { ensureWorkspaceSchema, workspaceDatabaseUrl } from "./orchestration/db.js";
+import { runtimeFromWorkspace, withWorkspaceRuntime } from "./orchestration/workspace-runtime.js";
 import { pickWorkspaceApplyBatch } from "./orchestration/pick-jobs.js";
 import { captchaSolverStatsSnapshot } from "./application/captcha-solver-stats.js";
 import { resolveApplyCapability } from "./application/ats-capability.js";
+import { inspectJobUrl } from "./application/link-liveness.js";
+import {
+  recommendQueueStatus,
+  recommendStatusFromCapabilityOnly,
+  recoverCanonicalJobUrls,
+} from "./application/queue-sheet-verdict.js";
+import { runQueueRecheck } from "./orchestration/queue-recheck.js";
 import type { JobSheetRow } from "./orchestration/sheets/job-sheet.js";
 import { buildCvDocument, writeCvPdf } from "./cv/generate.js";
 import { choosePersonaFromText } from "./cv/persona-from-text.js";
@@ -83,12 +91,16 @@ const server = http.createServer(async (req, res) => {
         send(res, 200, result);
         return;
       }
-      const result = await runWorkspaceDiscoverDaily({
-        workspace,
-        runSource: "native_manual",
-        dryRun: body.dryRun === true,
-      });
-      send(res, 200, result);
+      if (workspaceRun.kind === "discover-run") {
+        const result = await runWorkspaceDiscoverDaily({
+          workspace,
+          runSource: "native_manual",
+          dryRun: body.dryRun === true,
+        });
+        send(res, 200, result);
+        return;
+      }
+      send(res, 404, { error: "unknown_workspace_run" });
       return;
     }
     if (!authorized(req)) {
@@ -260,7 +272,59 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url?.startsWith("/queue/capability")) {
       const parsed = new URL(req.url, "http://127.0.0.1");
       const target = parsed.searchParams.get("url") ?? "";
-      send(res, 200, { url: target, capability: resolveApplyCapability(target) });
+      send(res, 200, {
+        url: target,
+        capability: resolveApplyCapability(target),
+        classifyOnly: recommendStatusFromCapabilityOnly(resolveApplyCapability(target)),
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/queue/verify") {
+      const body = await readBody(req) as {
+        url?: string;
+        role?: string;
+        currentStatus?: string;
+        notes?: string;
+      };
+      const rawUrl = String(body.url ?? "").trim();
+      const url = recoverCanonicalJobUrls(rawUrl)[0] ?? rawUrl;
+      const liveness = await inspectJobUrl(url, String(body.role ?? ""));
+      const capability = resolveApplyCapability(liveness.finalUrl || url);
+      const verifiedAt = new Date().toISOString();
+      const recommendation = recommendQueueStatus({
+        currentStatus: String(body.currentStatus ?? "New"),
+        notes: String(body.notes ?? ""),
+        rawJobUrl: rawUrl,
+        role: String(body.role ?? ""),
+        capability,
+        liveness,
+        verifiedAt,
+      });
+      send(res, 200, { url, capability, liveness, recommendation, verifiedAt });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/queue/recheck") {
+      const body = await readBody(req) as {
+        workspaceId?: string;
+        dryRun?: boolean;
+        limit?: number;
+        offset?: number;
+        statuses?: string[];
+      };
+      const workspaceId = String(body.workspaceId ?? "internal").trim();
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const result = await runQueueRecheck({
+        workspace,
+        dryRun: body.dryRun !== false,
+        limit: body.limit,
+        offset: body.offset,
+        statuses: body.statuses,
+      });
+      send(res, result.status === "error" ? 500 : 200, result);
       return;
     }
     if (req.method === "POST" && req.url === "/queue/pick") {
@@ -360,7 +424,7 @@ const server = http.createServer(async (req, res) => {
         const input = parseApply(await readBody(req));
         input.attemptId = newAttemptId();
         input.startedAt = new Date().toISOString();
-        const outcome = await executeApply(input);
+        const outcome = await executeApplyInWorkspace(input);
         send(res, 200, outcome);
       } finally {
         releaseBrowserApply();
@@ -560,6 +624,37 @@ function bearerToken(req: http.IncomingMessage): string | undefined {
     return undefined;
   }
   return header.slice("Bearer ".length).trim();
+}
+
+async function executeApplyInWorkspace(input: ApplyInput): Promise<ApplicationResult> {
+  const workspaceId = input.workspaceId ?? "internal";
+  if (!workspaceDatabaseUrl()) {
+    return executeApply(input);
+  }
+  try {
+    const workspace = await getWorkspace(workspaceId);
+    if (!workspace) {
+      log("APPLY_WORKSPACE_MISSING", { workspaceId });
+      if (workspaceId !== "internal") {
+        throw new Error(`Workspace ${workspaceId} was not found.`);
+      }
+      return executeApply(input);
+    }
+    return await withWorkspaceRuntime(
+      runtimeFromWorkspace(workspace, input.runSource ?? "manual", {
+        runId: input.runId,
+        batchId: input.batchId,
+      }),
+      () => executeApply(input),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log("APPLY_WORKSPACE_RUNTIME_FAILED", { workspaceId, message });
+    if (workspaceId === "internal") {
+      return executeApply(input);
+    }
+    throw error;
+  }
 }
 
 function parseWorkspaceRunPath(

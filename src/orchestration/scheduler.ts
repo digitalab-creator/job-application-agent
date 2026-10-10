@@ -6,6 +6,7 @@ import { runWorkspaceApplyDaily } from "./apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
 import { runWorkspaceDailyPipeline } from "./daily-pipeline.js";
 import { runWorkspaceEmailOutcomes } from "./email-outcomes.js";
+import { runQueueRecheck } from "./queue-recheck.js";
 import { listEnabledWorkspaces } from "./workspace-store.js";
 
 const DEBOUNCE_MS = 2 * 60 * 1000;
@@ -41,6 +42,17 @@ export async function tickScheduledWorkspaces(): Promise<void> {
     const now = localScheduleParts(workspace.timezone);
     const runKey = `${now.date}:${now.hour}`;
     const integratedPipeline = process.env.NATIVE_INTEGRATED_DAILY_PIPELINE !== "false";
+    const recheckHour = Number(process.env.NATIVE_QUEUE_RECHECK_HOUR ?? String(workspace.schedule.discoverHour));
+    if (now.hour === recheckHour) {
+      await maybeRun(workspace.id, `recheck:${runKey}`, async () => {
+        await runQueueRecheck({
+          workspace,
+          dryRun: false,
+          limit: Number(process.env.QUEUE_RECHECK_BATCH_LIMIT ?? "60"),
+          statuses: ["Manual", "Review", "New"],
+        });
+      });
+    }
     if (!integratedPipeline && now.hour === workspace.schedule.discoverHour) {
       const slotKey = scheduleSlotKey("discover", workspace.timezone);
       if (workspace.lastDiscoverRunKey === slotKey) {

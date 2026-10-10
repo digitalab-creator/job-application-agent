@@ -22,6 +22,16 @@ test("a Hebrew apply page is an active job", () => {
   assert.equal(status, "ACTIVE_JOB");
 });
 
+test("Hebrew closed wording is closed", () => {
+  const status = classifyJobPage({
+    url: "https://www.example.co.il/jobs/9",
+    title: "משרה",
+    text: "המשרה נסגרה. תודה על ההתעניינות.",
+    role: "Marketing Manager",
+  });
+  assert.equal(status, "CLOSED");
+});
+
 test("a removed posting is closed", () => {
   const status = classifyJobPage({
     url: "https://www.comeet.com/jobs/stampli/example",
