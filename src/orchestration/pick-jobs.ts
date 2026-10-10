@@ -6,6 +6,7 @@ import { dailyApplyPickLimit } from "../application/apply-policy.js";
 import { DAILY_APPLY_BATCH_LIMIT, selectApplyDailyBatch } from "../discovery/queue-mix.js";
 import { isFreelanceOpportunity } from "../freelance/opportunity-kind.js";
 import type { JobSheetRow } from "./sheets/job-sheet.js";
+import { shouldSkipApplyForScopeDedup } from "../application/submission-dedup.js";
 
 export function sheetMatchScore(row: JobSheetRow): number {
   const raw = String(row["Match Score"] ?? "").replace(/[^\d.]/g, "");
@@ -46,6 +47,10 @@ export function filterEligibleApplyRows(
     }
     const url = String(row["Job URL"] ?? "").trim();
     if (seenUrl.has(url)) {
+      continue;
+    }
+    const scopeSkip = shouldSkipApplyForScopeDedup(url);
+    if (scopeSkip.skip) {
       continue;
     }
     seenUrl.add(url);

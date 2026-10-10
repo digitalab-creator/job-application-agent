@@ -7,6 +7,7 @@ import type {
   AttemptOutcome,
   AttemptPipeline,
 } from "../models/types.js";
+import { countsAsConfirmedEmployerApplication } from "./submission-scope.js";
 import { instantOnJerusalemDay } from "../time/jerusalem-day.js";
 import { resolveApplyAttemptsPath } from "../orchestration/workspace-runtime.js";
 
@@ -85,6 +86,9 @@ export function attemptRecordFromResult(
     blocker: result.blocker,
     submitted: result.submitted,
     confirmationDetected: result.confirmationDetected,
+    submissionScope: result.submissionScope,
+    agencyId: result.agencyId,
+    postingId: result.postingId,
     pipeline: result.pipeline ?? defaultPipeline(result),
     notes: result.notes,
     workspaceId: input.workspaceId,
@@ -99,7 +103,17 @@ export function inferAttemptOutcome(result: ApplicationResult): AttemptOutcome {
   if (result.terminalOutcome === "in_progress") {
     return "in_progress";
   }
+  if (result.status === "agency_registered") {
+    return "agency_registered";
+  }
+  if (result.status === "agency_job_referred") {
+    return "agency_job_referred";
+  }
   if (result.confirmationDetected || result.status === "applied") {
+    const scope = result.submissionScope ?? "direct_employer_application";
+    if (!countsAsConfirmedEmployerApplication(scope)) {
+      return scope === "agency_registration" ? "agency_registered" : "agency_job_referred";
+    }
     return "applied";
   }
   if (result.status === "manual_required") {
@@ -219,7 +233,10 @@ function isAppliedAttempt(row?: ApplyAttemptRecord): boolean {
   if (!row) {
     return false;
   }
-  return row.confirmationDetected || row.outcome === "applied";
+  return row.confirmationDetected
+    || row.outcome === "applied"
+    || row.outcome === "agency_registered"
+    || row.outcome === "agency_job_referred";
 }
 
 function attemptLedgerPath(): string {

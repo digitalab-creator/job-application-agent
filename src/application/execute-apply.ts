@@ -92,7 +92,11 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
           withApplySession((context) => applyToJob(context, input)),
         ),
     );
-    rememberQuotaUse({ url: input.job.url, status: tracked.result.status });
+    rememberQuotaUse({
+      url: input.job.url,
+      status: tracked.result.status,
+      submissionScope: tracked.result.submissionScope,
+    });
     const outcome = tracked.result;
     attachManualFillGuide(outcome);
     outcome.llmCostUsd = tracked.usd;

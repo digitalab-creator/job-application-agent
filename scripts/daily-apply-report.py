@@ -512,13 +512,33 @@ def row_on_day(at: str, day: str) -> bool:
         return str(at).startswith(day)
 
 
+def submission_scope_bucket(row: dict) -> str:
+    scope = str(row.get("submissionScope") or row.get("submission_scope") or "").strip()
+    if scope in ("agency_registration", "agency_job_interest", "direct_employer_application"):
+        return scope
+    outcome = str(row.get("outcome") or "")
+    if outcome == "agency_registered":
+        return "agency_registration"
+    if outcome == "agency_job_referred":
+        return "agency_job_interest"
+    return "direct_employer_application"
+
+
 def confirmed_today(day: str) -> list[dict]:
     out: list[dict] = []
     for row in attempts_today(day):
-        if row.get("outcome") != "applied" and not row.get("confirmationDetected"):
+        if row.get("outcome") not in (
+            "applied",
+            "agency_registered",
+            "agency_job_referred",
+        ) and not row.get("confirmationDetected"):
             continue
         out.append(row)
     return out
+
+
+def employer_confirmed_today(day: str) -> list[dict]:
+    return [r for r in confirmed_today(day) if submission_scope_bucket(r) == "direct_employer_application"]
 
 
 def _attempt_rank(row: dict) -> int:
@@ -561,6 +581,9 @@ def attempts_today(day: str) -> list[dict]:
                 "originalJobUrl": row.get("url", ""),
                 "outcome": "applied",
                 "confirmationDetected": True,
+                "submissionScope": row.get("submissionScope"),
+                "agencyId": row.get("agencyId"),
+                "postingId": row.get("postingId"),
                 "pipeline": {"submitted": True, "confirmed": True},
                 "notes": "reconciled_from_applications_ledger",
             }
@@ -1077,6 +1100,13 @@ def print_report(day: str | None = None) -> int:
     daily_remaining = float(budget.get("dailyRemainingIls") or 0) if budget else 0
 
     confirmed = confirmed_today(day)
+    employer_confirmed = employer_confirmed_today(day)
+    agency_registrations = [
+        r for r in confirmed if submission_scope_bucket(r) == "agency_registration"
+    ]
+    agency_job_requests = [
+        r for r in confirmed if submission_scope_bucket(r) == "agency_job_interest"
+    ]
     attempts = attempts_today(day)
     quota_rows = quota_rows_today(day)
     cv_count = count_generated_cvs(day)
@@ -1163,8 +1193,11 @@ def print_report(day: str | None = None) -> int:
     print("## Summary")
     print(f"| Metric | Value |")
     print(f"|--------|-------|")
-    print(f"| **Confirmed submissions** | **{len(confirmed)}** |")
-    print(f"| Confirmed submissions (worker) | {worker_confirmed} |")
+    print(f"| **Confirmed employer applications** | **{len(employer_confirmed)}** |")
+    print(f"| Confirmed agency registrations | {len(agency_registrations)} |")
+    print(f"| Confirmed job-specific agency requests | {len(agency_job_requests)} |")
+    print(f"| All confirmed (incl. agency) | {len(confirmed)} |")
+    print(f"| Confirmed employer apps (worker quota ledger) | {worker_confirmed} |")
     print(f"| Daily budget ILS | {daily_spent:.2f} / {daily_budget:.2f} ({daily_remaining:.2f} remaining) |")
     print(f"| Attempt safety cap | {attempt_cap} |")
     print(f"| Worker attempts with terminal outcomes | {ledger_attempts} |")
