@@ -24,3 +24,4 @@ Rolling batch file — see skill `bug-pattern-log` and `/archive-full-bug-patter
 <!-- bug-pattern-stats:end -->
 
 <!-- entries below -->
+2026-10-10 | prod | apply/reporting | daily-apply-report exit 0 with 0 confirmed | script returned 0 unless infra blockers; ignored DAILY_CONFIRMED target | business_status JSON + exit 1 target_missed; trigger repair via apply_pipeline
