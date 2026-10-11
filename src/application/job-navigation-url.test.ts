@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { directGreenhouseUrlsForCareersUrl, greenhouseBoardUrls, greenhouseJobPostUrls, normalizeJobNavigationUrl, navigationRetryUrls } from "./job-navigation-url.js";
+import {
+  directGreenhouseUrlsForCareersUrl,
+  greenhouseBoardUrls,
+  greenhouseBoardSlug,
+  greenhouseJobBoardRecoveryUrls,
+  greenhouseJobPostUrls,
+  normalizeJobNavigationUrl,
+  navigationRetryUrls,
+} from "./job-navigation-url.js";
 
 test("normalizeJobNavigationUrl adds trailing slash on WordPress careers slug", () => {
   const raw = "https://orca.security/about/careers/6161068004?gh_jid=6161068004";
@@ -39,6 +47,24 @@ test("legacy boards.greenhouse.io links omit raw boards host when embed alternat
 test("payoneer embed token URLs stay on job-boards", () => {
   const urls = greenhouseJobPostUrls("https://job-boards.greenhouse.io/embed/job_app?for=payoneer&token=8185354");
   assert.equal(urls[0], "https://job-boards.greenhouse.io/embed/job_app?for=payoneer&token=8185354");
+});
+
+test("greenhouseBoardSlug reads for= on broken embed board links", () => {
+  assert.equal(
+    greenhouseBoardSlug("https://job-boards.greenhouse.io/embed/job_board?for=payoneer&error=true"),
+    "payoneer",
+  );
+});
+
+test("broken Greenhouse job_board error links recover via the public board listing", () => {
+  const broken = "https://job-boards.greenhouse.io/embed/job_board?for=payoneer&error=true";
+  assert.deepEqual(greenhouseJobBoardRecoveryUrls(broken), [
+    "https://job-boards.greenhouse.io/payoneer",
+    "https://boards.greenhouse.io/payoneer",
+  ]);
+  const retries = navigationRetryUrls(broken);
+  assert.equal(retries[0], "https://job-boards.greenhouse.io/payoneer");
+  assert.ok(!retries.includes(broken));
 });
 
 test("Wix position URL can fall back to the Greenhouse board posting", () => {

@@ -1,4 +1,4 @@
-import { parseHttpUrl } from "./automatable-url.js";
+import { isKnownBlockedApplyUrl, parseHttpUrl } from "./automatable-url.js";
 import { linkedinEasyApplyEnabled } from "./linkedin-easy-apply.js";
 
 /**
@@ -26,11 +26,7 @@ export function resolveApplyCapability(url: string): AtsCapability {
     return "invalid";
   }
   const href = parsed.toString();
-  const lower = href.toLowerCase();
-  if (lower.includes("/jobs/stampli/") && lower.includes("0b.273")) {
-    return "invalid";
-  }
-  if (/^https:\/\/apply\.workable\.com\/comeet\//i.test(href)) {
+  if (isKnownBlockedApplyUrl(href)) {
     return "invalid";
   }
   if (/(^|\.)linkedin\.com$/i.test(parsed.hostname) && !linkedinEasyApplyEnabled()) {

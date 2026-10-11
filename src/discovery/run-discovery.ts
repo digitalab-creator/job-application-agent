@@ -63,7 +63,12 @@ export async function runDiscovery(input: {
       notes: "Monthly budget exhausted. Discovery did not run.",
     };
   }
-  const boards = input.boardUrls?.length ? input.boardUrls : discoveryBoardUrls();
+  const boards =
+    input.boardUrls === undefined
+      ? discoveryBoardUrls()
+      : input.boardUrls.length > 0
+        ? input.boardUrls
+        : [];
   if (boards.length === 0) {
     return {
       status: "skipped",

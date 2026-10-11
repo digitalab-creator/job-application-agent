@@ -1,4 +1,24 @@
 /**
+ * Broken sheet placeholders — valid HTTP, but not a real job posting path.
+ * SSOT for denylist; ats-capability imports this too.
+ */
+export function isKnownBlockedApplyUrl(url: string): boolean {
+  const parsed = parseHttpUrl(url);
+  if (!parsed) {
+    return false;
+  }
+  const href = parsed.toString();
+  if (/^https:\/\/apply\.workable\.com\/comeet\//i.test(href)) {
+    return true;
+  }
+  // Stampli junk cell: team id then position id with no role slug in between.
+  if (/\/jobs\/stampli\/[^/]+\/0b\.273\/?$/i.test(parsed.pathname)) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Daily apply queue gate. Same rule as n8n Pick Jobs `okUrl`.
  * Any real http(s) job page is attempted. Known junk links are skipped.
  * A failed apply stays on the sheet as Review so we can tighten that site later.
@@ -8,11 +28,7 @@ export function isAutomatableApplyUrl(url: string): boolean {
   if (!parsed) {
     return false;
   }
-  const u = parsed.toString().toLowerCase();
-  if (u.includes("/jobs/stampli/") && u.includes("0b.273")) {
-    return false;
-  }
-  if (/^https:\/\/apply\.workable\.com\/comeet\//i.test(u)) {
+  if (isKnownBlockedApplyUrl(parsed.toString())) {
     return false;
   }
   return true;

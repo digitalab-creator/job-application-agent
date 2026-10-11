@@ -22,7 +22,7 @@ Exit code **0** = confirmed submissions met `DAILY_APPLY_LIMIT`; **1** = target 
 
 ## Report to the user
 
-1. Paste or summarize the script **Summary**, **Jobs tried (worker logs)**, **Apply attempts**, **What stopped progress**, and **Suggested next steps** sections.
+1. Paste or summarize the script **Summary**, **Attempt details (links & blockers)** when present, **Jobs tried (worker logs)**, **Apply attempts**, **What stopped progress**, and **Suggested next steps** sections.
 2. Call out **confirmed submissions** vs **daily limit** first (that is the business answer).
 3. Distinguish **attempts** (worker ledger rows + per-attempt table) from **confirmed** (`confirmationDetected`).
 4. Use **Jobs tried** for per-opening exact causes (logs); use **ledger** only for quota-counted outcomes.

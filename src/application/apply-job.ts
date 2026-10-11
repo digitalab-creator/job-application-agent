@@ -29,6 +29,8 @@ import type { LedgerEntry } from "./ledger.js";
 import { isExcludedApplyTarget } from "./exclude-company.js";
 import { alreadySubmitted, priorTerminalEntry, rememberSubmission } from "./ledger.js";
 import { chooseOpening, careersPositionId, listOpenings, openChosen, openingMatchesPositionId } from "./pick-opening.js";
+import { greenhouseBoardSlug } from "./job-navigation-url.js";
+import { fetchGreenhouseBoardOpenings, listingsNeedGreenhouseApiFallback } from "./openings.js";
 import { chooseSalary, classifyPublishedSalary } from "./salary.js";
 import { resolveJobLocationEligible, resolveJobLocationVerdict } from "../discovery/resolve-location-eligibility.js";
 import { postingGoneReason, redirectedAwayReason } from "./posting-gone.js";
@@ -380,7 +382,14 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     }
     const locationVerdict = await resolveJobLocationVerdict({ title: activeRole, snippet: bodyText, url: page.url() });
     if (!locationVerdict.eligible) {
-      log("JOB_LOCATION_INELIGIBLE", { role: activeRole, url: page.url(), source: locationVerdict.source, reason: locationVerdict.reason });
+      log("JOB_LOCATION_INELIGIBLE", {
+        company: input.job.company,
+        role: activeRole,
+        url: page.url(),
+        source: locationVerdict.source,
+        reason: locationVerdict.reason,
+        attemptId: input.attemptId,
+      });
       return locationIneligibleResult(input, screenshots, page.url(), locationVerdict.reason);
     }
     if (pageStatus === "UNKNOWN") {
@@ -1241,7 +1250,11 @@ async function openJob(page: Page, url: string): Promise<void> {
         try {
           await page.goto(target, { waitUntil });
           await page.waitForFunction(() => (document.body?.innerText?.length ?? 0) > 80, undefined, { timeout: 20_000 }).catch(() => undefined);
-          if (/error=true/i.test(page.url()) || /\/embed\/job_board\b/i.test(page.url())) {
+          if (/\/embed\/job_board\b/i.test(page.url()) && !/error=true/i.test(page.url())) {
+            await dismissOverlays(page);
+            return;
+          }
+          if (/error=true/i.test(page.url())) {
             greenhouseErrorSignals += 1;
             log("NAVIGATION_GREENHOUSE_ERROR", {
               target,
@@ -1860,7 +1873,15 @@ async function enterBestOpening(
       }
     }
   }
-  const openings = await listOpenings(page, role);
+  let openings = await listOpenings(page, role);
+  const boardSlug = greenhouseBoardSlug(targetUrl);
+  if (boardSlug && listingsNeedGreenhouseApiFallback(openings, page.url())) {
+    const apiOpenings = await fetchGreenhouseBoardOpenings(boardSlug);
+    if (apiOpenings.length > 0) {
+      log("LISTING_GREENHOUSE_API", { company, slug: boardSlug, count: apiOpenings.length });
+      openings = apiOpenings;
+    }
+  }
   log("LISTING_OPENINGS_FOUND", { company, targetRole: role, count: openings.length, url: page.url() });
   const positionId = careersPositionId(targetUrl);
   if (positionId && openings.length > 0) {

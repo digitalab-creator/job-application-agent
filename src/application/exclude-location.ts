@@ -113,13 +113,13 @@ export function ensureExcludedLocationsConfig(): ExcludedLocationsConfig {
   return { locations };
 }
 
-export function textMatchesExcludedLocation(
+export function findExcludedLocationMatch(
   text: string,
   excluded: readonly string[] = getExcludedLocations(),
-): boolean {
+): string | null {
   const blob = String(text || "").normalize("NFKC");
   if (!blob.trim()) {
-    return false;
+    return null;
   }
   for (const item of excluded) {
     const needle = String(item || "").trim();
@@ -127,10 +127,17 @@ export function textMatchesExcludedLocation(
       continue;
     }
     if (locationNeedleMatchesText(needle, blob)) {
-      return true;
+      return needle;
     }
   }
-  return false;
+  return null;
+}
+
+export function textMatchesExcludedLocation(
+  text: string,
+  excluded: readonly string[] = getExcludedLocations(),
+): boolean {
+  return findExcludedLocationMatch(text, excluded) !== null;
 }
 
 /** Match whole location tokens — avoid substring hits inside unrelated words. */

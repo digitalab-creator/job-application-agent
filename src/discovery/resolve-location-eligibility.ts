@@ -2,9 +2,9 @@ import { getExcludedLocations } from "../application/exclude-location.js";
 import { log } from "../logging/logger.js";
 import {
   classifyLocationDetailed,
+  excludedLocationMatchInHead,
   isDiscoveryLocationEligible,
   LOCATION_RULES_VERSION,
-  matchesExcludedLocationHead,
   type LocationRulesVerdict,
 } from "./location-eligibility.js";
 import { factsToSnippet, researchJobLocationWithLlm } from "./location-llm-resolve.js";
@@ -38,8 +38,10 @@ const inflight = new Map<string, Promise<LocationVerdict>>();
  */
 export async function resolveJobLocationVerdict(input: ResolveLocationInput): Promise<LocationVerdict> {
   // The block list is the one thing that can change without a deploy, so it always beats the cache.
-  if (matchesExcludedLocationHead(input.title, input.snippet, input.url)) {
-    return { eligible: false, source: "blocked_city", reason: "blocked_city" };
+  const blockedCity = excludedLocationMatchInHead(input.title, input.snippet, input.url);
+  if (blockedCity) {
+    const reason = `blocked_city:${blockedCity}`;
+    return { eligible: false, source: "blocked_city", reason };
   }
 
   const key = locationCacheKey(input.url, input.title);

@@ -22,5 +22,5 @@ test("discovery runs when unresolved backlog is high but actionable New queue is
   }));
   assert.equal(result.status, "skipped");
   assert.ok(!result.notes.includes("discovery_skipped=unresolved_backlog"));
-  assert.ok(result.notes.includes("JOB_DISCOVERY_BOARD_URLS") || result.notes.includes("Comeet"));
+  assert.ok(result.notes.includes("JOB_DISCOVERY_BOARD_URLS"));
 });
