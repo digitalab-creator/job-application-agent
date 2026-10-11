@@ -1,8 +1,71 @@
+import { log } from "../logging/logger.js";
+
 export type ListedJob = {
   title: string;
   href: string;
   snippet: string;
 };
+
+const GREENHOUSE_JOBS_API_TIMEOUT_MS = 10_000;
+
+type GreenhouseApiJob = {
+  id: number;
+  title: string;
+  absolute_url: string;
+  location?: { name?: string };
+};
+
+/** Public boards API — reliable titles, deep links, and location when the careers SPA hides them. */
+export async function fetchGreenhouseBoardOpenings(slug: string): Promise<ListedJob[]> {
+  const normalized = slug.trim().toLowerCase();
+  if (!normalized || !/^[a-z0-9][a-z0-9_-]*$/i.test(normalized)) {
+    return [];
+  }
+  const apiUrl = `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(normalized)}/jobs`;
+  try {
+    const response = await fetch(apiUrl, {
+      headers: { "User-Agent": "job-application-agent/1.0" },
+      signal: AbortSignal.timeout(GREENHOUSE_JOBS_API_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      log("GREENHOUSE_BOARD_API_MISS", { slug: normalized, status: response.status });
+      return [];
+    }
+    const payload = (await response.json()) as { jobs?: GreenhouseApiJob[] };
+    const jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+    return jobs.slice(0, 250).map((job) => ({
+      title: String(job.title || "").replace(/\s+/g, " ").trim(),
+      href: String(job.absolute_url || "").trim(),
+      snippet: String(job.location?.name || "").replace(/\s+/g, " ").trim().slice(0, 240),
+    })).filter((job) => job.title.length > 2 && job.href.startsWith("http"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log("GREENHOUSE_BOARD_API_ERROR", { slug: normalized, message: message.split("\n", 1)[0] });
+    return [];
+  }
+}
+
+/** Careers SPA lists often repeat the hub URL — API listings carry real posting links. */
+export function listingsNeedGreenhouseApiFallback(jobs: ListedJob[], pageUrl: string): boolean {
+  if (jobs.length === 0) {
+    return true;
+  }
+  const pageBase = pageUrl.split("?")[0];
+  return jobs.every((job) => {
+    try {
+      const parsed = new URL(job.href);
+      const sameHub = parsed.href.split("?")[0] === pageBase;
+      const hasJobId =
+        Boolean(greenhouseJobId(parsed))
+        || /\/positions\/\d+/i.test(parsed.pathname)
+        || /\/jobs\/\d+/i.test(parsed.pathname)
+        || /gh_jid=\d+/i.test(job.href);
+      return sameHub || !hasJobId;
+    } catch {
+      return true;
+    }
+  });
+}
 
 /** Keep real job links on the same board. Drop the board itself, duplicates, and empty slugs. */
 export function normalizeOpenings(
