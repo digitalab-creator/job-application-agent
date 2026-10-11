@@ -10,12 +10,19 @@ import {
 const APPLY_FIT_THRESHOLD = 70;
 const MUST_HAVE_COVERAGE_THRESHOLD = 0.65;
 
-/** Office software and personality traits are never a hard skip. Real skills still are. */
+/**
+ * Office software, personality traits, and degree boilerplate are never a hard skip.
+ * A named skill the candidate lacks (Java, PyTorch, a specific product) still is.
+ * Israeli postings often list "B.Sc. or equivalent" without making the degree the job.
+ */
 const NON_HARD_REQUIREMENT =
-  /\b(google sheets|microsoft excel|excel|microsoft office|ms office|attention to detail|teamwork|communication skills|interpersonal|adaptability|fast learner|work ethic|independent|organized execution|self[- ]starter)\b/i;
+  /\b(google sheets|microsoft excel|excel|microsoft office|ms office|attention to detail|teamwork|communication skills|interpersonal|adaptability|fast learner|work ethic|independent learning|independent|organized execution|self[- ]starter|collaboration)\b/i;
+
+const DEGREE_BOILERPLATE =
+  /\b(b\.?\s*sc\.?|bsc|bachelor(?:'s)?|computer science degree|תואר)\b/i;
 
 function isNonHardRequirement(requirement: string): boolean {
-  return NON_HARD_REQUIREMENT.test(requirement);
+  return NON_HARD_REQUIREMENT.test(requirement) || DEGREE_BOILERPLATE.test(requirement);
 }
 
 const TEAM_DEVELOPMENT_REQUIREMENT =

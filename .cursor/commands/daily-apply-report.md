@@ -2,9 +2,9 @@
 
 **Business outcome:** Answer “Did we send today’s applications? If not, why?” without manual log diving.
 
-Read-only audit of the live apply worker, ledgers, Docker logs, and n8n apply/discover runs for **today (Asia/Jerusalem)** unless a date is passed.
+Read-only audit of the live apply worker, ledgers, Docker logs, and (when `ORCHESTRATION_MODE=n8n`) n8n apply/discover runs for **today (Asia/Jerusalem)** unless a date is passed.
 
-Root: `/opt/apps/job-application-agent`. Related n8n workflow: **Apply to jobs (daily)** `fcYSvcG7IiP8xAqr`.
+Root: `/opt/apps/job-application-agent` (only job product repo on this server). Native mode: use **scheduled_production** / native run logs; archived n8n workflow `fcYSvcG7IiP8xAqr` is inactive.
 
 ## Run (agent must execute)
 

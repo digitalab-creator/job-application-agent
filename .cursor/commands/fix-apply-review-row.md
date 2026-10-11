@@ -2,7 +2,7 @@
 
 **Business outcome:** Turn one stuck **Review** sheet row into either a **working auto-apply** or a clear **won’t-fix** with evidence—without manual log spelunking.
 
-Root: `/opt/apps/job-application-agent`. Apply workflow: **Apply to jobs (daily)** `fcYSvcG7IiP8xAqr`.
+Root: `/opt/apps/job-application-agent` (only job product repo). Applies via worker `POST /apply` or native `POST /workspaces/:id/apply-run`; n8n apply workflow is archived/inactive.
 
 ## 1. Triage (agent must run first)
 

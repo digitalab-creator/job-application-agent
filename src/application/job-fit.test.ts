@@ -62,6 +62,25 @@ test("central unsupported Java requirement is skipped", () => {
   assert.equal(result.decision, "skip");
 });
 
+test("a listed bachelor degree does not block a supported fit", () => {
+  const result = evaluateJobFit(analysis({
+    missingMustHaves: ["Bachelor of Science in Computer Science or related field"],
+    requirementEvidence: [
+      ...analysis().requirementEvidence,
+      { requirement: "Bachelor of Science in Computer Science or related field", factIds: [], status: "missing" },
+    ],
+    requirements: {
+      ...analysis().requirements,
+      educationRequirements: ["B.Sc. in Computer Science or equivalent"],
+    },
+  }));
+  assert.equal(result.decision, "apply");
+  assert.equal(
+    result.missingMustHaves.some((item) => /bachelor/i.test(item)),
+    false,
+  );
+});
+
 test("office software and soft traits do not block a supported fit", () => {
   const result = evaluateJobFit(analysis({
     missingMustHaves: ["Google Sheets", "High attention to detail"],

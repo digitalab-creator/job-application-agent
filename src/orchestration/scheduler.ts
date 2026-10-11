@@ -5,6 +5,7 @@ import { ensureWorkspaceSchema, workspaceDatabaseUrl } from "./db.js";
 import { runWorkspaceApplyDaily } from "./apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
 import { runWorkspaceDailyPipeline } from "./daily-pipeline.js";
+import { runWorkspaceEmailOutcomes } from "./email-outcomes.js";
 import { listEnabledWorkspaces } from "./workspace-store.js";
 
 const DEBOUNCE_MS = 2 * 60 * 1000;
@@ -74,6 +75,19 @@ export async function tickScheduledWorkspaces(): Promise<void> {
             dryRun: false,
           });
         }
+      });
+    }
+    if (now.hour === workspace.schedule.outcomeHour) {
+      const slotKey = scheduleSlotKey("outcome", workspace.timezone);
+      if (workspace.lastOutcomeRunKey === slotKey) {
+        continue;
+      }
+      await maybeRun(workspace.id, `outcome:${runKey}`, async () => {
+        await runWorkspaceEmailOutcomes({
+          workspace,
+          runSource: "native_schedule",
+          dryRun: false,
+        });
       });
     }
   }
