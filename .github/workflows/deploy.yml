@@ -126,8 +126,10 @@ jobs:
           changed="$(git diff --name-only "$OUTGOING" "$APPLIED" || true)"
           echo "$changed"
           if printf '%s\n' "$changed" | grep -q '^orchestration/n8n/workflows/'; then
-            echo "Job n8n workflow JSON changed. Syncing to live n8n."
-            bash orchestration/n8n/scripts/sync-workflows-to-live.sh
+            echo "Job n8n workflow JSON changed (archive only). Skipping live n8n sync unless SYNC_JOB_N8N_WORKFLOWS=1."
+            if [[ "${SYNC_JOB_N8N_WORKFLOWS:-}" == "1" ]]; then
+              bash orchestration/n8n/scripts/sync-workflows-to-live.sh
+            fi
           fi
           if printf '%s\n' "$changed" | grep -Eq '(^|/)Dockerfile$|(^|/)package\.json$|^docker-compose\.yml$|^package-lock\.json$'; then
             echo "Image or compose changed. Rebuilding job-application-agent."

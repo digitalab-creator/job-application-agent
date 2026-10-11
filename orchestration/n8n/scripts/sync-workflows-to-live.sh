@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Push git-exported job workflows to the live n8n instance (PUT /workflows/:id).
+# Production uses native orchestration; do not run on deploy unless SYNC_JOB_N8N_WORKFLOWS=1.
 set -euo pipefail
+
+if [[ "${SYNC_JOB_N8N_WORKFLOWS:-}" != "1" && "${CONFIRM:-}" != "SYNC_JOB_N8N_WORKFLOWS" ]]; then
+  echo "sync-workflows-to-live: refused (set SYNC_JOB_N8N_WORKFLOWS=1 or CONFIRM=SYNC_JOB_N8N_WORKFLOWS)" >&2
+  exit 1
+fi
 
 ORCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPORT_DIR="${WORKFLOW_EXPORT_DIR:-$ORCH_ROOT/workflows/auto-export}"

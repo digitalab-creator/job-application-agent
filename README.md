@@ -1,6 +1,11 @@
 # Job application worker
 
-Discovery and apply run through **n8n** and this service (Google Sheet queue). The older **job-finder** Apps Script repo is legacy and not used in production.
+**Single product repo** for job discovery, apply, workspace config, and archived n8n workflow JSON (inactive). Production runs **`ORCHESTRATION_MODE=native`**: the worker schedules discover/apply per workspace and talks to each customer’s Google Sheet—no separate job repo and no live n8n job cron. Shared **dl-n8n** on this host is for other products only.
+
+| Retired | Replacement |
+|---------|-------------|
+| `digitalab-creator/job-finder` (archived Apps Script) | This repo |
+| Live n8n job workflows (deleted from shared n8n) | `orchestration/n8n/workflows/` JSON archive + `src/orchestration/` native runners |
 
 ## Search Config (targeting policy)
 

@@ -17,6 +17,7 @@ import { cvFileStatus, env, orchestrationMode } from "./config/env.js";
 import { authorizeWorkspaceRun } from "./orchestration/auth.js";
 import { runWorkspaceApplyDaily } from "./orchestration/apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./orchestration/discover-daily.js";
+import { runWorkspaceEmailOutcomes } from "./orchestration/email-outcomes.js";
 import { buildFreelanceDigestText, listFreelancePacks, newPacksSinceLastDigest, runFreelanceDigest } from "./freelance/digest.js";
 import { decryptSecret } from "./orchestration/crypto.js";
 import { computeQueueDepthSnapshot } from "./orchestration/queue-depth.js";
@@ -68,6 +69,15 @@ const server = http.createServer(async (req, res) => {
           workspace,
           runSource: "native_manual",
           submit: body.submit !== false,
+          dryRun: body.dryRun === true,
+        });
+        send(res, 200, result);
+        return;
+      }
+      if (workspaceRun.kind === "outcome-run") {
+        const result = await runWorkspaceEmailOutcomes({
+          workspace,
+          runSource: "native_manual",
           dryRun: body.dryRun === true,
         });
         send(res, 200, result);
@@ -555,7 +565,7 @@ function bearerToken(req: http.IncomingMessage): string | undefined {
 function parseWorkspaceRunPath(
   method: string,
   url: string,
-): { workspaceId: string; kind: "apply-run" | "discover-run" } | null {
+): { workspaceId: string; kind: "apply-run" | "discover-run" | "outcome-run" } | null {
   if (method !== "POST") {
     return null;
   }
@@ -567,6 +577,10 @@ function parseWorkspaceRunPath(
   const discover = /^\/workspaces\/([^/]+)\/discover-run$/.exec(pathOnly);
   if (discover) {
     return { workspaceId: decodeURIComponent(discover[1]), kind: "discover-run" };
+  }
+  const outcome = /^\/workspaces\/([^/]+)\/outcome-run$/.exec(pathOnly);
+  if (outcome) {
+    return { workspaceId: decodeURIComponent(outcome[1]), kind: "outcome-run" };
   }
   return null;
 }
