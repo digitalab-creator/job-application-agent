@@ -20,5 +20,10 @@ export function fitLocationRejection(
     return null;
   }
   const detail = classifyLocationDetailed(role, `${requirements.workMode} ${stated}`, "");
-  return detail.verdict === "ineligible" && REJECTING_EVIDENCE.has(detail.evidence) ? detail.evidence : null;
+  const evidence = detail.evidence;
+  const rejecting =
+    REJECTING_EVIDENCE.has(evidence)
+    || evidence.startsWith("blocked_city:")
+    || evidence.startsWith("other_israel_region:");
+  return detail.verdict === "ineligible" && rejecting ? evidence : null;
 }

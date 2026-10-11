@@ -6,8 +6,8 @@
  */
 import {
   EXCLUDED_SCAN_CHARS,
+  findExcludedLocationMatch,
   getExcludedLocations,
-  textMatchesExcludedLocation,
 } from "../application/exclude-location.js";
 import {
   FOREIGN_LOCATION,
@@ -25,7 +25,10 @@ import { normalizeLocationAliases } from "./location-aliases.js";
  * Bump when the rules change meaning. Cached verdicts made by older rules are ignored,
  * so a rules fix is not defeated by stale "ineligible" answers on disk.
  */
-export const LOCATION_RULES_VERSION = 2;
+export const LOCATION_RULES_VERSION = 3;
+
+/** Job location is stated near the title; avoid footer office lists (Netanya, etc.). */
+const LOCATION_POLICY_HEAD_CHARS = 1_200;
 
 const REMOTE_FROM_ISRAEL: readonly RegExp[] = [
   latinTerm(String.raw`remote[\s]+(?:from|in)[\s]+israel|work[\s]+from[\s]+israel|based[\s]+in[\s]+israel`),
@@ -107,14 +110,27 @@ export function isIsraelLocationUncertain(title: string, snippet: string, url: s
  * Blocked-city check on the part of the text that states the job's location.
  * Shared by the rules and by the cache layer, so a freshly blocked city beats any cached "eligible".
  */
+function policyLocationHead(title: string, snippet: string, url: string): string {
+  return `${title} ${snippet.slice(0, LOCATION_POLICY_HEAD_CHARS)} ${safeDecode(url)}`.trim();
+}
+
 export function matchesExcludedLocationHead(
   title: string,
   snippet: string,
   url = "",
   excludedLocations: readonly string[] = getExcludedLocations(),
 ): boolean {
-  const head = `${title} ${snippet.slice(0, EXCLUDED_SCAN_CHARS)} ${safeDecode(url)}`;
-  return textMatchesExcludedLocation(head, excludedLocations);
+  return findExcludedLocationMatch(policyLocationHead(title, snippet, url), excludedLocations) !== null;
+}
+
+/** Which admin-blocked city matched in the location head (for logs and sheet Location column). */
+export function excludedLocationMatchInHead(
+  title: string,
+  snippet: string,
+  url = "",
+  excludedLocations: readonly string[] = getExcludedLocations(),
+): string | null {
+  return findExcludedLocationMatch(policyLocationHead(title, snippet, url), excludedLocations);
 }
 
 export function classifyLocationDetailed(
@@ -123,8 +139,14 @@ export function classifyLocationDetailed(
   url = "",
   excludedLocations: readonly string[] = getExcludedLocations(),
 ): LocationRulesDetail {
-  if (matchesExcludedLocationHead(title, snippet, url, excludedLocations)) {
-    return { verdict: "ineligible", evidence: "blocked_city" };
+  const policyHead = policyLocationHead(title, snippet, url);
+  const otherRegionInHead = firstMatch(OTHER_ISRAEL_REGIONS, policyHead);
+  if (otherRegionInHead) {
+    return { verdict: "ineligible", evidence: `other_israel_region:${otherRegionInHead}` };
+  }
+  const blockedCity = findExcludedLocationMatch(policyHead, excludedLocations);
+  if (blockedCity) {
+    return { verdict: "ineligible", evidence: `blocked_city:${blockedCity}` };
   }
   if (isForeignOnlySite(title, snippet, url)) {
     return { verdict: "ineligible", evidence: "foreign_only" };
@@ -144,8 +166,9 @@ export function classifyLocationDetailed(
   if (remote && israelContext) {
     return { verdict: "eligible", evidence: `remote+israel:${remote}` };
   }
-  if (matchesAny(OTHER_ISRAEL_REGIONS, text)) {
-    return { verdict: "ineligible", evidence: "other_israel_region" };
+  const otherRegion = firstMatch(OTHER_ISRAEL_REGIONS, text);
+  if (otherRegion) {
+    return { verdict: "ineligible", evidence: `other_israel_region:${otherRegion}` };
   }
   if (remote) {
     return { verdict: "needs_lookup", evidence: "remote_without_israel" };

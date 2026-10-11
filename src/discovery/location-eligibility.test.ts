@@ -146,7 +146,14 @@ test("Hebrew words that merely contain a city are not matched", () => {
 
 test("verdict carries evidence for the sheet Location column", () => {
   assert.equal(classifyLocationDetailed("Data Scientist Tel Aviv", "", "", NO_EXCLUDED).evidence, "metro:Tel Aviv");
-  assert.equal(classifyLocationDetailed("Engineer", "Office in Raanana", "", ["Raanana"]).evidence, "blocked_city");
+  assert.equal(classifyLocationDetailed("Engineer", "Office in Raanana", "", ["Raanana"]).evidence, "blocked_city:Raanana");
+});
+
+test("Jerusalem in the job header is other_israel_region with the city name", () => {
+  assert.equal(
+    classifyLocationDetailed("DevOps Engineer", "ירושלים משרה מלאה", "", NO_EXCLUDED).evidence,
+    "other_israel_region:ירושלים",
+  );
 });
 
 test("Netanya is only blocked through the admin list, not hardcoded geography", () => {

@@ -7,7 +7,10 @@ test("model-stated foreign location is rejected", () => {
 });
 
 test("model-stated other Israeli region is rejected", () => {
-  assert.equal(fitLocationRejection({ location: "Haifa, Israel", workMode: "onsite" }, "Growth Manager"), "other_israel_region");
+  assert.equal(
+    fitLocationRejection({ location: "Haifa, Israel", workMode: "onsite" }, "Growth Manager"),
+    "other_israel_region:Haifa",
+  );
 });
 
 test("Tel Aviv, plain Israel, remote and unknown all continue", () => {

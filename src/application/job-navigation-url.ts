@@ -64,6 +64,55 @@ export function greenhousePostUrlsForBoard(slug: string, jobId: string, eu = fal
 }
 
 /** Parse slug + job id from Greenhouse board URLs, embed tokens, and legacy boards links. */
+/** Greenhouse board slug from embed `for=`, `/slug`, or `/embed/job_board?for=`. */
+export function greenhouseBoardSlug(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (!/greenhouse\.io/i.test(parsed.hostname)) {
+      return null;
+    }
+    const forParam = parsed.searchParams.get("for")?.trim().toLowerCase() ?? "";
+    if (forParam && /^[a-z0-9][a-z0-9_-]*$/i.test(forParam)) {
+      return forParam;
+    }
+    const segment = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase() ?? "";
+    if (segment && !/^(embed|jobs)$/i.test(segment)) {
+      return segment;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** Broken embed board links (error=true) — recover via the public Greenhouse board listing. */
+export function greenhouseJobBoardRecoveryUrls(url: string): string[] {
+  try {
+    const parsed = new URL(url);
+    if (!/greenhouse\.io/i.test(parsed.hostname)) {
+      return [];
+    }
+    const slug = parsed.searchParams.get("for")?.trim().toLowerCase() ?? "";
+    if (!slug || !/^[a-z0-9][a-z0-9_-]*$/i.test(slug)) {
+      return [];
+    }
+    const brokenBoard =
+      /\/embed\/job_board\b/i.test(parsed.pathname) ||
+      parsed.searchParams.get("error") === "true";
+    if (!brokenBoard) {
+      return [];
+    }
+    const eu = parsed.hostname.includes(".eu.greenhouse.io");
+    const host = eu ? "job-boards.eu.greenhouse.io" : "job-boards.greenhouse.io";
+    return [
+      `https://${host}/${slug}`,
+      `https://boards.greenhouse.io/${slug}`,
+    ];
+  } catch {
+    return [];
+  }
+}
+
 export function greenhouseJobPostUrls(url: string): string[] {
   try {
     const parsed = new URL(url);
@@ -108,10 +157,13 @@ export function navigationRetryUrls(url: string): string[] {
   const fromPost = greenhouseJobPostUrls(url);
   const greenhouse = greenhouseBoardUrls(url);
   const directBoard = directGreenhouseUrlsForCareersUrl(url);
+  const boardRecovery = greenhouseJobBoardRecoveryUrls(url);
   const raw = url.trim();
-  const preferEmbedFirst = fromPost.length > 0 || greenhouse.length > 0 || directBoard.length > 0;
-  const legacyBoard = preferEmbedFirst && /^https:\/\/boards\.greenhouse\.io\//i.test(raw)
-    ? []
-    : [raw, normalized];
-  return [...new Set([...fromPost, ...greenhouse, ...directBoard, ...legacyBoard].filter(Boolean))];
+  const preferEmbedFirst =
+    fromPost.length > 0 || greenhouse.length > 0 || directBoard.length > 0 || boardRecovery.length > 0;
+  const skipLegacyRaw =
+    boardRecovery.length > 0 ||
+    (preferEmbedFirst && /^https:\/\/boards\.greenhouse\.io\//i.test(raw));
+  const legacyBoard = skipLegacyRaw ? [] : [raw, normalized];
+  return [...new Set([...fromPost, ...greenhouse, ...directBoard, ...boardRecovery, ...legacyBoard].filter(Boolean))];
 }

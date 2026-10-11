@@ -54,7 +54,8 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
     const discovery = await withSearchPolicy(searchPolicy, async () => runDiscovery({
       existingUrls,
       newQueueStats,
-      boardUrls: workspace.discoveryBoardUrls,
+      boardUrls:
+        workspace.discoveryBoardUrls.length > 0 ? workspace.discoveryBoardUrls : undefined,
       sheetRows: rows,
       actionableAutomatable: depth.automatableEmployment,
     }));

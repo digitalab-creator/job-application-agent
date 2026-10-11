@@ -239,6 +239,109 @@ def load_n8n_api_key() -> str:
     return ""
 
 
+def location_reason_index(events: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+    by_url: dict[str, str] = {}
+    by_attempt: dict[str, str] = {}
+    for ev in events:
+        if str(ev.get("event", "")) != "JOB_LOCATION_INELIGIBLE":
+            continue
+        reason = str(ev.get("reason", "")).strip()
+        if not reason:
+            continue
+        attempt_id = str(ev.get("attemptId", "")).strip()
+        url = str(ev.get("url", "")).strip()
+        if attempt_id:
+            by_attempt[attempt_id] = reason
+        if url:
+            by_url[url] = reason
+    return by_url, by_attempt
+
+
+def resolve_location_evidence(
+    row: dict,
+    notes: dict[str, str],
+    by_url: dict[str, str],
+    by_attempt: dict[str, str],
+) -> str:
+    loc = notes.get("location_evidence") or notes.get("reason", "")
+    if loc and loc != "blocked_city":
+        return loc
+    attempt_id = str(row.get("attemptId", "")).strip()
+    url = attempt_job_url(row)
+    from_log = by_attempt.get(attempt_id) or by_url.get(url) or ""
+    return from_log or loc
+
+
+def print_attempt_details(
+    attempts: list[dict],
+    events: list[dict] | None = None,
+) -> None:
+    """Per-attempt drill-down: URLs, location evidence, missing facts, fit gaps."""
+    by_url, by_attempt = location_reason_index(events or [])
+    interesting = [
+        row
+        for row in attempts
+        if not row.get("confirmationDetected") and attempt_outcome_label(row) != "confirmed"
+    ]
+    if not interesting:
+        return
+    print("## Attempt details (links & blockers)")
+    print("Ledger rows with URLs and parsed notes — use this when the summary table is too thin.\n")
+    for i, row in enumerate(interesting, start=1):
+        outcome = attempt_outcome_label(row)
+        company = str(row.get("company", "?"))
+        role = str(row.get("role", "?"))[:80]
+        url = attempt_job_url(row)
+        sheet_url = str(row.get("originalJobUrl") or "").strip()
+        print(f"### {i}. {company} — {role}")
+        print(f"- **Outcome:** `{outcome}`")
+        if url:
+            print(f"- **Apply URL:** {url}")
+        if sheet_url and sheet_url != url:
+            print(f"- **Sheet URL:** {sheet_url}")
+        notes = parse_attempt_notes(str(row.get("notes") or ""))
+        if outcome == "location_ineligible":
+            loc = resolve_location_evidence(row, notes, by_url, by_attempt)
+            if loc:
+                print(f"- **Location:** {format_location_evidence(loc)}")
+        if outcome == "missing_fact" or notes.get("blocker") == "missing_fact":
+            screening = notes.get("screening_blockers", "").strip()
+            if screening:
+                print("- **Missing fact / screening:**")
+                for line in screening.splitlines()[:6]:
+                    print(f"  - {line.strip()}")
+            else:
+                for line in str(row.get("notes") or "").splitlines():
+                    if line.strip() and not line.startswith("result=") and "blocker=" not in line:
+                        if "grounded" in line.lower() or "answer" in line.lower():
+                            print(f"- **Screening:** {line.strip()[:200]}")
+        if notes.get("missing_must_haves"):
+            print(f"- **Fit gaps:** {notes['missing_must_haves'][:280]}")
+        if notes.get("risks"):
+            print(f"- **Risks:** {notes['risks'][:280]}")
+        why = failure_reason(row)
+        if why:
+            print(f"- **Summary:** {why[:300]}")
+        print()
+    print()
+
+
+def print_queue_row_issues(queue: dict | None) -> None:
+    issues = queue.get("new_row_issues") if queue else None
+    if not issues:
+        return
+    print("## Sheet `New` rows blocking auto-apply (sample)")
+    print("| Issue | Company | Role | Job URL cell |")
+    print("|-------|---------|------|--------------|")
+    for row in issues[:20]:
+        issue = str(row.get("issue", "?"))
+        company = str(row.get("company", "?"))[:24].replace("|", "/")
+        role = str(row.get("role", "?"))[:32].replace("|", "/")
+        job_url = str(row.get("jobUrl", ""))[:80].replace("|", "/") or "—"
+        print(f"| `{issue}` | {company} | {role} | {job_url} |")
+    print()
+
+
 def native_queue_snapshot() -> dict[str, int | str] | None:
     token = load_token()
     if not token:
@@ -254,6 +357,8 @@ def native_queue_snapshot() -> dict[str, int | str] | None:
         "automatable_employment": int(payload.get("automatableEmployment", 0)),
         "freelance_new": int(payload.get("freelanceNew", 0)),
         "manual_only": int(payload.get("manualOnlyEmployment", 0)),
+        "invalid_url": int(payload.get("invalidUrl", 0)),
+        "new_row_issues": payload.get("newRowIssues") or [],
     }
 
 
@@ -270,6 +375,8 @@ def sheet_queue_snapshot() -> dict[str, int] | None:
                 "pick_jobs_output": int(native["eligible_employment"]),
                 "eligible_employment": int(native["eligible_employment"]),
                 "freelance_new": int(native.get("freelance_new", 0)),
+                "invalid_url": int(native.get("invalid_url", 0)),
+                "new_row_issues": native.get("new_row_issues") or [],
             }
     api = load_n8n_api_key()
     if not api:
@@ -475,15 +582,108 @@ def attempt_outcome_label(row: dict) -> str:
     return "no_confirmation"
 
 
-def failure_reason(row: dict) -> str:
+def attempt_job_url(row: dict) -> str:
+    return str(row.get("canonicalJobUrl") or row.get("originalJobUrl") or row.get("url") or "").strip()
+
+
+def parse_attempt_notes(notes: str) -> dict[str, str]:
+    """Pull `key=value` lines and well-known prefixes from multiline attempt notes."""
+    parsed: dict[str, str] = {}
+    blockers: list[str] = []
+    for line in str(notes or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("blocker=") and "=" in line:
+            parsed["blocker"] = line.split("=", 1)[1].strip()
+            continue
+        if line.startswith("reason=") and "=" in line:
+            parsed["reason"] = line.split("=", 1)[1].strip()
+            continue
+        if "=" in line and not line.startswith("http"):
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key and key.replace("_", "").isalnum():
+                parsed[key] = value.strip()
+            continue
+        if line.startswith("No grounded answer") or line.startswith("Could not write"):
+            blockers.append(line)
+        elif line.startswith("LLM answer could not"):
+            blockers.append(line)
+        elif parsed.get("blocker") == "missing_fact" and not line.startswith("result="):
+            blockers.append(line)
+    if blockers:
+        parsed["screening_blockers"] = "\n".join(blockers)
+    return parsed
+
+
+def format_location_evidence(evidence: str) -> str:
+    text = str(evidence or "").strip()
+    if not text:
+        return ""
+    if text.startswith("other_israel_region:"):
+        region = text.split(":", 1)[1].strip()
+        return f"Outside pursue geography: **{region}** (policy: remote or Central/Tel Aviv District only)"
+    if text == "other_israel_region":
+        return "Outside pursue geography (e.g. Jerusalem/Haifa — city not stored on this ledger row)"
+    if text.startswith("blocked_city:"):
+        city = text.split(":", 1)[1].strip()
+        return f"Blocked city: **{city}** (admin exclude list)"
+    if text == "blocked_city":
+        return "Blocked city (admin exclude list; city name missing on this row — check apply URL or re-run after worker update)"
+    if text.startswith("job_fit:"):
+        return f"Fit model location: `{text}`"
+    if text.startswith("llm_ok:") or text.startswith("llm_reject:"):
+        return f"LLM location lookup: {text[:160]}"
+    return text[:200]
+
+
+def failure_reason(row: dict, *, include_url: bool = False) -> str:
     if row.get("confirmationDetected"):
-        return "Submission confirmed on site."
+        base = "Submission confirmed on site."
+        if include_url:
+            url = attempt_job_url(row)
+            return f"{base} Link: {url}" if url else base
+        return base
     label = attempt_outcome_label(row)
+    notes = parse_attempt_notes(str(row.get("notes") or ""))
+    parts: list[str] = []
     if label in BLOCKER_WHY:
-        return BLOCKER_WHY[label]
-    if label == "no_confirmation":
-        return "Worker finished without confirmation signal (check logs / sheet Notes)."
-    return f"Blocker `{label}` — see sheet Notes or worker logs."
+        parts.append(BLOCKER_WHY[label])
+    elif label == "no_confirmation":
+        parts.append("Worker finished without confirmation signal (check logs / sheet Notes).")
+    else:
+        parts.append(f"Blocker `{label}`.")
+
+    if label == "location_ineligible":
+        loc = notes.get("location_evidence") or notes.get("reason", "")
+        detail = format_location_evidence(loc)
+        if detail:
+            parts.append(detail)
+    elif label == "missing_fact":
+        screening = notes.get("screening_blockers", "").strip()
+        if screening:
+            parts.append(screening.replace("\n", " | ")[:240])
+        elif notes.get("blocker") == "missing_fact":
+            parts.append("See screening_blockers in ledger notes.")
+    elif label in {"no_suitable_replacement", "not_relevant", "full_job_fit_failed"}:
+        if notes.get("missing_must_haves"):
+            parts.append(f"Missing must-haves: {notes['missing_must_haves'][:200]}")
+        if notes.get("fit_score"):
+            parts.append(f"fit_score={notes['fit_score']}")
+        for line in str(row.get("notes") or "").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("The link opened") or stripped.startswith("No opening on this list"):
+                parts.append(stripped[:200])
+                break
+    elif label == "review_required" and notes.get("screening_blockers"):
+        parts.append(notes["screening_blockers"].replace("\n", " | ")[:240])
+
+    if include_url:
+        url = attempt_job_url(row)
+        if url:
+            parts.append(f"Link: {url}")
+    return " ".join(parts).replace("|", "/")[:320]
 
 
 def cv_paths_from_attempts(attempts: list[dict]) -> set[str]:
@@ -739,7 +939,17 @@ def job_attempts_from_events(events: list[dict]) -> list[JobLogAttempt]:
                 cause = BLOCKER_WHY["navigation_failed"]
             elif name == "JOB_LOCATION_INELIGIBLE":
                 outcome = "location_ineligible"
-                cause = LOG_OUTCOME_WHY["location_ineligible"]
+                reason = str(ev.get("reason", "")).strip()
+                source = str(ev.get("source", "")).strip()
+                url_ev = str(ev.get("url", "")).strip()
+                bits: list[str] = []
+                if reason:
+                    bits.append(format_location_evidence(reason))
+                if source and source != reason:
+                    bits.append(f"source={source}")
+                if url_ev:
+                    bits.append(f"Link: {url_ev}")
+                cause = " — ".join(bits) if bits else LOG_OUTCOME_WHY["location_ineligible"]
             elif name == "JOB_PAGE_UNCONFIRMED":
                 outcome = "unconfirmed_page"
                 cause = LOG_OUTCOME_WHY["unconfirmed_page"]
@@ -1018,7 +1228,13 @@ def print_report(day: str | None = None) -> int:
             f"Pick Jobs output: **{queue['pick_jobs_output']}** (exec `{queue['execution_id']}`)"
         )
         skipped = queue["status_new"] - queue["automatable_new"]
-        if skipped > 0:
+        invalid_n = queue.get("invalid_url")
+        if isinstance(invalid_n, int) and invalid_n > 0:
+            print(
+                f"- **{invalid_n}** `New` employment rows have **missing or invalid** Job URL "
+                f"(automatable http(s): **{queue['automatable_new']}**)."
+            )
+        elif skipped > 0:
             print(f"- **{skipped}** `New` rows have no usable http(s) link (or a known junk URL).")
         if queue["pick_jobs_output"] < attempt_cap and queue["automatable_new"] >= attempt_cap:
             print(
@@ -1031,6 +1247,7 @@ def print_report(day: str | None = None) -> int:
                 f"{discover_depth_threshold} ({DISCOVER_SKIP_NEW_MULTIPLIER}× attempt safety cap {attempt_cap})."
             )
         print()
+        print_queue_row_issues(queue)
 
     if health:
         print("## Worker health")
@@ -1087,16 +1304,21 @@ def print_report(day: str | None = None) -> int:
     if not log_jobs:
         print("- No `JOB_OPENED` events in today's docker logs.")
     else:
-        print("| # | Outcome | Company | Role | Exact cause |")
-        print("|---|---------|---------|------|-------------|")
+        print("| # | Outcome | Company | Role | Link | Exact cause |")
+        print("|---|---------|---------|------|------|-------------|")
         for i, row in enumerate(log_jobs, start=1):
             company = row.company[:26]
             role = row.role[:36]
-            why = row.cause.replace("|", "/")[:160]
-            print(f"| {i} | `{row.outcome}` | {company} | {role} | {why} |")
+            link = (row.url or "")[:56].replace("|", "/")
+            if len(row.url or "") > 56:
+                link += "…"
+            why = row.cause.replace("|", "/")[:140]
+            print(f"| {i} | `{row.outcome}` | {company} | {role} | {link or '—'} | {why} |")
         print()
 
     print_unanswered_questions(log_jobs)
+
+    print_attempt_details(attempts, events)
 
     print("## Apply attempts (worker ledger, chronological)")
     if not attempts:
@@ -1110,11 +1332,11 @@ def print_report(day: str | None = None) -> int:
         print("| # | Time (UTC) | Outcome | Company | Role | Why |")
         print("|---|------------|---------|---------|------|-----|")
         for i, row in enumerate(attempts, start=1):
-            at = str(row.get("at", ""))[:19]
+            at = str(row.get("finishedAt") or row.get("startedAt") or row.get("at", ""))[:19]
             outcome = attempt_outcome_label(row)
             company = str(row.get("company", "?"))[:28]
             role = str(row.get("role", "?"))[:40]
-            why = failure_reason(row).replace("|", "/")[:120]
+            why = failure_reason(row, include_url=True).replace("|", "/")[:200]
             print(f"| {i} | {at} | `{outcome}` | {company} | {role} | {why} |")
         if cv_orphan:
             print()

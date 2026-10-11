@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from n8n_orchestration import n8n_env_file  # noqa: E402
+from n8n_orchestration import WORKFLOW_EXPORT_DIR, n8n_env_file  # noqa: E402
 
 ENV_FILE = ROOT / ".env"
 N8N_ENV = n8n_env_file()
@@ -151,15 +151,7 @@ def load_n8n_api_key() -> str:
     return ""
 
 
-def fetch_live_sheet_rows(api: str) -> list[ReviewRow]:
-    workflow_url = f"http://127.0.0.1:5678/api/v1/workflows/{APPLY_WF_ID}"
-    request = urllib.request.Request(workflow_url, headers={"X-N8N-API-KEY": api})
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            workflow = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as error:
-        raise LiveSheetError(f"could not load apply workflow configuration: {type(error).__name__}") from error
-
+def sheet_ids_from_workflow(workflow: dict) -> tuple[str, str]:
     read_node = next(
         (
             node for node in workflow.get("nodes", [])
@@ -172,6 +164,37 @@ def fetch_live_sheet_rows(api: str) -> list[ReviewRow]:
     sheet_id = parameters.get("sheetName", {}).get("value")
     if not document_id or not sheet_id:
         raise LiveSheetError("Read Jobs node has no Google Sheet document or tab configured")
+    return str(document_id), str(sheet_id)
+
+
+def load_apply_workflow(api: str) -> dict:
+    workflow_url = f"http://127.0.0.1:5678/api/v1/workflows/{APPLY_WF_ID}"
+    request = urllib.request.Request(workflow_url, headers={"X-N8N-API-KEY": api})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise LiveSheetError(
+                f"could not load apply workflow configuration: HTTPError {error.code}"
+            ) from error
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as error:
+        raise LiveSheetError(f"could not load apply workflow configuration: {type(error).__name__}") from error
+
+    export_path = WORKFLOW_EXPORT_DIR / f"wf-{APPLY_WF_ID}.json"
+    if not export_path.is_file():
+        raise LiveSheetError(
+            f"apply workflow {APPLY_WF_ID} missing in n8n and no export at {export_path}"
+        )
+    try:
+        return json.loads(export_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise LiveSheetError(f"could not parse workflow export {export_path.name}") from error
+
+
+def fetch_live_sheet_rows(api: str) -> list[ReviewRow]:
+    workflow = load_apply_workflow(api)
+    document_id, sheet_id = sheet_ids_from_workflow(workflow)
 
     export_url = (
         f"https://docs.google.com/spreadsheets/d/{urllib.parse.quote(str(document_id), safe='')}"

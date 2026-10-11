@@ -27,6 +27,12 @@ test("empty links and known junk placeholders are skipped", () => {
     isAutomatableApplyUrl("https://www.comeet.com/jobs/stampli/F6.007/0B.273"),
     false,
   );
+  assert.equal(
+    isAutomatableApplyUrl(
+      "https://www.comeet.com/jobs/stampli/F6.007/senior-machine-learning-engineer/0B.273",
+    ),
+    true,
+  );
 });
 
 test("URL validation rejects malformed and non-web schemes before navigation", () => {
