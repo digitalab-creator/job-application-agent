@@ -35,8 +35,8 @@ test("30-day batch of 20 follows category allocation", () => {
   assert.equal(total, 20);
 });
 
-test("implied marketing queue share is 65%", () => {
-  assert.equal(trackerMarketingShareFromCategories(), 0.65);
+test("implied marketing queue share includes MarTech at 80%", () => {
+  assert.equal(trackerMarketingShareFromCategories(), 0.80);
 });
 
 test("CV persona hints per tracker category", () => {
