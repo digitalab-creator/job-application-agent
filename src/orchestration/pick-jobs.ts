@@ -92,6 +92,7 @@ export function pickWorkspaceApplyBatch(
   const { selected, pickedTech, pickedMarketing } = selectApplyDailyBatch(
     withCategory,
     (item) => sheetMatchScore(item.row),
+    cap,
   );
   return {
     selected: selected.map((item) => item.row).slice(0, cap),
