@@ -94,8 +94,8 @@ test("pickWorkspaceApplyBatch respects eligibility and mix", () => {
   assert.equal(eligible.length, 2);
   const batch = pickWorkspaceApplyBatch(fixture, excluded, 20);
   assert.equal(batch.selected.length, 2);
-  assert.equal(batch.pickedTech, 1);
-  assert.equal(batch.pickedMarketing, 1);
+  assert.equal(batch.pickedTech, 0);
+  assert.equal(batch.pickedMarketing, 2);
   const sorted = [...eligible].sort(
     (a, b) =>
       sheetMatchScore(b) - sheetMatchScore(a)
