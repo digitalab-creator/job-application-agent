@@ -29,7 +29,11 @@ export function resolveLeadIdentity(input: {
   const fromSheet = input.trackerCategory?.trim()
     ? leadIdentityForTrackerCategory(input.trackerCategory)
     : null;
+  // The full-job-description fit selects the final persona. A stale tracker category
+  // may suggest a different lane: do not let it force a misleading CV headline.
   if (fromSheet) {
+    if (input.persona === "technical" && fromSheet !== "applied_ai") return "applied_ai";
+    if (input.persona === "marketing" && fromSheet === "applied_ai") return "performance";
     return fromSheet;
   }
   if (input.persona === "marketing") {
