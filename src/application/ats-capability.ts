@@ -29,6 +29,10 @@ export function resolveApplyCapability(url: string): AtsCapability {
   if (isKnownBlockedApplyUrl(href)) {
     return "invalid";
   }
+  // Category/search links are not individual openings, even if their host normally supports apply.
+  if (isListingOrSearchPage(parsed)) {
+    return "manual_only";
+  }
   if (/(^|\.)linkedin\.com$/i.test(parsed.hostname) && !linkedinEasyApplyEnabled()) {
     return "manual_only";
   }
@@ -53,6 +57,22 @@ export function resolveApplyCapability(url: string): AtsCapability {
 
 export function isAutomatableCapability(capability: AtsCapability): boolean {
   return capability === "supported_auto" || capability === "resolvable";
+}
+
+/** Conservative known-host listing patterns; never mistake an ATS board for a job. */
+function isListingOrSearchPage(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase().replace(/\\/+$/, "") || "/";
+  if (/(^|\\.)drushim\\.co\\.il$/.test(host) && /^\\/jobs\\/(subcat|cat|category|q-)/.test(path)) return true;
+  if (/(^|\\.)jobmaster\\.co\\.il$/.test(host) && /^\\/jobs\\/(q-|search|category)/.test(path)) return true;
+  if (/(^|\\.)linkedin\\.com$/.test(host) && /^\\/jobs\\/(search|collections)(?:\\/|$)/.test(path)) return true;
+  if (/(^|\\.)gotfriends\\.co\\.il$/.test(host) && /^\\/jobslobby\\//.test(path) && !/\\/\\d+$/.test(path)) return true;
+  if (/(^|\\.)comeet\\.com$/.test(host) && /^\\/jobs\\/[^/]+\\/?$/.test(path)) return true;
+  if (/^(boards\\.greenhouse\\.io|job-boards\\.greenhouse\\.io)$/.test(host) && !/\\/jobs\\/\\d+(?:\\/|$)/.test(path)) return true;
+  if (host === "jobs.lever.co" && /^\\/[^/]+$/.test(path)) return true;
+  if (/^(jobs\\.ashbyhq\\.com)$/.test(host) && /^\\/[^/]+$/.test(path)) return true;
+  if (/(^|\\.)indeed\\.com$/.test(host) && path === "/jobs") return true;
+  return false;
 }
 
 function isAggregatorListPage(href: string, pathname: string): boolean {
