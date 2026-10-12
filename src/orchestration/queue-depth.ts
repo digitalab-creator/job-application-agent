@@ -27,6 +27,8 @@ export type QueueDepthSnapshot = {
   statusNew: number;
   eligibleEmployment: number;
   automatableEmployment: number;
+  resolvableEmployment: number;
+  actionableEmployment: number;
   manualOnlyEmployment: number;
   freelanceNew: number;
   cooling: number;
@@ -44,6 +46,7 @@ export function computeQueueDepthSnapshot(
   let statusNew = 0;
   let eligibleEmployment = 0;
   let automatableEmployment = 0;
+  let resolvableEmployment = 0;
   let manualOnlyEmployment = 0;
   let freelanceNew = 0;
   let cooling = 0;
@@ -118,6 +121,8 @@ export function computeQueueDepthSnapshot(
     const cap = resolveApplyCapability(url);
     if (cap === "supported_auto") {
       automatableEmployment += 1;
+    } else if (cap === "resolvable") {
+      resolvableEmployment += 1;
     }
   }
 
@@ -132,6 +137,8 @@ export function computeQueueDepthSnapshot(
     statusNew,
     eligibleEmployment,
     automatableEmployment,
+    resolvableEmployment,
+    actionableEmployment: automatableEmployment + resolvableEmployment,
     manualOnlyEmployment,
     freelanceNew,
     cooling,
