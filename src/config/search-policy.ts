@@ -119,8 +119,6 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
     }
   }
 
-  const focusRaw = settings.get("career_focus_mode")?.toLowerCase();
-  const careerFocusMode = focusRaw === "recovery" ? "recovery" : "balanced";
   const version = settings.get("policy_version") ?? settings.get("policy version") ?? base.version;
   const minScore = parseIntSetting(settings, "discovery_min_match_score", base.discoveryMinMatchScore);
   const discoverEnabled = parseBoolSetting(settings, "discover_enabled", base.discoverEnabled);
@@ -129,6 +127,9 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
     "skip_discover_when_unresolved_gte",
     base.skipDiscoverWhenUnresolvedGte,
   );
+
+  const focusRaw = settings.get("career_focus_mode")?.toLowerCase();
+  const careerFocusMode = focusRaw === "recovery" ? "recovery" : "balanced";
 
   let categoryWeights = careerFocusMode === "recovery" ? new Map(RECOVERY_CATEGORY_TARGET_SHARE) : weights.size > 0 ? weights : base.categoryWeights;
   categoryWeights = normalizeCategoryWeights(categoryWeights);
