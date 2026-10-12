@@ -14,7 +14,7 @@ export function renderCvHtml(doc: CvDocument, persona: Persona): string {
     }
     const bullets = role.bullets.map((bullet) => `<li>${escapeHtml(polishCvText(bullet.text))}</li>`).join("");
     return `<section>
-      <h2>${escapeHtml(record.company)}</h2>
+      <h2>${escapeHtml(role.roleId === "caseedge" ? (persona === "marketing" ? "Digitalab" : "CaseEdge") : record.company)}</h2>
       <p class="meta">${escapeHtml(role.title)} · ${escapeHtml(formatRoleDateRange(record.start, record.end))}</p>
       <ul>${bullets}</ul>
     </section>`;
