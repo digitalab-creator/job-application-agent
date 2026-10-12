@@ -22,7 +22,7 @@ export const TRACKER_CATEGORY_QUEUE_SIDE = new Map<string, "tech" | "marketing">
   ["Performance Marketing Leadership", "marketing"],
   ["Revenue Systems", "marketing"],
   ["Analytics & CRO", "marketing"],
-  ["Marketing Technology", "tech"],
+  ["Marketing Technology", "marketing"],
   ["AI Solutions", "tech"],
   ["Applied AI", "tech"],
 ]);
