@@ -7,6 +7,7 @@ import { resolveJobLocationVerdict } from "./resolve-location-eligibility.js";
 import { getSearchPolicy } from "../config/search-policy-runtime.js";
 import { CANONICAL_TRACKER_CATEGORIES } from "./tracker-category-weights.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
+import { specialistDiscoveryReason } from "./specialist-role.js";
 
 function discoveryScoreSystemPrompt(): string {
   const categories = CANONICAL_TRACKER_CATEGORIES.join(" | ");
@@ -88,6 +89,8 @@ export async function scoreDiscoveryJobs(
     if (!opening) {
       continue;
     }
+    // Do not inflate unsupported narrow research/vision/systems roles from a short board title.
+    if (specialistDiscoveryReason(opening.title)) continue;
     const locationVerdict = await resolveJobLocationVerdict({
       title: opening.title,
       snippet: opening.snippet,
