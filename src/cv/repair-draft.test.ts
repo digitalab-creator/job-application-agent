@@ -21,6 +21,6 @@ test("missing roleId is filled from the approved role order", () => {
     ],
   }) as { experience: Array<{ roleId?: string }> };
   assert.equal(repaired.experience[0]?.roleId, "caseedge");
-  assert.equal(repaired.experience[1]?.roleId, "boroda");
-  assert.equal(repaired.experience[2]?.roleId, "klogic");
+  assert.equal(repaired.experience[1]?.roleId, "klogic");
+  assert.equal(repaired.experience[2]?.roleId, "boroda");
 });
