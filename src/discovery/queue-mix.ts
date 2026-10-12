@@ -33,7 +33,7 @@ export const MARKETING_SHEET_CATEGORIES = new Set([
 const CATEGORY_DISCOVERY_BOOST = new Map<string, number>([
   ["Performance Marketing Leadership", 3],
   ["Revenue Systems", 2],
-  ["Marketing Technology", 2],
+  ["Marketing Technology", 3],
   ["Analytics & CRO", 1],
   ["AI Solutions", 1],
   ["Applied AI", 1],
@@ -56,7 +56,7 @@ const EXCEPTIONAL_TECH = 90;
 export const DAILY_APPLY_BATCH_LIMIT = 20;
 
 /** Default marketing-side share (~65%). Must match tracker-category-weights; n8n drift script reads this literal. */
-export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = 0.65;
+export const QUEUE_MIX_MARKETING_SHARE_DEFAULT = 0.80;
 
 /** Marketing share of tech+marketing slots (0–1). Env: `QUEUE_MIX_MARKETING_SHARE`. */
 export function queueMixMarketingShare(): number {
