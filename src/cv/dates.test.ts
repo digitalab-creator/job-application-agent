@@ -13,3 +13,7 @@ test("current role uses year–present", () => {
 test("multi-year range uses years only", () => {
   assert.equal(formatRoleDateRange("2022", "2024"), "2022–2024");
 });
+
+test("2024 end date remains 2024 despite January 2025 notice expiry", () => {
+  assert.equal(formatRoleDateRange("May 2022","Dec 2024"),"2022–2024");
+});
