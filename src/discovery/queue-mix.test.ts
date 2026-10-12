@@ -32,7 +32,7 @@ test("heavy tech queue uses configured marketing share for discovery batch", () 
     { category: "Growth Marketing" },
   ]));
   assert.equal(policy.mode, "heavy_tech");
-  assert.equal(policy.targetMarketingShareOfBatch, 0.65);
+  assert.equal(policy.targetMarketingShareOfBatch, 0.80);
 });
 
 test("tech-heavy policy blocks 80-score Applied AI but allows 90+", () => {
