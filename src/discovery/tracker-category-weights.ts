@@ -1,3 +1,4 @@
+/** Marketing Technology describes marketing/revenue execution even when CV is hybrid. */
 /** Canonical tracker categories and default allocation (shares sum to 1). SSOT for code defaults; sheet Search Config overrides at runtime. */
 export type CategoryWeightMap = Map<string, number>;
 
@@ -16,7 +17,7 @@ const QUEUE_SIDE = new Map<string, "tech" | "marketing">([
   ["Performance Marketing Leadership", "marketing"],
   ["Revenue Systems", "marketing"],
   ["Analytics & CRO", "marketing"],
-  ["Marketing Technology", "tech"],
+  ["Marketing Technology", "marketing"],
   ["AI Solutions", "tech"],
   ["Applied AI", "tech"],
 ]);
