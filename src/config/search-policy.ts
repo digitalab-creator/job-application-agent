@@ -16,6 +16,7 @@ export type SearchPolicy = {
   skipDiscoverWhenUnresolvedGte: number;
   categoryWeights: CategoryWeightMap;
   configSource: SearchConfigSource;
+  careerFocusMode: "balanced" | "recovery";
   parseWarnings: string[];
 };
 
@@ -27,6 +28,7 @@ export function defaultSearchPolicy(): SearchPolicy {
     skipDiscoverWhenUnresolvedGte: 100,
     categoryWeights: new Map(TRACKER_CATEGORY_TARGET_SHARE),
     configSource: "defaults",
+    careerFocusMode: "balanced",
     parseWarnings: [],
   };
 }
@@ -107,6 +109,8 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
     }
   }
 
+  const focusRaw = settings.get("career_focus_mode")?.toLowerCase();
+  const careerFocusMode = focusRaw === "recovery" ? "recovery" : "balanced";
   const version = settings.get("policy_version") ?? settings.get("policy version") ?? base.version;
   const minScore = parseIntSetting(settings, "discovery_min_match_score", base.discoveryMinMatchScore);
   const discoverEnabled = parseBoolSetting(settings, "discover_enabled", base.discoverEnabled);
@@ -130,6 +134,7 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
 
   return {
     version,
+    careerFocusMode,
     discoveryMinMatchScore: clampScore(minScore),
     discoverEnabled,
     skipDiscoverWhenUnresolvedGte: Math.max(0, unresolvedGte),
