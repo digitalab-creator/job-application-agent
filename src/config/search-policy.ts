@@ -6,6 +6,16 @@ import { trackerMarketingShareFromCategoryWeights } from "../discovery/tracker-c
 
 export const SEARCH_POLICY_DEFAULT_VERSION = "2026-03-26-targeting-v1";
 
+/** Opt-in mix for the internal recovery effort: 45% performance/CRO, 35% MarTech/Revenue, 20% applied AI. */
+export const RECOVERY_CATEGORY_TARGET_SHARE: CategoryWeightMap = new Map([
+  ["Performance Marketing Leadership", 0.40],
+  ["Analytics & CRO", 0.05],
+  ["Revenue Systems", 0.15],
+  ["Marketing Technology", 0.20],
+  ["AI Solutions", 0.10],
+  ["Applied AI", 0.10],
+]);
+
 export type SearchConfigSource = "sheet_key_value" | "sheet_category_table" | "defaults";
 
 export type SearchPolicy = {
@@ -120,7 +130,7 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
     base.skipDiscoverWhenUnresolvedGte,
   );
 
-  let categoryWeights = weights.size > 0 ? weights : base.categoryWeights;
+  let categoryWeights = careerFocusMode === "recovery" ? new Map(RECOVERY_CATEGORY_TARGET_SHARE) : weights.size > 0 ? weights : base.categoryWeights;
   categoryWeights = normalizeCategoryWeights(categoryWeights);
 
   const configSource: SearchConfigSource = weights.size > 0
