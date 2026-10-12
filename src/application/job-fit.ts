@@ -124,14 +124,15 @@ export function evaluateJobFit(
     ...new Set(evidenceCheck.supportedRows.flatMap((row) => row.factIds)),
     ...analysis.matchedFactIds.filter((id) => factIds.has(id)),
   ];
-  const matchedMustHaves = unique([
-    ...evidenceCheck.supportedRows.map((row) => row.requirement),
-    ...analysis.matchedMustHaves,
-  ]);
+  // Only grounded evidence rows count as matched must-haves; ungrounded LLM labels do not.
+  const matchedMustHaves = unique(evidenceCheck.supportedRows.map((row) => row.requirement));
   const reportedMissing = unique([
     ...evidenceCheck.missingRequirements,
     ...analysis.missingMustHaves,
-  ]);
+    ...analysis.requirements.mustHaveSkills.filter((requirement) =>
+      !matchedMustHaves.some((matched) => matched.toLowerCase() === requirement.toLowerCase())),
+  ]).filter((requirement) =>
+    !matchedMustHaves.some((matched) => matched.toLowerCase() === requirement.toLowerCase()));
   const softGaps = reportedMissing.filter(isNonHardRequirement);
   const factText = verifiedFacts.map((fact) => fact.text).join("\n");
   const mentoringGaps = reportedMissing.filter((requirement) => coveredByMentoringFact(requirement, factText));
