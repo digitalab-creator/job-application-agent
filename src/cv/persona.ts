@@ -71,9 +71,9 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     summaryFactId: "summary-technical",
     skills: TECHNICAL_SKILLS,
     roleFactIds: {
-      caseedge: ["caseedge-production", "caseedge-stack", "caseedge-entity-matching", "caseedge-forecasting"],
+      caseedge: ["caseedge-production", "caseedge-stack", "caseedge-entity-matching", "caseedge-forecasting"],      klogic: ["klogic-pipelines", "klogic-cellcom-tech"],
+
       boroda: ["boroda-platform", "boroda-adoption"],
-      klogic: ["klogic-pipelines", "klogic-cellcom-tech"],
       fullpower: ["fullpower-build", "fullpower-combined"],
       independent: ["independent-agency", "independent-adtech"],
     },
@@ -84,9 +84,9 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
     summaryFactId: "summary-marketing",
     skills: MARKETING_SKILLS,
     roleFactIds: {
-      caseedge: ["caseedge-advisory", "caseedge-campaigns", "caseedge-launched"],
+      caseedge: ["caseedge-advisory", "caseedge-campaigns", "caseedge-launched"],      klogic: ["klogic-cellcom-mkt", "klogic-workflows", "klogic-ai-implementation-lead", "klogic-enterprise"],
+
       boroda: ["boroda-accounts", "boroda-watch-mkt", "boroda-cpa", "boroda-mentor"],
-      klogic: ["klogic-cellcom-mkt", "klogic-workflows", "klogic-ai-implementation-lead", "klogic-enterprise"],
       fullpower: ["fullpower-paid", "fullpower-tracking", "fullpower-visibility"],
       independent: ["independent-acquisition", "independent-supervisor-agency", "independent-specialized"],
     },
@@ -110,9 +110,9 @@ export const personaDefaults: Record<Persona, PersonaDefaults> = {
       "Webhooks",
     ],
     roleFactIds: {
-      caseedge: ["caseedge-production", "caseedge-stack", "caseedge-advisory"],
+      caseedge: ["caseedge-production", "caseedge-stack", "caseedge-advisory"],      klogic: ["klogic-pipelines", "klogic-ai-implementation-lead", "klogic-cellcom-mkt"],
+
       boroda: ["boroda-platform", "boroda-accounts"],
-      klogic: ["klogic-pipelines", "klogic-ai-implementation-lead", "klogic-cellcom-mkt"],
       fullpower: ["fullpower-build", "fullpower-tracking"],
       independent: ["independent-crm-built", "independent-crm-integrations", "independent-adtech"],
     },
