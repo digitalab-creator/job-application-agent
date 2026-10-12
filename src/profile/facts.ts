@@ -278,6 +278,33 @@ export const facts: Fact[] = [
     personas: ["technical", "hybrid"],
     verified: true,
   },
+  // Evidence: legal-ai main/services/backend/app/domains/rag/services/rag/processing/formatting/llm/tool_calling.py
+  {
+    id: "caseedge-llm-tool-calling",
+    roleId: "caseedge",
+    text: "Implemented iterative LLM tool-calling in CaseEdge RAG answering workflows, with execution limits, timeout handling, and per-job cost safeguards.",
+    tags: ["llm", "agents", "tool-calling", "production"],
+    personas: ["technical", "hybrid"],
+    verified: true,
+  },
+  // Evidence: legal-ai main/services/backend/app/domains/documents/temporal and app/domains/capacity/scaling/temporal_queue_metrics.py
+  {
+    id: "caseedge-async-event-driven",
+    roleId: "caseedge",
+    text: "Implemented asynchronous, event-driven document processing with Temporal workflows, task queues, background workers, retries and recovery, and worker queue-health monitoring.",
+    tags: ["backend", "async", "event-driven", "temporal", "queues", "reliability"],
+    personas: ["technical", "hybrid"],
+    verified: true,
+  },
+  // Evidence: legal-ai main/services/backend/app/domains/capacity/scaling/rate_limit_calculator.py and app/domains/documents/temporal/circuit_breaker.py
+  {
+    id: "caseedge-capacity-reliability-tradeoffs",
+    roleId: "caseedge",
+    text: "Designed CaseEdge backend resource controls for API rate limits, worker concurrency, queue capacity, provider failure isolation, and LLM cost budgets; this is design and operation experience, not a claim of measured high-throughput load.",
+    tags: ["backend", "system-design", "capacity", "reliability", "cost"],
+    personas: ["technical", "hybrid"],
+    verified: true,
+  },
   {
     id: "fullpower-javascript-web",
     roleId: "fullpower",
