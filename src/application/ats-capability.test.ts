@@ -42,3 +42,20 @@ test("LinkedIn stays manual until Easy Apply is explicitly enabled", () => {
 test("malformed URLs are invalid", () => {
   assert.equal(resolveApplyCapability("not-a-url"), "invalid");
 });
+
+
+test("category listings do not consume browser-apply slots", () => {
+  const listingUrls = [
+    "https://www.drushim.co.il/jobs/subcat/512/?q=ai",
+    "https://www.jobmaster.co.il/jobs/q-AI/",
+    "https://www.linkedin.com/jobs/search/?keywords=engineer",
+    "https://www.comeet.com/jobs/acme/",
+    "https://boards.greenhouse.io/acme",
+    "https://jobs.lever.co/acme",
+  ];
+  for (const url of listingUrls) {
+    assert.equal(resolveApplyCapability(url), "manual_only", url);
+  }
+  assert.equal(resolveApplyCapability("https://www.drushim.co.il/job/38548191/"), "resolvable");
+  assert.equal(resolveApplyCapability("https://boards.greenhouse.io/acme/jobs/123"), "supported_auto");
+});
