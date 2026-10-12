@@ -61,7 +61,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
     }));
     if (discovery.status !== "ok" || discovery.jobs.length === 0) {
       const result: DiscoverDailyResult = {
-        status: discovery.status === "ok" ? "skipped" : discovery.status === "budget_reached" ? "skipped" : "skipped",
+        status: discovery.status === "ok" ? "ok" : "skipped",
         added: 0,
         notes: discovery.notes,
       };
