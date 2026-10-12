@@ -146,7 +146,7 @@ async function tryTailored(
       `Open the summary with the lead identity: ${leadIdentityGuidance(leadIdentity)}`,
       "summaryFactIds should include preferredSummaryFactId when that fact supports the wording.",
       "Include all roles listed in roles[] with an approved title variant.",
-      "Keep experience in the same order as roles[] (CaseEdge, then Boroda Kaplan, then K Logic, then older roles).",
+      "Keep experience in the same order as roles[] (CaseEdge, then K Logic, then Boroda Kaplan, then older roles).",
       "summaryFactIds may only cite facts with roleId null.",
       "Each bullet factIds must belong to that experience roleId.",
       "If includePortfolio is false, omit portfolioKey.",
