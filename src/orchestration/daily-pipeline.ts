@@ -58,7 +58,7 @@ export async function runWorkspaceDailyPipeline(input: {
     const rows = await readJobSheetRows(input.workspace);
     const excluded = await readExcludeCompanies(input.workspace);
     const depth = computeQueueDepthSnapshot(rows, excluded);
-    const lowSupply = depth.automatableEmployment < DAILY_APPLY_BATCH_LIMIT;
+    const lowSupply = depth.actionableEmployment < DAILY_APPLY_BATCH_LIMIT;
     if (lowSupply) {
       const discover = await runWorkspaceDiscoverDaily({
         workspace: input.workspace,
@@ -90,6 +90,12 @@ export async function runWorkspaceDailyPipeline(input: {
     confirmed = quotaSnapshot().confirmed;
     if (apply.status === "locked" || apply.status === "error") {
       log("DAILY_PIPELINE_STOP", { cycle, applyStatus: apply.status });
+      break;
+    }
+    if (input.runSource === "native_schedule") {
+      // Scheduled apply/discover slots are daily single-use; further cycles would be rejected.
+      // Stop explicitly rather than reporting a self-replenishing loop that cannot run.
+      notes.push("scheduled_slots_single_use; additional cycles require a separate orchestration design");
       break;
     }
     if (apply.status === "skipped" && apply.picked === 0 && !lowSupply) {
