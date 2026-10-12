@@ -23,38 +23,23 @@ export const roles: RoleRecord[] = [
   {
     id: "caseedge",
     company: "CaseEdge / Digitalab",
-    start: "2025",
+    start: "Oct 2025",
     end: "Present",
     titleVariants: [
-      "Independent Applied AI Engineer & Product Builder",
-      "Independent Growth & Performance Marketing Consultant",
+      "Founder & Applied AI Product Engineer",
+      "Independent Performance Marketing & Growth Consultant",
     ],
     defaultTitle: {
-      technical: "Independent Applied AI Engineer & Product Builder",
-      marketing: "Independent Growth & Performance Marketing Consultant",
-      hybrid: "Independent Applied AI Engineer & Product Builder",
-    },
-  },
-  {
-    id: "boroda",
-    company: "Boroda Kaplan",
-    start: "2022",
-    end: "2024",
-    titleVariants: [
-      "AI & Backend Engineer / Solutions Architect and PPC Team Lead",
-      "PPC Team Lead & Marketing Technology Lead",
-    ],
-    defaultTitle: {
-      technical: "AI & Backend Engineer / Solutions Architect and PPC Team Lead",
-      marketing: "PPC Team Lead & Marketing Technology Lead",
-      hybrid: "PPC Team Lead & Marketing Technology Lead",
+      technical: "Founder & Applied AI Product Engineer",
+      marketing: "Independent Performance Marketing & Growth Consultant",
+      hybrid: "Founder & Applied AI Product Engineer",
     },
   },
   {
     id: "klogic",
     company: "K Logic",
-    start: "2025",
-    end: "2025",
+    start: "Apr 2025",
+    end: "Sep 2025",
     titleVariants: ["Media Innovation Specialist"],
     defaultTitle: {
       technical: "Media Innovation Specialist",
@@ -63,10 +48,25 @@ export const roles: RoleRecord[] = [
     },
   },
   {
+    id: "boroda",
+    company: "Boroda Kaplan",
+    start: "May 2022",
+    end: "Dec 2024",
+    titleVariants: [
+      "PPC Team Lead & Marketing Technology Lead",
+      "PPC Team Lead & Marketing Technology Lead",
+    ],
+    defaultTitle: {
+      technical: "PPC Team Lead & Marketing Technology Lead",
+      marketing: "PPC Team Lead & Marketing Technology Lead",
+      hybrid: "PPC Team Lead & Marketing Technology Lead",
+    },
+  },
+  {
     id: "fullpower",
     company: "Full Power",
-    start: "2021",
-    end: "2023",
+    start: "Aug 2021",
+    end: "Mar 2023",
     titleVariants: ["Full-Stack Developer & PPC Specialist"],
     defaultTitle: {
       technical: "Full-Stack Developer & PPC Specialist",
@@ -95,7 +95,7 @@ export const facts: Fact[] = [
   {
     id: "summary-technical",
     roleId: null,
-    text: "Applied AI engineer and product builder with 6+ years of software experience and 11+ years of business-domain expertise. Delivers production LLM, RAG, OCR, and backend systems end-to-end — architecture through deployment — with demonstrated shipped product (CaseEdge) and measurable AI delivery in live environments.",
+    text: "Applied AI engineer and product builder with 5+ years of software experience and 12+ years of business-domain expertise. Delivers production LLM, RAG, OCR, and backend systems end-to-end — architecture through deployment — with demonstrated shipped product (CaseEdge) and measurable AI delivery in live environments.",
     tags: ["summary", "ai", "backend"],
     personas: ["technical", "hybrid"],
     verified: true,
@@ -121,7 +121,7 @@ export const facts: Fact[] = [
   {
     id: "year-software",
     roleId: null,
-    text: "6+ years of software experience",
+    text: "5+ years of software experience",
     tags: ["years"],
     personas: ["technical", "hybrid", "both"],
     verified: true,
@@ -786,8 +786,8 @@ export const SKILLS = [
 ] as const;
 
 export const HEADLINES = {
-  "tech-full": "Applied AI Engineer | Production LLM, Backend Systems & Shipped Delivery",
-  "marketing-full": "Performance Marketing Lead | Acquisition, Budgets, Measurement & Results",
+  "tech-full": "Applied AI & Backend Engineer | Product Systems & Automation",
+  "marketing-full": "Senior Performance Marketing Lead | Paid Media, Measurement & Automation",
   "revenue-martech-full": "Revenue & Marketing Systems | GTM, CRM, MarTech & Data Operations",
 } as const;
 
