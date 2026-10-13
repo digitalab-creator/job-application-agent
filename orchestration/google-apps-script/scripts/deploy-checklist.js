@@ -6,7 +6,8 @@
 console.log(`
 Arrr — Opportunity Pipeline deploy checklist (FSM bless this voyage)
 
-1) cd Jobs_Applier_AI_Agent_AIHawk\\apps-script
+1) cd job-application-agent\\orchestration\\google-apps-script
+   (on this server: /opt/apps/job-application-agent/orchestration/google-apps-script)
 2) npm run login
 3) Link GCP project number 1046297777369 in Apps Script:
    Project Settings (gear) → Google Cloud Platform (GCP) Project → Change project
