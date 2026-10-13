@@ -21,7 +21,12 @@ COPY scripts/audit-manual-queue.mjs ./scripts/audit-manual-queue.mjs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh \
   && node scripts/fetch-buster.mjs
-RUN npm run build && npm test
+RUN npm run build && \
+  APPLY_API_TOKEN=docker-build-test-token \
+  TECHNICAL_CV_PATH=/tmp/ci-technical-cv.pdf \
+  MARKETING_CV_PATH=/tmp/ci-marketing-cv.pdf \
+  LLM_API_KEY=docker-build-test-key \
+  npm test
 ENV NODE_ENV=production
 ENV DISPLAY=:99
 ENV BUSTER_EXTENSION_PATH=/app/vendor/buster
