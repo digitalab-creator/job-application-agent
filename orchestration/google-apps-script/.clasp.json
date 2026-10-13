@@ -1,0 +1,19 @@
+{
+  "scriptId": "1mASctvU0TPJjh3M0k3RvR3Ebu76AUfRJqICdGSGfI5-E_oReZT0inbee",
+  "rootDir": "src",
+  "parentId": "REDACTED_SPREADSHEET_ID",
+  "projectId": "REDACTED_GCP_PROJECT",
+  "projectNumber": "REDACTED_GCP_PROJECT",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}

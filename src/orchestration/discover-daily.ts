@@ -12,10 +12,13 @@ import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.j
 import { scheduleSlotKey } from "../time/jerusalem-day.js";
 import { claimScheduledSlot } from "./schedule-claim.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
+import type { ScheduleSlotMode } from "./schedule-claim.js";
+
 export type DiscoverDailyOptions = {
   workspace: WorkspaceRecord;
   runSource: "native_schedule" | "native_manual";
   dryRun: boolean;
+  scheduleSlot?: ScheduleSlotMode;
 };
 
 export type DiscoverDailyResult = {
@@ -25,19 +28,21 @@ export type DiscoverDailyResult = {
 };
 
 export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): Promise<DiscoverDailyResult> {
-  const { workspace, runSource, dryRun } = options;
+  const { workspace, runSource, dryRun, scheduleSlot = "default" } = options;
   return withWorkspaceRuntime(runtimeFromWorkspace(workspace, runSource), async () => {
   const startedAt = new Date().toISOString();
   let added = 0;
   try {
-    const claim = await claimScheduledSlot(workspace, "discover", runSource);
-    if (!claim.ok) {
-      const result: DiscoverDailyResult = {
-        status: "skipped",
-        added: 0,
-        notes: claim.reason,
-      };
-      return result;
+    if (scheduleSlot !== "pipeline_inner") {
+      const claim = await claimScheduledSlot(workspace, "discover", runSource);
+      if (!claim.ok) {
+        const result: DiscoverDailyResult = {
+          status: "skipped",
+          added: 0,
+          notes: claim.reason,
+        };
+        return result;
+      }
     }
     recordPlatformAllocationIfNeeded();
     const rows = await readJobSheetRows(workspace);
@@ -65,7 +70,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
         added: 0,
         notes: discovery.notes,
       };
-      await finishRun(workspace, runSource, startedAt, result);
+      await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
       return result;
     }
     const sheetRows = discovery.jobs.map((job) => {
@@ -95,13 +100,13 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
       added,
       notes: discovery.notes,
     };
-    await finishRun(workspace, runSource, startedAt, result);
+    await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log("DISCOVER_DAILY_FAILED", { workspaceId: workspace.id, message });
     const result: DiscoverDailyResult = { status: "error", added, notes: message };
-    await finishRun(workspace, runSource, startedAt, result);
+    await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
     return result;
   }
   });
@@ -112,12 +117,15 @@ async function finishRun(
   runSource: "native_schedule" | "native_manual",
   startedAt: string,
   result: DiscoverDailyResult,
+  scheduleSlot: ScheduleSlotMode = "default",
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
   const runKey = runSource === "native_schedule"
     ? scheduleSlotKey("discover", workspace.timezone, new Date(startedAt))
     : startedAt.slice(0, 16);
-  await markWorkspaceRunKey(workspace.id, "discover", runKey);
+  if (scheduleSlot !== "pipeline_inner") {
+    await markWorkspaceRunKey(workspace.id, "discover", runKey);
+  }
   appendNativeRunLog({
     workspaceId: workspace.id,
     kind: "discover",

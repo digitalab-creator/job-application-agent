@@ -1,5 +1,7 @@
 import { googleAccessTokenFromRefresh } from "./google-auth.js";
 
+export { googleAccessTokenFromRefresh };
+
 export type SheetRow = Record<string, string | number> & { row_number?: number };
 
 async function sheetsFetch(
@@ -87,6 +89,66 @@ export async function batchUpdateSheet(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type SpreadsheetSheetMeta = {
+  properties?: { sheetId?: number; title?: string };
+  basicFilter?: unknown;
+};
+
+async function spreadsheetsBatchUpdate(
+  accessToken: string,
+  spreadsheetId: string,
+  requests: unknown[],
+): Promise<void> {
+  if (requests.length === 0) {
+    return;
+  }
+  const res = await sheetsFetch(accessToken, `/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requests }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Sheets batchUpdate failed (${res.status}): ${text.slice(0, 400)}`);
+  }
+}
+
+/**
+ * Remove sheet-level basic filters (not filter views) so Apps Script append/format and API writes stay safe.
+ * Returns sheetIds that had a filter cleared.
+ */
+export async function clearBasicFiltersOnSheets(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetIds: number[],
+): Promise<number[]> {
+  const want = new Set(sheetIds);
+  if (want.size === 0) {
+    return [];
+  }
+  const metaRes = await sheetsFetch(
+    accessToken,
+    `/${spreadsheetId}?fields=sheets(properties.sheetId,title,basicFilter)`,
+  );
+  if (!metaRes.ok) {
+    const text = await metaRes.text();
+    throw new Error(`Sheets metadata read failed (${metaRes.status}): ${text.slice(0, 400)}`);
+  }
+  const meta = (await metaRes.json()) as { sheets?: SpreadsheetSheetMeta[] };
+  const requests: unknown[] = [];
+  const cleared: number[] = [];
+  for (const sheet of meta.sheets ?? []) {
+    const sheetId = sheet.properties?.sheetId;
+    if (sheetId === undefined || !want.has(sheetId) || !sheet.basicFilter) {
+      continue;
+    }
+    requests.push({ clearBasicFilter: { sheetId } });
+    cleared.push(sheetId);
+  }
+  await spreadsheetsBatchUpdate(accessToken, spreadsheetId, requests);
+  return cleared;
 }
 
 export function headerRowToObjects(header: string[], rows: string[][]): SheetRow[] {

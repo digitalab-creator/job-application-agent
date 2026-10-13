@@ -2,6 +2,8 @@ import { scheduleSlotKey } from "../time/jerusalem-day.js";
 import { getWorkspace } from "./workspace-store.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 
+export type ScheduleSlotMode = "default" | "pipeline_inner";
+
 export async function claimScheduledSlot(
   workspace: WorkspaceRecord,
   kind: "apply" | "discover" | "outcome",

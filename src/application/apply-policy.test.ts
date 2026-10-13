@@ -3,10 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { dailyApplyPickLimit, estimatedApplyCostIls } from "./apply-policy.js";
-import { DAILY_APPLY_BATCH_LIMIT } from "../discovery/queue-mix.js";
+import { applyPickBatchSafetyCap, dailyApplyPickLimit, estimatedApplyCostIls } from "./apply-policy.js";
 
-test("daily pick limit follows remaining daily budget and batch cap", () => {
+test("daily pick limit follows remaining paced daily budget", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apply-policy-"));
   const previousLedger = process.env.COST_LEDGER_PATH;
   const previousBudget = process.env.MONTHLY_BUDGET_ILS;
@@ -17,7 +16,7 @@ test("daily pick limit follows remaining daily budget and batch cap", () => {
   try {
     const limit = dailyApplyPickLimit();
     assert.ok(limit > 0);
-    assert.ok(limit <= DAILY_APPLY_BATCH_LIMIT);
+    assert.ok(limit <= applyPickBatchSafetyCap());
     assert.equal(estimatedApplyCostIls(), 2);
   } finally {
     if (previousLedger === undefined) delete process.env.COST_LEDGER_PATH;
