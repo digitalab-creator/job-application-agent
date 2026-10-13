@@ -11,6 +11,7 @@ import { maybeTriggerPipelineRepair } from "./pipeline-repair-trigger.js";
 import { dailyConfirmedApplicationsTarget } from "./daily-target.js";
 import { scheduleSlotKey } from "../time/jerusalem-day.js";
 import { markWorkspaceRunKey } from "./workspace-store.js";
+import { shouldStopAfterEmptyApply } from "./daily-pipeline-policy.js";
 
 export type DailyPipelineResult = {
   status: "ok" | "skipped" | "error";
@@ -45,6 +46,7 @@ export async function runWorkspaceDailyPipeline(input: {
   let confirmed = quota0.confirmed;
   let discoverRuns = 0;
   let applyRuns = 0;
+  let lastDiscoverAdded: number | null = null;
   const notes: string[] = [];
 
   for (let cycle = 0; cycle < maxPipelineCycles(); cycle += 1) {
@@ -65,6 +67,7 @@ export async function runWorkspaceDailyPipeline(input: {
         scheduleSlot: input.runSource === "native_schedule" ? "pipeline_inner" : "default",
       });
       discoverRuns += 1;
+      lastDiscoverAdded = discover.added;
       notes.push(`discover_cycle=${cycle} status=${discover.status} added=${discover.added}`);
       if (discover.status === "error") {
         return {
@@ -92,13 +95,29 @@ export async function runWorkspaceDailyPipeline(input: {
       log("DAILY_PIPELINE_STOP", { cycle, applyStatus: apply.status });
       break;
     }
-    if (apply.status === "skipped" && apply.picked === 0) {
-      notes.push(lowSupply ? "no_eligible_rows_after_discover" : "no_eligible_rows");
-      break;
+    if (apply.picked === 0 && apply.attempted === 0) {
+      const depthAfter = computeQueueDepthSnapshot(
+        await readJobSheetRows(input.workspace),
+        excluded,
+      );
+      const stop = shouldStopAfterEmptyApply({
+        dailyBudgetOpen: applyBudgetAllowsWork(),
+        lastDiscoverAdded,
+        automatableEmployment: depthAfter.automatableEmployment,
+      });
+      if (stop.stop) {
+        notes.push(`pipeline_stop=${stop.reason}`);
+        break;
+      }
+      notes.push("pipeline_retry_discover_budget_remain");
+      continue;
     }
     if (!applyBudgetAllowsWork()) {
       notes.push("daily_budget_spent_after_apply");
       break;
+    }
+    if (apply.picked > 0) {
+      lastDiscoverAdded = null;
     }
   }
 
