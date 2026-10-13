@@ -30,6 +30,11 @@ jobs:
           node-version: "22"
 
       - name: Install and test
+        env:
+          APPLY_API_TOKEN: ci-unit-test-token
+          TECHNICAL_CV_PATH: /tmp/ci-technical-cv.pdf
+          MARKETING_CV_PATH: /tmp/ci-marketing-cv.pdf
+          LLM_API_KEY: ci-unit-test-key
         run: |
           set -euo pipefail
           npm install
