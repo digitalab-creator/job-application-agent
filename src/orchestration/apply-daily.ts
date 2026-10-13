@@ -8,7 +8,7 @@ import type { ApplyInput } from "../application/apply-job.js";
 import { appendNativeRunLog } from "./native-run-log.js";
 import { processFreelanceBatch } from "../freelance/process-freelance-batch.js";
 import { scheduleSlotKey } from "../time/jerusalem-day.js";
-import { claimScheduledSlot } from "./schedule-claim.js";
+import { claimScheduledSlot, type ScheduleSlotMode } from "./schedule-claim.js";
 import { withSearchPolicy } from "../config/search-policy-runtime.js";
 import { pickWorkspaceApplyBatch, sheetMatchScore } from "./pick-jobs.js";
 import { loadSearchPolicyFromSheet } from "./sheets/search-config.js";
@@ -19,12 +19,16 @@ import { withDb } from "./db.js";
 import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
 import { randomUUID } from "node:crypto";
+import { applyBudgetAllowsWork } from "../application/apply-policy.js";
+import { budgetSnapshot } from "../budget/monthly-budget.js";
 
 export type ApplyDailyOptions = {
   workspace: WorkspaceRecord;
   runSource: "native_schedule" | "native_manual";
   submit: boolean;
   dryRun: boolean;
+  /** When `pipeline_inner`, do not claim/mark the once-per-day apply slot (daily pipeline owns that). */
+  scheduleSlot?: ScheduleSlotMode;
 };
 
 export type ApplyDailyResult = {
@@ -37,7 +41,7 @@ export type ApplyDailyResult = {
 };
 
 export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promise<ApplyDailyResult> {
-  const { workspace, runSource, submit, dryRun } = options;
+  const { workspace, runSource, submit, dryRun, scheduleSlot = "default" } = options;
   const batchId = randomUUID();
   return withWorkspaceRuntime(runtimeFromWorkspace(workspace, runSource, { batchId, runId: batchId }), async () => {
     const runLock = claimApplyRun(workspace.id);
@@ -49,96 +53,148 @@ export async function runWorkspaceApplyDaily(options: ApplyDailyOptions): Promis
       let attempted = 0;
       let confirmed = 0;
     try {
-      const claim = await claimScheduledSlot(workspace, "apply", runSource);
-      if (!claim.ok) {
-        const result: ApplyDailyResult = {
-          status: "skipped",
-          picked: 0,
-          attempted: 0,
-          notes: claim.reason,
-        };
-        return result;
+      if (scheduleSlot !== "pipeline_inner") {
+        const claim = await claimScheduledSlot(workspace, "apply", runSource);
+        if (!claim.ok) {
+          const result: ApplyDailyResult = {
+            status: "skipped",
+            picked: 0,
+            attempted: 0,
+            notes: claim.reason,
+          };
+          return result;
+        }
       }
-      const rows = await readJobSheetRows(workspace);
       const excluded = await readExcludeCompanies(workspace);
       setExcludedCompanies(excluded, `workspace:${workspace.id}:sheet`);
       const searchPolicy = await loadSearchPolicyFromSheet(workspace);
-      const freelance = await processFreelanceBatch(workspace, rows, dryRun);
-      const batch = await withSearchPolicy(searchPolicy, async () => pickWorkspaceApplyBatch(rows, excluded));
-      picked = batch.selected.length;
-      if (picked === 0) {
-        const result: ApplyDailyResult = {
-          status: "skipped",
-          picked: 0,
-          attempted: 0,
-          notes: `No eligible rows (eligible=${batch.eligible}). ${freelance.notes}`,
-          freelancePacksReady: freelance.packsReady,
-        };
-        await finishRun(workspace, runSource, startedAt, result);
-        return result;
+      const initialRows = await readJobSheetRows(workspace);
+      const freelance = await processFreelanceBatch(workspace, initialRows, dryRun);
+
+      let batchesRun = 0;
+      let lastEligible = 0;
+      let lastTech = 0;
+      let lastMkt = 0;
+      let stoppedForBudget = false;
+
+      while (!dryRun && applyBudgetAllowsWork()) {
+        const rows = await readJobSheetRows(workspace);
+        const batch = await withSearchPolicy(searchPolicy, async () => pickWorkspaceApplyBatch(rows, excluded));
+        lastEligible = batch.eligible;
+        lastTech = batch.pickedTech;
+        lastMkt = batch.pickedMarketing;
+        if (batch.selected.length === 0) {
+          break;
+        }
+        picked += batch.selected.length;
+        batchesRun += 1;
+        for (const row of batch.selected) {
+          if (!applyBudgetAllowsWork()) {
+            stoppedForBudget = true;
+            break;
+          }
+          const browserClaim = claimBrowserApply();
+          if (!browserClaim.ok) {
+            log("APPLY_DAILY_BROWSER_BUSY", { workspaceId: workspace.id });
+            break;
+          }
+          try {
+            const input: ApplyInput = {
+              row: row.row_number,
+              submit,
+              workspaceId: workspace.id,
+              runSource,
+              runId: batchId,
+              batchId,
+              triggeredAt: startedAt,
+              job: {
+                role: String(row.Role ?? ""),
+                company: String(row.Company ?? ""),
+                url: String(row["Job URL"] ?? ""),
+                matchScore: sheetMatchScore(row),
+                category: String(row.Category ?? ""),
+                estimatedSalary: String(row["Est. Salary Range"] ?? ""),
+                opportunityKind: opportunityKindFromRow(row),
+              },
+              attemptId: newAttemptId(),
+              startedAt: new Date().toISOString(),
+            };
+            const outcome = await executeApply(input);
+            attempted += 1;
+            if (outcome.confirmationDetected || outcome.status === "applied") {
+              confirmed += 1;
+            }
+          } finally {
+            releaseBrowserApply();
+          }
+        }
+        if (stoppedForBudget) {
+          break;
+        }
       }
+
+      if (!dryRun && !applyBudgetAllowsWork()) {
+        stoppedForBudget = true;
+      }
+      const budget = budgetSnapshot();
+
       if (dryRun) {
+        const batch = await withSearchPolicy(searchPolicy, async () =>
+          pickWorkspaceApplyBatch(initialRows, excluded),
+        );
+        picked = batch.selected.length;
         const result: ApplyDailyResult = {
-          status: "ok",
+          status: picked === 0 ? "skipped" : "ok",
           picked,
           attempted: 0,
           notes: `dry_run picked=${picked} tech=${batch.pickedTech} marketing=${batch.pickedMarketing}. ${freelance.notes}`,
           freelancePacksReady: freelance.packsReady,
         };
-        await finishRun(workspace, runSource, startedAt, result);
+        await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
         return result;
       }
-      for (const row of batch.selected) {
-        const browserClaim = claimBrowserApply();
-        if (!browserClaim.ok) {
-          log("APPLY_DAILY_BROWSER_BUSY", { workspaceId: workspace.id });
-          break;
-        }
-        try {
-          const input: ApplyInput = {
-            row: row.row_number,
-            submit,
-            workspaceId: workspace.id,
-            runSource,
-            runId: batchId,
-            batchId,
-            triggeredAt: startedAt,
-            job: {
-              role: String(row.Role ?? ""),
-              company: String(row.Company ?? ""),
-              url: String(row["Job URL"] ?? ""),
-              matchScore: sheetMatchScore(row),
-              category: String(row.Category ?? ""),
-              estimatedSalary: String(row["Est. Salary Range"] ?? ""),
-              opportunityKind: opportunityKindFromRow(row),
-            },
-            attemptId: newAttemptId(),
-            startedAt: new Date().toISOString(),
-          };
-          const outcome = await executeApply(input);
-          attempted += 1;
-          if (outcome.confirmationDetected || outcome.status === "applied") {
-            confirmed += 1;
-          }
-        } finally {
-          releaseBrowserApply();
-        }
+
+      if (picked === 0) {
+        const result: ApplyDailyResult = {
+          status: "skipped",
+          picked: 0,
+          attempted: 0,
+          notes: `No eligible rows (eligible=${lastEligible}). ${freelance.notes}`,
+          freelancePacksReady: freelance.packsReady,
+        };
+        await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
+        return result;
       }
+
       const result: ApplyDailyResult = {
         status: "ok",
         picked,
         attempted,
         confirmed,
         freelancePacksReady: freelance.packsReady,
-        notes: `attempted=${attempted} confirmed=${confirmed} picked=${picked}. ${freelance.notes}`,
+        notes: [
+          `attempted=${attempted}`,
+          `confirmed=${confirmed}`,
+          `picked=${picked}`,
+          `batches=${batchesRun}`,
+          `eligible_last=${lastEligible}`,
+          `tech=${lastTech}`,
+          `mkt=${lastMkt}`,
+          `daily_budget_ils=${budget.dailySpentIls}/${budget.dailyBudgetIls}`,
+          `daily_remaining_ils=${budget.dailyRemainingIls}`,
+          `monthly_remaining_ils=${budget.remainingIls}`,
+          `days_left=${budget.daysRemaining}`,
+          stoppedForBudget ? "stop_reason=daily_budget_spent" : "",
+          freelance.notes,
+        ].filter(Boolean).join(" "),
       };
-      await finishRun(workspace, runSource, startedAt, result);
+      await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log("APPLY_DAILY_FAILED", { workspaceId: workspace.id, message });
       const result: ApplyDailyResult = { status: "error", picked, attempted, notes: message };
-      await finishRun(workspace, runSource, startedAt, result);
+      await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
       return result;
     } finally {
       releaseApplyRun(workspace.id);
@@ -151,12 +207,15 @@ async function finishRun(
   runSource: "native_schedule" | "native_manual",
   startedAt: string,
   result: ApplyDailyResult,
+  scheduleSlot: ScheduleSlotMode = "default",
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
   const runKey = runSource === "native_schedule"
     ? scheduleSlotKey("apply", workspace.timezone, new Date(startedAt))
     : startedAt.slice(0, 16);
-  await markWorkspaceRunKey(workspace.id, "apply", runKey);
+  if (scheduleSlot !== "pipeline_inner") {
+    await markWorkspaceRunKey(workspace.id, "apply", runKey);
+  }
   appendNativeRunLog({
     workspaceId: workspace.id,
     kind: "apply",

@@ -2,6 +2,7 @@ import { applyToJob, type ApplyInput } from "./apply-job.js";
 import { attemptRecordFromResult, rememberAttemptOutcome, rememberAttemptStarted } from "./attempt-ledger.js";
 import { budgetIsOpen, budgetSnapshot } from "../budget/monthly-budget.js";
 import { quotaIsOpen, quotaSnapshot, rememberQuotaUse } from "./daily-quota.js";
+import { applyAttemptQuotaEnforced, recordApplyAttemptDebug } from "./apply-attempt-debug.js";
 import { withJobCost } from "../llm/cost-ledger.js";
 import { log, withLogContext } from "../logging/logger.js";
 import type { ApplicationResult } from "../models/types.js";
@@ -56,10 +57,11 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       budget: compactBudget(budget),
       notes: "result=budget_reached",
     };
+    recordApplyAttemptDebug(input, outcome);
     rememberAttempt(input, outcome);
     return finishApply(input, outcome);
   }
-  if (!quotaIsOpen()) {
+  if (applyAttemptQuotaEnforced() && !quotaIsOpen()) {
     const quota = quotaSnapshot();
     const outcome: ApplicationResult = {
       attemptId: input.attemptId,
@@ -73,6 +75,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       quota,
       notes: "result=quota_reached",
     };
+    recordApplyAttemptDebug(input, outcome);
     rememberAttempt(input, outcome);
     return finishApply(input, outcome);
   }
@@ -81,6 +84,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     const outcome = linkedinFeatureDisabledResult(input.job.url);
     outcome.attemptId = input.attemptId;
     outcome.pipeline = input.pipeline ?? emptyPipeline();
+    recordApplyAttemptDebug(input, outcome);
     rememberAttempt(input, outcome);
     return finishApply(input, outcome);
   }
@@ -103,6 +107,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     outcome.quota = quotaSnapshot();
     outcome.budget = compactBudget(budgetSnapshot());
     outcome.notes = [outcome.notes, `llm_cost_usd=${tracked.usd}`].filter(Boolean).join("\n");
+    recordApplyAttemptDebug(input, outcome);
     rememberAttempt(input, outcome);
     return finishApply(input, outcome);
   } catch (error) {
@@ -121,6 +126,7 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
     };
     rememberQuotaUse({ url: input.job.url, status: outcome.status });
+    recordApplyAttemptDebug(input, outcome);
     rememberAttempt(input, outcome);
     return finishApply(input, outcome);
   }

@@ -1,0 +1,19 @@
+{
+  "scriptId": "1mASctvU0TPJjh3M0k3RvR3Ebu76AUfRJqICdGSGfI5-E_oReZT0inbee",
+  "rootDir": "src",
+  "parentId": "1fxnXLQndeiw7xT1r4NWwO01J8rOMY5J2zQcjHm3HqnQ",
+  "projectId": "1046297777369",
+  "projectNumber": "1046297777369",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}

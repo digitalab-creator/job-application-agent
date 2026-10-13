@@ -3,7 +3,7 @@ import { resolveApplyCapability } from "../application/ats-capability.js";
 import { hostIsCooling } from "../application/rate-limit.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
 import { dailyApplyPickLimit } from "../application/apply-policy.js";
-import { DAILY_APPLY_BATCH_LIMIT, selectApplyDailyBatch } from "../discovery/queue-mix.js";
+import { selectApplyDailyBatch } from "../discovery/queue-mix.js";
 import { isFreelanceOpportunity } from "../freelance/opportunity-kind.js";
 import type { JobSheetRow } from "./sheets/job-sheet.js";
 import { shouldSkipApplyForScopeDedup } from "../application/submission-dedup.js";
@@ -78,10 +78,7 @@ export function pickWorkspaceApplyBatch(
     }
   }
   const eligible = [...autoRows, ...aggregatorRows];
-  const cap = Math.min(
-    DAILY_APPLY_BATCH_LIMIT,
-    Math.max(0, pickLimit ?? dailyApplyPickLimit()),
-  );
+  const cap = Math.max(0, pickLimit ?? dailyApplyPickLimit());
   if (cap === 0 || eligible.length === 0) {
     return { selected: [], pickedTech: 0, pickedMarketing: 0, eligible: eligible.length };
   }
@@ -97,6 +94,7 @@ export function pickWorkspaceApplyBatch(
   const { selected, pickedTech, pickedMarketing } = selectApplyDailyBatch(
     withCategory,
     (item) => sheetMatchScore(item.row),
+    cap,
   );
   return {
     selected: selected.map((item) => item.row).slice(0, cap),

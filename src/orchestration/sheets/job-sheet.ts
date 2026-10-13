@@ -7,6 +7,7 @@ import {
   readSheetValues,
   type SheetRow,
 } from "./google-sheets.js";
+import { ensureJobsSheetBasicFilterOff } from "./sheet-filter-guard.js";
 
 const JOBS_RANGE = "A:Z";
 
@@ -33,6 +34,7 @@ function workspaceRefreshToken(workspace: WorkspaceRecord): string {
 }
 
 export async function readJobSheetRows(workspace: WorkspaceRecord): Promise<JobSheetRow[]> {
+  await ensureJobsSheetBasicFilterOff(workspace);
   const refresh = workspaceRefreshToken(workspace);
   const values = await readSheetValues(refresh, workspace.spreadsheetId, JOBS_RANGE);
   if (values.length < 2) {
@@ -76,6 +78,7 @@ export async function updateJobSheetRows(
   if (rows.length === 0) {
     return 0;
   }
+  await ensureJobsSheetBasicFilterOff(workspace);
   const refresh = workspaceRefreshToken(workspace);
   const headerValues = await readSheetValues(refresh, workspace.spreadsheetId, "1:1");
   const header = headerValues[0] ?? [];
@@ -120,6 +123,7 @@ export async function appendDiscoveredJobs(
   if (rows.length === 0) {
     return 0;
   }
+  await ensureJobsSheetBasicFilterOff(workspace);
   const refresh = workspaceRefreshToken(workspace);
   const headerValues = await readSheetValues(refresh, workspace.spreadsheetId, "1:1");
   const header = headerValues[0] ?? [];

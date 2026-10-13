@@ -212,9 +212,11 @@ export function passesDiscoveryQuality(job: ScoredDiscoveryJob, policy: Rebalanc
 export function selectApplyDailyBatch<T extends { category?: string }>(
   eligibleRows: T[],
   scoreOf: (row: T) => number,
+  batchLimit = DAILY_APPLY_BATCH_LIMIT,
 ): { selected: T[]; pickedTech: number; pickedMarketing: number } {
+  const cap = Math.max(0, Math.floor(batchLimit));
   const byScore = (a: T, b: T) => scoreOf(b) - scoreOf(a);
-  const targets = categoryBatchTargets(DAILY_APPLY_BATCH_LIMIT);
+  const targets = categoryBatchTargets(cap);
   const buckets = new Map<string, T[]>();
   const other: T[] = [];
   for (const row of eligibleRows) {
@@ -243,7 +245,7 @@ export function selectApplyDailyBatch<T extends { category?: string }>(
   }
   const backfill = [...eligibleRows].filter((row) => !seen.has(row)).sort(byScore);
   for (const row of backfill) {
-    if (selected.length >= DAILY_APPLY_BATCH_LIMIT) {
+    if (selected.length >= cap) {
       break;
     }
     seen.add(row);
@@ -251,7 +253,7 @@ export function selectApplyDailyBatch<T extends { category?: string }>(
   }
 
   selected.sort(byScore);
-  const trimmed = selected.slice(0, DAILY_APPLY_BATCH_LIMIT);
+  const trimmed = selected.slice(0, cap);
   let pickedTechCount = 0;
   let pickedMarketingCount = 0;
   for (const row of trimmed) {

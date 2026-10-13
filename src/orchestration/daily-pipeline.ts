@@ -1,5 +1,6 @@
+import { applyBudgetAllowsWork } from "../application/apply-policy.js";
+import { budgetSnapshot } from "../budget/monthly-budget.js";
 import { quotaSnapshot } from "../application/daily-quota.js";
-import { DAILY_APPLY_BATCH_LIMIT } from "../discovery/queue-mix.js";
 import { log } from "../logging/logger.js";
 import { runWorkspaceApplyDaily } from "./apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
@@ -7,6 +8,9 @@ import { computeQueueDepthSnapshot } from "./queue-depth.js";
 import { readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { maybeTriggerPipelineRepair } from "./pipeline-repair-trigger.js";
+import { dailyConfirmedApplicationsTarget } from "./daily-target.js";
+import { scheduleSlotKey } from "../time/jerusalem-day.js";
+import { markWorkspaceRunKey } from "./workspace-store.js";
 
 export type DailyPipelineResult = {
   status: "ok" | "skipped" | "error";
@@ -18,25 +22,17 @@ export type DailyPipelineResult = {
   notes: string;
 };
 
-function dailyConfirmedTarget(): number {
-  const parsed = Number(process.env.DAILY_CONFIRMED_APPLICATIONS_TARGET ?? "10");
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return 10;
-  }
-  return Math.floor(parsed);
-}
-
 function maxPipelineCycles(): number {
-  const parsed = Number(process.env.DAILY_PIPELINE_MAX_CYCLES ?? "6");
+  const parsed = Number(process.env.DAILY_PIPELINE_MAX_CYCLES ?? "48");
   if (!Number.isFinite(parsed) || parsed < 1) {
-    return 6;
+    return 48;
   }
   return Math.floor(parsed);
 }
 
 /**
  * Self-replenishing day loop: discover when actionable supply is low, then apply until
- * confirmed target or hard limits. Discovery and Apply entry points stay separate.
+ * daily paced budget is spent or no eligible jobs remain.
  */
 export async function runWorkspaceDailyPipeline(input: {
   workspace: WorkspaceRecord;
@@ -44,7 +40,7 @@ export async function runWorkspaceDailyPipeline(input: {
   submit: boolean;
   dryRun: boolean;
 }): Promise<DailyPipelineResult> {
-  const target = dailyConfirmedTarget();
+  const target = dailyConfirmedApplicationsTarget();
   const quota0 = quotaSnapshot();
   let confirmed = quota0.confirmed;
   let discoverRuns = 0;
@@ -52,19 +48,21 @@ export async function runWorkspaceDailyPipeline(input: {
   const notes: string[] = [];
 
   for (let cycle = 0; cycle < maxPipelineCycles(); cycle += 1) {
-    if (confirmed >= target) {
-      notes.push(`target_met confirmed=${confirmed}`);
+    if (!applyBudgetAllowsWork()) {
+      const budget = budgetSnapshot();
+      notes.push(`daily_budget_spent daily=${budget.dailySpentIls}/${budget.dailyBudgetIls} ils`);
       break;
     }
     const rows = await readJobSheetRows(input.workspace);
     const excluded = await readExcludeCompanies(input.workspace);
     const depth = computeQueueDepthSnapshot(rows, excluded);
-    const lowSupply = depth.automatableEmployment < DAILY_APPLY_BATCH_LIMIT;
+    const lowSupply = depth.automatableEmployment < 1;
     if (lowSupply) {
       const discover = await runWorkspaceDiscoverDaily({
         workspace: input.workspace,
         runSource: input.runSource,
         dryRun: input.dryRun,
+        scheduleSlot: input.runSource === "native_schedule" ? "pipeline_inner" : "default",
       });
       discoverRuns += 1;
       notes.push(`discover_cycle=${cycle} status=${discover.status} added=${discover.added}`);
@@ -85,6 +83,7 @@ export async function runWorkspaceDailyPipeline(input: {
       runSource: input.runSource,
       submit: input.submit,
       dryRun: input.dryRun,
+      scheduleSlot: input.runSource === "native_schedule" ? "pipeline_inner" : "default",
     });
     applyRuns += 1;
     notes.push(`apply_cycle=${cycle} status=${apply.status} picked=${apply.picked} attempted=${apply.attempted} confirmed=${apply.confirmed ?? 0}`);
@@ -93,9 +92,25 @@ export async function runWorkspaceDailyPipeline(input: {
       log("DAILY_PIPELINE_STOP", { cycle, applyStatus: apply.status });
       break;
     }
-    if (apply.status === "skipped" && apply.picked === 0 && !lowSupply) {
-      notes.push("no_eligible_rows_and_supply_not_low");
+    if (apply.status === "skipped" && apply.picked === 0) {
+      notes.push(lowSupply ? "no_eligible_rows_after_discover" : "no_eligible_rows");
       break;
+    }
+    if (!applyBudgetAllowsWork()) {
+      notes.push("daily_budget_spent_after_apply");
+      break;
+    }
+  }
+
+  if (input.runSource === "native_schedule" && !input.dryRun) {
+    const applySlot = scheduleSlotKey("apply", input.workspace.timezone);
+    await markWorkspaceRunKey(input.workspace.id, "apply", applySlot);
+    if (discoverRuns > 0) {
+      await markWorkspaceRunKey(
+        input.workspace.id,
+        "discover",
+        scheduleSlotKey("discover", input.workspace.timezone),
+      );
     }
   }
 

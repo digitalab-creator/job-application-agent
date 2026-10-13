@@ -1,0 +1,6 @@
+node_modules/
+.clasprc.json
+.clasp.json.local
+*.log
+.env
+.env.local
