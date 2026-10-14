@@ -149,6 +149,39 @@ export async function markWorkspaceRunKey(
   });
 }
 
+export async function getLatestOrchestrationRun(
+  workspaceId: string,
+  kind: string,
+): Promise<{
+  kind: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  summary: Record<string, unknown>;
+} | null> {
+  return withDb(async (client) => {
+    const res = await client.query(
+      `SELECT kind, status, started_at, finished_at, summary_json
+       FROM orchestration_runs
+       WHERE workspace_id = $1 AND kind = $2
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [workspaceId, kind],
+    );
+    if ((res.rowCount ?? 0) === 0) {
+      return null;
+    }
+    const row = res.rows[0] as Record<string, unknown>;
+    return {
+      kind: String(row.kind),
+      status: String(row.status),
+      startedAt: new Date(String(row.started_at)).toISOString(),
+      finishedAt: row.finished_at ? new Date(String(row.finished_at)).toISOString() : null,
+      summary: (row.summary_json ?? {}) as Record<string, unknown>,
+    };
+  });
+}
+
 export async function insertOrchestrationRun(
   client: PoolClient,
   row: {

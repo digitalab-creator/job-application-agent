@@ -75,6 +75,18 @@ CREATE TABLE IF NOT EXISTS orchestration_runs (
 );
 CREATE INDEX IF NOT EXISTS orchestration_runs_workspace_started ON orchestration_runs(workspace_id, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS schedule_slot_executions (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  slot_key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMPTZ,
+  error_summary TEXT,
+  PRIMARY KEY (workspace_id, slot_key)
+);
+CREATE INDEX IF NOT EXISTS schedule_slot_executions_started ON schedule_slot_executions(started_at DESC);
+
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_refresh_token_enc TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS mailbox_email TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS profile_json JSONB;

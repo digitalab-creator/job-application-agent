@@ -130,7 +130,7 @@ export async function clearBasicFiltersOnSheets(
   }
   const metaRes = await sheetsFetch(
     accessToken,
-    `/${spreadsheetId}?fields=sheets(properties.sheetId,title,basicFilter)`,
+    `/${spreadsheetId}?fields=sheets(properties(sheetId,title),basicFilter)`,
   );
   if (!metaRes.ok) {
     const text = await metaRes.text();

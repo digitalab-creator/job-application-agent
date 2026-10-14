@@ -8,9 +8,9 @@ import { appendNativeRunLog } from "./native-run-log.js";
 import { appendDiscoveredJobs, readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
-import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
-import { scheduleSlotKey } from "../time/jerusalem-day.js";
+import { insertOrchestrationRun } from "./workspace-store.js";
 import { claimScheduledSlot } from "./schedule-claim.js";
+import { finishScheduledSlotIfNeeded } from "./schedule-slot-finish.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
 import type { ScheduleSlotMode } from "./schedule-claim.js";
 
@@ -120,12 +120,15 @@ async function finishRun(
   scheduleSlot: ScheduleSlotMode = "default",
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
-  const runKey = runSource === "native_schedule"
-    ? scheduleSlotKey("discover", workspace.timezone, new Date(startedAt))
-    : startedAt.slice(0, 16);
-  if (scheduleSlot !== "pipeline_inner") {
-    await markWorkspaceRunKey(workspace.id, "discover", runKey);
-  }
+  await finishScheduledSlotIfNeeded({
+    workspace,
+    kind: "discover",
+    runSource,
+    scheduleSlot,
+    startedAt,
+    status: result.status,
+    errorSummary: result.notes,
+  });
   appendNativeRunLog({
     workspaceId: workspace.id,
     kind: "discover",
