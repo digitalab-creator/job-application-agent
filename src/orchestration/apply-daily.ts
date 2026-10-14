@@ -7,8 +7,8 @@ import { log } from "../logging/logger.js";
 import type { ApplyInput } from "../application/apply-job.js";
 import { appendNativeRunLog } from "./native-run-log.js";
 import { processFreelanceBatch } from "../freelance/process-freelance-batch.js";
-import { scheduleSlotKey } from "../time/jerusalem-day.js";
 import { claimScheduledSlot, type ScheduleSlotMode } from "./schedule-claim.js";
+import { finishScheduledSlotIfNeeded } from "./schedule-slot-finish.js";
 import { withSearchPolicy } from "../config/search-policy-runtime.js";
 import { pickWorkspaceApplyBatch, sheetMatchScore } from "./pick-jobs.js";
 import { loadSearchPolicyFromSheet } from "./sheets/search-config.js";
@@ -16,7 +16,7 @@ import { opportunityKindFromRow } from "../freelance/opportunity-kind.js";
 import { readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
-import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
+import { insertOrchestrationRun } from "./workspace-store.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "./workspace-runtime.js";
 import { randomUUID } from "node:crypto";
 import { applyBudgetAllowsWork } from "../application/apply-policy.js";
@@ -210,12 +210,15 @@ async function finishRun(
   scheduleSlot: ScheduleSlotMode = "default",
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
-  const runKey = runSource === "native_schedule"
-    ? scheduleSlotKey("apply", workspace.timezone, new Date(startedAt))
-    : startedAt.slice(0, 16);
-  if (scheduleSlot !== "pipeline_inner") {
-    await markWorkspaceRunKey(workspace.id, "apply", runKey);
-  }
+  await finishScheduledSlotIfNeeded({
+    workspace,
+    kind: "apply",
+    runSource,
+    scheduleSlot,
+    startedAt,
+    status: result.status,
+    errorSummary: result.notes,
+  });
   appendNativeRunLog({
     workspaceId: workspace.id,
     kind: "apply",

@@ -1,12 +1,14 @@
 import { log } from "../logging/logger.js";
 import { orchestrationMode } from "../config/env.js";
-import { localScheduleParts, scheduleSlotKey } from "../time/jerusalem-day.js";
+import { localScheduleParts } from "../time/jerusalem-day.js";
 import { ensureWorkspaceSchema, workspaceDatabaseUrl } from "./db.js";
 import { runWorkspaceApplyDaily } from "./apply-daily.js";
 import { runWorkspaceDiscoverDaily } from "./discover-daily.js";
 import { runWorkspaceDailyPipeline } from "./daily-pipeline.js";
 import { runWorkspaceEmailOutcomes } from "./email-outcomes.js";
 import { runQueueRecheck } from "./queue-recheck.js";
+import { runStartupApplyCatchUp } from "./scheduler-catch-up.js";
+import { workspaceScheduleSlotKey } from "./schedule-slot-key.js";
 import { listEnabledWorkspaces } from "./workspace-store.js";
 
 const DEBOUNCE_MS = 2 * 60 * 1000;
@@ -28,6 +30,11 @@ export async function startNativeScheduler(): Promise<void> {
     return;
   }
   log("NATIVE_SCHEDULER_STARTED", { pollMs: POLL_MS });
+  const workspaces = await listEnabledWorkspaces();
+  await runStartupApplyCatchUp(workspaces).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    log("NATIVE_CATCHUP_FAILED", { message });
+  });
   timer = setInterval(() => {
     void tickScheduledWorkspaces().catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -54,7 +61,7 @@ export async function tickScheduledWorkspaces(): Promise<void> {
       });
     }
     if (!integratedPipeline && now.hour === workspace.schedule.discoverHour) {
-      const slotKey = scheduleSlotKey("discover", workspace.timezone);
+      const slotKey = workspaceScheduleSlotKey(workspace, "discover");
       if (workspace.lastDiscoverRunKey === slotKey) {
         continue;
       }
@@ -67,7 +74,7 @@ export async function tickScheduledWorkspaces(): Promise<void> {
       });
     }
     if (now.hour === workspace.schedule.applyHour) {
-      const slotKey = scheduleSlotKey("apply", workspace.timezone);
+      const slotKey = workspaceScheduleSlotKey(workspace, "apply");
       if (workspace.lastApplyRunKey === slotKey) {
         continue;
       }
@@ -90,7 +97,7 @@ export async function tickScheduledWorkspaces(): Promise<void> {
       });
     }
     if (now.hour === workspace.schedule.outcomeHour) {
-      const slotKey = scheduleSlotKey("outcome", workspace.timezone);
+      const slotKey = workspaceScheduleSlotKey(workspace, "outcome");
       if (workspace.lastOutcomeRunKey === slotKey) {
         continue;
       }

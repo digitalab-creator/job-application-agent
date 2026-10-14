@@ -9,7 +9,12 @@ import { readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { maybeTriggerPipelineRepair } from "./pipeline-repair-trigger.js";
 import { dailyConfirmedApplicationsTarget } from "./daily-target.js";
-import { scheduleSlotKey } from "../time/jerusalem-day.js";
+import { claimScheduledSlot } from "./schedule-claim.js";
+import { finalizeScheduleSlotExecution } from "./schedule-slot-execution.js";
+import {
+  shouldMarkWorkspaceScheduleComplete,
+  workspaceScheduleSlotKey,
+} from "./schedule-slot-key.js";
 import { markWorkspaceRunKey } from "./workspace-store.js";
 import { shouldStopAfterEmptyApply } from "./daily-pipeline-policy.js";
 
@@ -48,6 +53,23 @@ export async function runWorkspaceDailyPipeline(input: {
   let applyRuns = 0;
   let lastDiscoverAdded: number | null = null;
   const notes: string[] = [];
+  let pipelineStatus: DailyPipelineResult["status"] = "ok";
+  const applySlotKey = workspaceScheduleSlotKey(input.workspace, "apply");
+
+  if (input.runSource === "native_schedule" && !input.dryRun) {
+    const claim = await claimScheduledSlot(input.workspace, "apply", input.runSource);
+    if (!claim.ok) {
+      return {
+        status: "skipped",
+        confirmedStart: quota0.confirmed,
+        confirmedEnd: confirmed,
+        targetConfirmed: target,
+        discoverRuns: 0,
+        applyRuns: 0,
+        notes: claim.reason,
+      };
+    }
+  }
 
   for (let cycle = 0; cycle < maxPipelineCycles(); cycle += 1) {
     if (!applyBudgetAllowsWork()) {
@@ -70,15 +92,9 @@ export async function runWorkspaceDailyPipeline(input: {
       lastDiscoverAdded = discover.added;
       notes.push(`discover_cycle=${cycle} status=${discover.status} added=${discover.added}`);
       if (discover.status === "error") {
-        return {
-          status: "error",
-          confirmedStart: quota0.confirmed,
-          confirmedEnd: confirmed,
-          targetConfirmed: target,
-          discoverRuns,
-          applyRuns,
-          notes: notes.join("\n"),
-        };
+        pipelineStatus = "error";
+        notes.push(`discover_failed=${discover.notes}`);
+        break;
       }
     }
     const apply = await runWorkspaceApplyDaily({
@@ -93,6 +109,10 @@ export async function runWorkspaceDailyPipeline(input: {
     confirmed = quotaSnapshot().confirmed;
     if (apply.status === "locked" || apply.status === "error") {
       log("DAILY_PIPELINE_STOP", { cycle, applyStatus: apply.status });
+      if (apply.status === "error" || apply.status === "locked") {
+        pipelineStatus = "error";
+        notes.push(`apply_stop=${apply.status}:${apply.notes}`);
+      }
       break;
     }
     if (apply.picked === 0 && apply.attempted === 0) {
@@ -122,19 +142,26 @@ export async function runWorkspaceDailyPipeline(input: {
   }
 
   if (input.runSource === "native_schedule" && !input.dryRun) {
-    const applySlot = scheduleSlotKey("apply", input.workspace.timezone);
-    await markWorkspaceRunKey(input.workspace.id, "apply", applySlot);
-    if (discoverRuns > 0) {
-      await markWorkspaceRunKey(
-        input.workspace.id,
-        "discover",
-        scheduleSlotKey("discover", input.workspace.timezone),
-      );
+    if (shouldMarkWorkspaceScheduleComplete(pipelineStatus)) {
+      await markWorkspaceRunKey(input.workspace.id, "apply", applySlotKey);
+      await finalizeScheduleSlotExecution(input.workspace.id, applySlotKey, { status: "completed" });
+      if (discoverRuns > 0) {
+        await markWorkspaceRunKey(
+          input.workspace.id,
+          "discover",
+          workspaceScheduleSlotKey(input.workspace, "discover"),
+        );
+      }
+    } else if (pipelineStatus === "error") {
+      await finalizeScheduleSlotExecution(input.workspace.id, applySlotKey, {
+        status: "failed",
+        errorSummary: notes.join("\n").slice(0, 2000),
+      });
     }
   }
 
   const result: DailyPipelineResult = {
-    status: "ok",
+    status: pipelineStatus,
     confirmedStart: quota0.confirmed,
     confirmedEnd: confirmed,
     targetConfirmed: target,

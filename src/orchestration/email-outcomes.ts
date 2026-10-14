@@ -1,12 +1,12 @@
 import { log } from "../logging/logger.js";
-import { scheduleSlotKey } from "../time/jerusalem-day.js";
+import { finishScheduledSlotIfNeeded } from "./schedule-slot-finish.js";
 import { decryptSecret } from "./crypto.js";
 import { withDb } from "./db.js";
 import { appendNativeRunLog } from "./native-run-log.js";
 import { claimScheduledSlot } from "./schedule-claim.js";
 import { googleAccessTokenFromRefresh } from "./sheets/google-auth.js";
 import { readJobSheetRows, updateJobSheetRow, type JobSheetRow } from "./sheets/job-sheet.js";
-import { insertOrchestrationRun, markWorkspaceRunKey } from "./workspace-store.js";
+import { insertOrchestrationRun } from "./workspace-store.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 
 /** Closed classifier output. The model picks one; code only checks the shape. */
@@ -349,11 +349,16 @@ async function finishOutcomeRun(
   result: EmailOutcomeRunResult,
 ): Promise<void> {
   const finishedAt = new Date().toISOString();
-  const runKey = runSource === "native_schedule"
-    ? scheduleSlotKey("outcome", workspace.timezone, new Date(startedAt))
-    : startedAt.slice(0, 16);
   try {
-    await markWorkspaceRunKey(workspace.id, "outcome", runKey);
+    await finishScheduledSlotIfNeeded({
+      workspace,
+      kind: "outcome",
+      runSource,
+      scheduleSlot: "default",
+      startedAt,
+      status: result.status,
+      errorSummary: result.notes,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log("EMAIL_OUTCOME_RUN_KEY_FAILED", { workspaceId: workspace.id, message });

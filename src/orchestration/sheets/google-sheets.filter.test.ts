@@ -24,6 +24,12 @@ test("clearBasicFiltersOnSheets clears only matching sheets that have a basic fi
 
   try {
     const cleared = await clearBasicFiltersOnSheets("token", "spreadsheet-id", [111, 222]);
+    const metaGet = calls.find((c) => c.method === "GET" && !c.url.includes(":batchUpdate"));
+    assert.ok(metaGet);
+    assert.ok(
+      metaGet!.url.includes("fields=sheets(properties(sheetId,title),basicFilter)"),
+      `unexpected metadata fields mask: ${metaGet!.url}`,
+    );
     assert.deepEqual(cleared, [111]);
     const batch = calls.find((c) => c.url.includes(":batchUpdate"));
     assert.ok(batch);

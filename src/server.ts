@@ -16,6 +16,8 @@ import { removeOldScreenshots } from "./browser/screenshot.js";
 import { cvFileStatus, env, orchestrationMode } from "./config/env.js";
 import { authorizeWorkspaceRun } from "./orchestration/auth.js";
 import { runWorkspaceApplyDaily } from "./orchestration/apply-daily.js";
+import { runWorkspaceDailyPipeline } from "./orchestration/daily-pipeline.js";
+import { buildOrchestrationReadiness } from "./orchestration/orchestration-readiness.js";
 import { runWorkspaceDiscoverDaily } from "./orchestration/discover-daily.js";
 import { runWorkspaceEmailOutcomes } from "./orchestration/email-outcomes.js";
 import { buildFreelanceDigestText, listFreelancePacks, newPacksSinceLastDigest, runFreelanceDigest } from "./freelance/digest.js";
@@ -58,6 +60,11 @@ const server = http.createServer(async (req, res) => {
       send(res, health.ok ? 200 : 503, health);
       return;
     }
+    if (req.method === "GET" && (req.url === "/ready" || req.url?.startsWith("/ready?"))) {
+      const readiness = await buildOrchestrationReadiness();
+      send(res, readiness.ok ? 200 : 503, readiness);
+      return;
+    }
     const workspaceRun = parseWorkspaceRunPath(req.method ?? "", req.url ?? "");
     if (workspaceRun) {
       const token = bearerToken(req);
@@ -74,6 +81,16 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req) as { dryRun?: boolean; submit?: boolean };
       if (workspaceRun.kind === "apply-run") {
         const result = await runWorkspaceApplyDaily({
+          workspace,
+          runSource: "native_manual",
+          submit: body.submit !== false,
+          dryRun: body.dryRun === true,
+        });
+        send(res, 200, result);
+        return;
+      }
+      if (workspaceRun.kind === "pipeline-run") {
+        const result = await runWorkspaceDailyPipeline({
           workspace,
           runSource: "native_manual",
           submit: body.submit !== false,
@@ -523,6 +540,7 @@ async function healthCheck(): Promise<Record<string, unknown>> {
     excludedLocations: getExcludedLocations().length,
     applyInProgress: browserApplyLockHeld(),
     orchestrationMode: orchestrationMode(),
+    readinessPath: "/ready",
     ledgerPath: env.ledgerPath,
     applyAttemptsPath: env.applyAttemptsPath,
     captchaSolvers: {
@@ -660,7 +678,7 @@ async function executeApplyInWorkspace(input: ApplyInput): Promise<ApplicationRe
 function parseWorkspaceRunPath(
   method: string,
   url: string,
-): { workspaceId: string; kind: "apply-run" | "discover-run" | "outcome-run" } | null {
+): { workspaceId: string; kind: "apply-run" | "pipeline-run" | "discover-run" | "outcome-run" } | null {
   if (method !== "POST") {
     return null;
   }
@@ -668,6 +686,10 @@ function parseWorkspaceRunPath(
   const apply = /^\/workspaces\/([^/]+)\/apply-run$/.exec(pathOnly);
   if (apply) {
     return { workspaceId: decodeURIComponent(apply[1]), kind: "apply-run" };
+  }
+  const pipeline = /^\/workspaces\/([^/]+)\/pipeline-run$/.exec(pathOnly);
+  if (pipeline) {
+    return { workspaceId: decodeURIComponent(pipeline[1]), kind: "pipeline-run" };
   }
   const discover = /^\/workspaces\/([^/]+)\/discover-run$/.exec(pathOnly);
   if (discover) {
