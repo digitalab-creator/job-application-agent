@@ -3,7 +3,8 @@ import { resolveApplyCapability, isAutomatableCapability } from "./ats-capabilit
 import { extractHttpUrlFromCell } from "./automatable-url.js";
 import { navigationRetryUrls } from "./job-navigation-url.js";
 import type { LinkLivenessVerdict } from "./link-liveness.js";
-import { isSpecificJobUrl, isUnverifiableUrl } from "./url-inspector.js";
+import { isSpecificEmployerJobUrl } from "./job-url-eligibility.js";
+import { isUnverifiableUrl } from "./url-inspector.js";
 import { readNoteTag, setNoteTag } from "./sheet-note-tags.js";
 
 export const PRESERVE_QUEUE_STATUSES = new Set([
@@ -128,7 +129,7 @@ export function recommendQueueStatus(input: {
     ? resolveApplyCapability(urlForCapability)
     : input.capability;
 
-  if (!isSpecificJobUrl(urlForCapability) || isUnverifiableUrl(urlForCapability)) {
+  if (!isSpecificEmployerJobUrl(urlForCapability) || isUnverifiableUrl(urlForCapability)) {
     return {
       status: "Review",
       reason: "non_specific_or_unverifiable_url",
@@ -187,12 +188,21 @@ export function recommendQueueStatus(input: {
 }
 
 /** Classify-only helper (no liveness): never promote to Manual from capability alone. */
-export function recommendStatusFromCapabilityOnly(capability: AtsCapability): "Closed" | "Review" | "New" {
+export function recommendStatusFromCapabilityOnly(
+  capability: AtsCapability,
+  rawJobUrl = "",
+): "Closed" | "Review" | "New" | "Manual" {
   if (capability === "invalid") {
     return "Closed";
   }
+  if (rawJobUrl && !isSpecificEmployerJobUrl(rawJobUrl)) {
+    return "Review";
+  }
   if (capability === "supported_auto" || capability === "resolvable") {
     return "New";
+  }
+  if (capability === "manual_only") {
+    return rawJobUrl && isSpecificEmployerJobUrl(rawJobUrl) ? "Manual" : "Review";
   }
   return "Review";
 }

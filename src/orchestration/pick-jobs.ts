@@ -1,5 +1,7 @@
 import { extractHttpUrlFromCell } from "../application/automatable-url.js";
 import { resolveApplyCapability } from "../application/ats-capability.js";
+import { isSpecificEmployerJobUrl } from "../application/job-url-eligibility.js";
+import { isUnverifiableUrl } from "../application/url-inspector.js";
 import { hostIsCooling } from "../application/rate-limit.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
 import { dailyApplyPickLimit } from "../application/apply-policy.js";
@@ -24,6 +26,9 @@ export function isEligibleApplySheetRow(row: JobSheetRow): boolean {
     return false;
   }
   const url = extractHttpUrlFromCell(String(row["Job URL"] ?? "")) ?? String(row["Job URL"] ?? "").trim();
+  if (!isSpecificEmployerJobUrl(url) || isUnverifiableUrl(url)) {
+    return false;
+  }
   if (hostIsCooling(url)) {
     return false;
   }

@@ -292,7 +292,7 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, {
         url: target,
         capability: resolveApplyCapability(target),
-        classifyOnly: recommendStatusFromCapabilityOnly(resolveApplyCapability(target)),
+        classifyOnly: recommendStatusFromCapabilityOnly(resolveApplyCapability(target), target),
       });
       return;
     }

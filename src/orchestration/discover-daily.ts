@@ -86,7 +86,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
         Source: job.source,
         Location: job.location || "",
         "Job URL": job.url,
-        Status: "New",
+        Status: job.sheetStatus ?? "New",
         Notes: `${header}\n${discovery.notes || ""}`.trim(),
       };
     });

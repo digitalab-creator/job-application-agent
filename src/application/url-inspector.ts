@@ -3,6 +3,9 @@
  * Whether that posting is still live is link-liveness.ts.
  */
 
+import { gotFriendsPostingIdFromUrl, normalizeAgencyHost } from "./submission-scope.js";
+import { parseHttpUrl } from "./automatable-url.js";
+
 const HUB_TAIL_PATTERN = new RegExp(
   "/(?:careers?|jobs?|job-search|job_search|positions?|openings?|opportunities"
   + "|vacancy|vacancies|join-us|work-with-us|search|browse|listings?)$",
@@ -23,6 +26,7 @@ const GENERIC_JOB_URL_PATTERNS = [
   /google\.[^/]+\/search/i,
   /facebook\.com\/groups\/[^/]+\/?$/i,
   /facebook\.com\/search/i,
+  /gotfriends\.co\.il\/jobslobby\/[^/?#]+\/?(?:\?|$)/i,
 ];
 
 export function urlPath(url: string): string {
@@ -48,6 +52,31 @@ export function extractStrongJobId(url: string): string {
   return "";
 }
 
+/** Aggregator/search/category pages — shared by ATS capability and queue eligibility. */
+export function isAggregatorListPage(href: string, pathname: string): boolean {
+  if (/\/jobs\/view\/\d+/i.test(href)) {
+    return false;
+  }
+  if (/jobpage\?positionId=/i.test(href) || /\/job\/\d+/i.test(pathname)) {
+    return false;
+  }
+  if (/[?&](q|query|search|keywords|page|total)=/i.test(href)) {
+    return true;
+  }
+  if (/\/(jobs|careers|jobslobby)\/?$/i.test(pathname)) {
+    return true;
+  }
+  try {
+    const host = new URL(href).hostname;
+    if (normalizeAgencyHost(host) && /jobslobby/i.test(pathname) && !gotFriendsPostingIdFromUrl(href)) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export function isListingHubUrl(url: string): boolean {
   const path = urlPath(url).replace(/\/+$/, "");
   if (!path) {
@@ -67,7 +96,14 @@ export function isSpecificJobUrl(url: string): boolean {
   if (GENERIC_JOB_URL_PATTERNS.some((pattern) => pattern.test(value))) {
     return false;
   }
-  return !isListingHubUrl(value);
+  if (isListingHubUrl(value)) {
+    return false;
+  }
+  const parsed = parseHttpUrl(value);
+  if (parsed && isAggregatorListPage(parsed.toString(), parsed.pathname)) {
+    return false;
+  }
+  return true;
 }
 
 export function isUnverifiableUrl(url: string): boolean {
