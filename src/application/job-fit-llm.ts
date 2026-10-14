@@ -21,7 +21,7 @@ Extract requirements first, then compare them against facts. A missing preferred
 Office software (Google Sheets, Excel, PowerPoint, email) and personality traits (attention to detail, teamwork, communication, adaptability, independence) are preferred skills, never must-have skills and never hard blockers.
 When a verified fact says the candidate trained, mentored, or recruited people in the same function, that fact supports requirements worded as team management, team development, mentoring, or coaching. Cite that fact as supported. Do not mark those requirements missing when such a fact exists.
 Facts about executive stakeholders, senior management communication, AI adoption, and digital or workflow innovation at Boroda Kaplan or K Logic support related must-haves even when the posting asks for more years than the résumé spans — cite them as partial support rather than missing when the substance matches.
-Modest Microsoft Azure or cloud exposure on CaseEdge supports Microsoft-environment or Azure wording when the fact text mentions it; do not require full enterprise Microsoft-stack ownership.
+Verified facts mentioning Microsoft Azure or Google AI Studio (Gemini) support related must-haves when the fact text covers that platform; do not require full enterprise-only Microsoft or Google stack ownership.
 For every must-have skill, emit one requirementEvidence row with status supported (and factIds) or missing (empty factIds).
 Mark a hard blocker only when the requirement is genuinely mandatory and incompatible.
 Choose exactly one persona: technical, marketing, or hybrid. Do not default unknown or unrelated roles to technical.
