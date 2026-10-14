@@ -1,4 +1,5 @@
 import { isKnownBlockedApplyUrl, parseHttpUrl } from "./automatable-url.js";
+import { isAggregatorListPage } from "./url-inspector.js";
 import { linkedinEasyApplyEnabled } from "./linkedin-easy-apply.js";
 
 /**
@@ -53,17 +54,4 @@ export function resolveApplyCapability(url: string): AtsCapability {
 
 export function isAutomatableCapability(capability: AtsCapability): boolean {
   return capability === "supported_auto" || capability === "resolvable";
-}
-
-function isAggregatorListPage(href: string, pathname: string): boolean {
-  if (/\/jobs\/view\/\d+/i.test(href)) {
-    return false;
-  }
-  if (/jobpage\?positionId=/i.test(href) || /\/job\/\d+/i.test(pathname)) {
-    return false;
-  }
-  if (/[?&](q|query|search|keywords|page)=/i.test(href)) {
-    return true;
-  }
-  return /\/(jobs|careers|jobslobby)\/?$/i.test(pathname);
 }

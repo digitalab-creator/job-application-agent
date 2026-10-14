@@ -1,4 +1,5 @@
 import { extractHttpUrlFromCell, isKnownBlockedApplyUrl, parseHttpUrl } from "../application/automatable-url.js";
+import { evaluateJobUrlEligibility } from "../application/job-url-eligibility.js";
 import { resolveApplyCapability } from "../application/ats-capability.js";
 import { hostIsCooling } from "../application/rate-limit.js";
 import { isExcludedApplyCompany } from "../application/exclude-company.js";
@@ -19,7 +20,8 @@ export type NewQueueRowIssue = {
     | "blocked_listing"
     | "manual_only"
     | "host_cooling"
-    | "excluded_company";
+    | "excluded_company"
+    | "non_specific_url";
 };
 
 export type QueueDepthSnapshot = {
@@ -91,6 +93,12 @@ export function computeQueueDepthSnapshot(
     if (!parseHttpUrl(url)) {
       invalidUrl += 1;
       pushIssue(row, "invalid_url");
+      continue;
+    }
+    const urlEligibility = evaluateJobUrlEligibility(url);
+    if (!urlEligibility.specific) {
+      invalidUrl += 1;
+      pushIssue(row, "non_specific_url");
       continue;
     }
     if (hostIsCooling(url)) {

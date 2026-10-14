@@ -6,8 +6,12 @@ import {
   sheetRowHasManualBlocker,
 } from "./queue-sheet-verdict.js";
 
-test("capability-only never assigns Manual", () => {
+test("capability-only respects URL shape before promoting to New", () => {
+  const gotFriendsSearch = "https://www.gotfriends.co.il/jobslobby/ai/?page=1&total=11";
+  const gotFriendsPosting = "https://www.gotfriends.co.il/jobslobby/ai/ai-engineer/154895/";
   assert.equal(recommendStatusFromCapabilityOnly("manual_only"), "Review");
+  assert.equal(recommendStatusFromCapabilityOnly("manual_only", gotFriendsSearch), "Review");
+  assert.equal(recommendStatusFromCapabilityOnly("manual_only", gotFriendsPosting), "Manual");
   assert.equal(recommendStatusFromCapabilityOnly("resolvable"), "New");
   assert.equal(recommendStatusFromCapabilityOnly("invalid"), "Closed");
 });

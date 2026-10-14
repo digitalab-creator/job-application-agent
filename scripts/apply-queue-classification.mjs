@@ -40,7 +40,7 @@ const verifiedAt = new Date().toISOString();
 for (const row of targets) {
   const rawUrl = String(row["Job URL"] ?? "").trim();
   const capability = rawUrl.startsWith("http") ? resolveApplyCapability(rawUrl) : "invalid";
-  const classifyOnly = recommendStatusFromCapabilityOnly(capability);
+  const classifyOnly = recommendStatusFromCapabilityOnly(capability, rawUrl);
   if (!rawUrl.startsWith("http")) {
     summary.review += 1;
     const rec = {

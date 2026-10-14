@@ -8,7 +8,7 @@ import {
   recoverCanonicalJobUrls,
   recommendQueueStatus,
 } from "../application/queue-sheet-verdict.js";
-import { isSpecificJobUrl } from "../application/url-inspector.js";
+import { isSpecificEmployerJobUrl } from "../application/job-url-eligibility.js";
 import { log } from "../logging/logger.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { readJobSheetRows, updateJobSheetRows, type JobSheetRow } from "./sheets/job-sheet.js";
@@ -192,7 +192,7 @@ export async function runQueueRecheck(input: {
         continue;
       }
 
-      if (!isSpecificJobUrl(liveness.finalUrl || rawUrl)) {
+      if (!isSpecificEmployerJobUrl(liveness.finalUrl || rawUrl)) {
         const rec = recommendQueueStatus({
           currentStatus: String(row.Status ?? ""),
           notes: String(row.Notes ?? ""),

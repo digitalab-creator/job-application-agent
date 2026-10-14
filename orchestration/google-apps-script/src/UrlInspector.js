@@ -87,6 +87,12 @@ function isSpecificOpportunityUrl_(url, opportunityType) {
   ];
 
   if (genericPatterns.some((pattern) => pattern.test(value))) return false;
+  if (/gotfriends\.co\.il\/jobslobby\//i.test(value)) {
+    const segments = urlPath_(value).split('/').filter(Boolean);
+    const last = segments[segments.length - 1] || '';
+    if (!/^\d{5,7}$/.test(last)) return false;
+    if (/[?&](?:page|total|q|search)=/i.test(value)) return false;
+  }
   if (isListingHubUrl_(value)) return false;
 
   if (opportunityType === CONFIG.OPPORTUNITY_TYPES.FREELANCE) {

@@ -1,5 +1,5 @@
 import { listOpenings } from "../application/pick-opening.js";
-import { normalizeOpenings } from "../application/openings.js";
+import { fetchGreenhouseBoardOpenings, normalizeOpenings } from "../application/openings.js";
 import { withHeadlessBrowser } from "../browser/session.js";
 import { log } from "../logging/logger.js";
 
@@ -9,7 +9,31 @@ export type RawBoardJob = {
   snippet: string;
 };
 
+function greenhouseBoardSlug(boardUrl: string): string | null {
+  try {
+    const parsed = new URL(boardUrl);
+    const match = parsed.pathname.match(/^\/([^/]+)\/?$/i);
+    if (!parsed.hostname.includes("boards.greenhouse.io")) {
+      return null;
+    }
+    return match?.[1]?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBoardJobs(boardUrl: string): Promise<RawBoardJob[]> {
+  const ghSlug = greenhouseBoardSlug(boardUrl);
+  if (ghSlug) {
+    const apiJobs = await fetchGreenhouseBoardOpenings(ghSlug);
+    if (apiJobs.length > 0) {
+      return apiJobs.map((job) => ({
+        title: job.title,
+        href: job.href,
+        snippet: job.snippet,
+      }));
+    }
+  }
   const response = await fetch(boardUrl, {
     headers: {
       "User-Agent": "JobApplicationAgent/0.1 (+https://digitalab.co.il)",

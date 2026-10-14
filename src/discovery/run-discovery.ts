@@ -19,8 +19,14 @@ import {
   shouldSkipDiscoveryForUnresolvedBacklog,
 } from "../orchestration/sheet-backlog.js";
 import type { JobSheetRow } from "../orchestration/sheets/job-sheet.js";
+import { resolveDiscoveryBoardUrls } from "./resolve-discovery-boards.js";
 import { fetchBoardJobs } from "./scan-boards.js";
 import { scoreDiscoveryJobs, uniqueKeyForUrl } from "./score-jobs.js";
+import {
+  formatDiscoverySupplyFunnel,
+  validateDiscoverySupply,
+  type DiscoverySupplyFunnel,
+} from "./validate-discovery-supply.js";
 
 export type DiscoveryResult = {
   status: "ok" | "budget_reached" | "skipped";
@@ -35,8 +41,10 @@ export type DiscoveryResult = {
     source: string;
     location: string;
     foundDate: string;
+    sheetStatus: "New" | "Manual";
   }>;
   scannedBoards: number;
+  supplyFunnel?: DiscoverySupplyFunnel;
   llmCostUsd: number;
   budget: ReturnType<typeof budgetSnapshot>;
   notes: string;
@@ -64,11 +72,13 @@ export async function runDiscovery(input: {
     };
   }
   const boards =
-    input.boardUrls === undefined
-      ? discoveryBoardUrls()
-      : input.boardUrls.length > 0
-        ? input.boardUrls
-        : [];
+    input.boardUrls !== undefined && input.boardUrls.length === 0
+      ? []
+      : resolveDiscoveryBoardUrls({
+        workspaceBoards: input.boardUrls,
+        envBoardsCsv: process.env.JOB_DISCOVERY_BOARD_URLS,
+        includeDefaultAtsBoards: true,
+      });
   if (boards.length === 0) {
     return {
       status: "skipped",
@@ -160,8 +170,9 @@ export async function runDiscovery(input: {
   );
   const foundDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
   const tracked = await withJobCost("discovery://scan", async () => {
-    const candidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>> = [];
+    const scoredCandidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>> = [];
     let scanned = 0;
+    let rawOpeningCount = 0;
     for (const boardUrl of boards) {
       if (!budgetIsOpen()) {
         break;
@@ -170,6 +181,7 @@ export async function runDiscovery(input: {
       try {
         const openings = await fetchBoardJobs(boardUrl);
         log("DISCOVERY_BOARD_OPENINGS", { boardUrl, count: openings.length });
+        rawOpeningCount += openings.length;
         const fresh = openings.filter((job) => !existing.has(uniqueKeyForUrl(job.href)));
         if (fresh.length === 0) {
           continue;
@@ -178,7 +190,7 @@ export async function runDiscovery(input: {
         const scored = await scoreDiscoveryJobs(boardUrl, capped, mixPolicy.scoringBias);
         for (const job of scored) {
           if (!existing.has(job.uniqueKey)) {
-            candidates.push(job);
+            scoredCandidates.push(job);
           }
         }
       } catch (error) {
@@ -186,16 +198,68 @@ export async function runDiscovery(input: {
         log("DISCOVERY_BOARD_FAILED", { boardUrl, message });
       }
     }
+    const validated = await validateDiscoverySupply({
+      rawOpeningCount,
+      scored: scoredCandidates,
+      maxLivenessChecks: env.discoveryMaxJobsPerRun * 2,
+    });
+    const automatableCandidates = validated.jobs
+      .filter((job) => job.sheetStatus === "New")
+      .map((job) => ({
+        uniqueKey: job.uniqueKey,
+        role: job.role,
+        company: job.company,
+        url: job.url,
+        matchScore: job.matchScore,
+        category: job.category,
+        whyItFits: job.whyItFits,
+        source: job.source,
+        location: job.location,
+      }));
     const { selected, addedTech, addedMarketing } = selectDiscoveryBatch(
-      candidates,
+      automatableCandidates,
       mixPolicy,
       env.discoveryMaxJobsPerRun,
     );
-    for (const job of selected) {
+    const selectedKeys = new Set(selected.map((job) => job.uniqueKey));
+    const manualValidated = validated.jobs.filter(
+      (job) => job.sheetStatus === "Manual" && !selectedKeys.has(job.uniqueKey),
+    );
+    const sheetJobs = [
+      ...selected.map((job) => {
+        const full = validated.jobs.find((row) => row.uniqueKey === job.uniqueKey);
+        return {
+          ...job,
+          foundDate,
+          sheetStatus: "New" as const,
+          verifyEvidence: full?.verifyEvidence,
+        };
+      }),
+      ...manualValidated.slice(0, Math.max(0, 5 - selected.length)).map((job) => ({
+        uniqueKey: job.uniqueKey,
+        role: job.role,
+        company: job.company,
+        url: job.url,
+        matchScore: job.matchScore,
+        category: job.category,
+        whyItFits: job.whyItFits,
+        source: job.source,
+        location: job.location,
+        foundDate,
+        sheetStatus: "Manual" as const,
+        verifyEvidence: job.verifyEvidence,
+      })),
+    ];
+    for (const job of sheetJobs) {
       existing.add(job.uniqueKey);
     }
-    const jobs = selected.map((job) => ({ ...job, foundDate }));
-    return { jobs, scanned, addedTech, addedMarketing };
+    return {
+      jobs: sheetJobs,
+      scanned,
+      addedTech,
+      addedMarketing,
+      supplyFunnel: validated.funnel,
+    };
   }, "discovery");
 
   const mixReport = formatMixReport({
@@ -212,24 +276,15 @@ export async function runDiscovery(input: {
     llmCostUsd: tracked.usd,
     budget: budgetSnapshot(),
     mixReport,
+    supplyFunnel: tracked.result.supplyFunnel,
     notes: [
       `discovery_boards=${tracked.result.scanned}`,
       `discovery_added=${tracked.result.jobs.length}`,
       `llm_cost_usd=${tracked.usd}`,
       `monthly_budget_ils=${budgetSnapshot().spentIls}/${budgetSnapshot().limitIls}`,
       mixReport,
+      tracked.result.supplyFunnel ? formatDiscoverySupplyFunnel(tracked.result.supplyFunnel) : "",
       "location_gate=remote_or_central_or_tel_aviv_district_israel",
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
   };
-}
-
-function discoveryBoardUrls(): string[] {
-  const raw = process.env.JOB_DISCOVERY_BOARD_URLS?.trim() ?? "";
-  if (!raw) {
-    return [];
-  }
-  return raw
-    .split(/[\n,]+/)
-    .map((part) => part.trim())
-    .filter((part) => /^https?:\/\//i.test(part));
 }
