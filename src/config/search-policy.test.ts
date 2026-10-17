@@ -41,4 +41,18 @@ test("parse live Search Config column headers (Search Category / Preference / Va
   assert.equal(policy.discoverEnabled, true);
   assert.ok(policy.categoryWeights.get("Performance Marketing Leadership") ?? 0 > 0);
   assert.ok(policy.parseWarnings.length >= 0);
+  const perf = policy.categoryRows.find((row) => row.category === "Performance Marketing Leadership");
+  assert.equal(perf?.keywords.join(","), "ppc");
+});
+
+test("Search Config Include=false removes category weight", () => {
+  const policy = parseSearchConfigSheet([
+    ["Search Category", "Titles / Keywords", "Priority", "Include", "Value"],
+    ["Performance Marketing Leadership", "ppc", "35", "true", "35"],
+    ["Applied AI", "ai", "15", "false", "15"],
+  ]);
+  assert.ok(policy.categoryWeights.get("Performance Marketing Leadership"));
+  assert.equal(policy.categoryWeights.has("Applied AI"), false);
+  const skipped = policy.categoryRows.find((row) => row.category === "Applied AI");
+  assert.equal(skipped?.included, false);
 });

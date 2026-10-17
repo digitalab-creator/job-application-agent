@@ -1,4 +1,5 @@
 import { parseHttpUrl } from "./automatable-url.js";
+import { uniqueKeyForUrl } from "./job-posting-identity.js";
 import { getWorkspaceRuntime } from "../orchestration/workspace-runtime.js";
 import type { SubmissionScope } from "../models/types.js";
 
@@ -64,14 +65,7 @@ export function submissionDedupKey(input: {
     if (!input.jobUrl) {
       return null;
     }
-    try {
-      const parsed = new URL(input.jobUrl);
-      parsed.hash = "";
-      parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
-      return `direct:${workspaceId}:${parsed.toString()}`;
-    } catch {
-      return `direct:${workspaceId}:${input.jobUrl.trim()}`;
-    }
+    return `direct:${workspaceId}:${uniqueKeyForUrl(input.jobUrl)}`;
   }
   if (!input.agencyId) {
     return null;

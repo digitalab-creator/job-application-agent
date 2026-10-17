@@ -16,10 +16,10 @@ test("location cache key prefers job URL pathname", () => {
   );
 });
 
-test("location cache key keeps gh_jid so postings sharing one path stay separate", () => {
+test("location cache key keeps greenhouse job ids separate when path is shared", () => {
   const lisbon = locationCacheKey("https://www.riskified.com/job-description/?gh_jid=8831790002");
   const telAviv = locationCacheKey("https://www.riskified.com/job-description/?gh_jid=8805197002");
-  assert.equal(telAviv, "www.riskified.com/job-description?gh_jid=8805197002");
+  assert.equal(telAviv, "greenhouse:riskified:8805197002");
   assert.notEqual(lisbon, telAviv);
 });
 

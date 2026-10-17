@@ -52,7 +52,10 @@ export type DiscoveryResult = {
 };
 
 export async function runDiscovery(input: {
-  existingUrls: string[];
+  /** Legacy URL list — merged into `existingPostingKeys` when provided. */
+  existingUrls?: string[];
+  /** Canonical posting keys already on the sheet (any blocking status). */
+  existingPostingKeys?: Iterable<string>;
   newQueueStats?: NewQueueStats;
   boardUrls?: string[];
   sheetRows?: JobSheetRow[];
@@ -163,11 +166,19 @@ export async function runDiscovery(input: {
     discoveryMinScore: searchPolicy.discoveryMinMatchScore,
   });
 
-  const existing = new Set(
-    input.existingUrls
-      .map((url) => uniqueKeyForUrl(url))
-      .filter(Boolean),
-  );
+  const existing = new Set<string>();
+  for (const key of input.existingPostingKeys ?? []) {
+    const normalized = String(key || "").trim();
+    if (normalized) {
+      existing.add(normalized);
+    }
+  }
+  for (const url of input.existingUrls ?? []) {
+    const key = uniqueKeyForUrl(url);
+    if (key) {
+      existing.add(key);
+    }
+  }
   const foundDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
   const tracked = await withJobCost("discovery://scan", async () => {
     const scoredCandidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>> = [];

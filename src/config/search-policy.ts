@@ -8,6 +8,14 @@ export const SEARCH_POLICY_DEFAULT_VERSION = "2026-03-26-targeting-v1";
 
 export type SearchConfigSource = "sheet_key_value" | "sheet_category_table" | "defaults";
 
+export type SearchCategoryRow = {
+  category: string;
+  keywords: string[];
+  priority: number;
+  included: boolean;
+  share: number;
+};
+
 export type SearchPolicy = {
   version: string;
   discoveryMinMatchScore: number;
@@ -15,6 +23,7 @@ export type SearchPolicy = {
   /** Skip discovery when Review + Manual rows are at or above this count. */
   skipDiscoverWhenUnresolvedGte: number;
   categoryWeights: CategoryWeightMap;
+  categoryRows: SearchCategoryRow[];
   configSource: SearchConfigSource;
   parseWarnings: string[];
 };
@@ -26,6 +35,7 @@ export function defaultSearchPolicy(): SearchPolicy {
     discoverEnabled: true,
     skipDiscoverWhenUnresolvedGte: 100,
     categoryWeights: new Map(TRACKER_CATEGORY_TARGET_SHARE),
+    categoryRows: [],
     configSource: "defaults",
     parseWarnings: [],
   };
@@ -50,7 +60,14 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
   let keyCol = headerIndex(header, [/^key$/i]);
   let valueCol = headerIndex(header, [/^value$/i]);
   let categoryCol = headerIndex(header, [/^category$/i, /^search category$/i]);
-  let shareCol = headerIndex(header, [/^share$/i, /^weight$/i, /^preference$/i, /%$/i]);
+  const titlesCol = headerIndex(header, [/titles/i, /keywords/i]);
+  const priorityCol = headerIndex(header, [/^priority$/i, /^preference$/i]);
+  const includeCol = headerIndex(header, [/^include$/i]);
+  let shareCol = headerIndex(header, [/^share$/i, /^weight$/i, /%$/i]);
+  if (shareCol < 0 && priorityCol >= 0 && categoryCol >= 0) {
+    shareCol = priorityCol;
+    parseWarnings.push("mapped_priority_column_as_category_share");
+  }
   if (keyCol < 0 && valueCol >= 0 && headerIndex(header, [/^preference$/i]) >= 0) {
     keyCol = headerIndex(header, [/^preference$/i]);
     parseWarnings.push("mapped_preference_column_as_settings_key");
@@ -65,6 +82,7 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
 
   const settings = new Map<string, string>();
   const weights = new Map<string, number>();
+  const categoryRows: SearchCategoryRow[] = [];
 
   for (let rowIndex = 1; rowIndex < values.length; rowIndex += 1) {
     const row = values[rowIndex] ?? [];
@@ -88,10 +106,30 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
       if (category && looksLikeSearchSettingKey(category)) {
         continue;
       }
+      const includeRaw = includeCol >= 0 ? String(row[includeCol] ?? "").trim().toLowerCase() : "";
+      const included = includeRaw
+        ? !["false", "0", "no", "off", "exclude", "disabled"].includes(includeRaw)
+        : true;
+      const keywordsRaw = titlesCol >= 0 ? String(row[titlesCol] ?? "").trim() : "";
+      const keywords = keywordsRaw
+        .split(/[,;|]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      const priorityRaw = priorityCol >= 0 ? String(row[priorityCol] ?? "").trim() : "";
+      const priority = Number(priorityRaw.replace(/%$/, ""));
       const shareRaw = String(row[shareCol] ?? "").trim().replace(/%$/, "");
       const share = Number(shareRaw);
-      if (category && Number.isFinite(share) && share > 0) {
+      if (category && Number.isFinite(share) && share > 0 && included) {
         weights.set(category, share > 1 ? share / 100 : share);
+      }
+      if (category && !looksLikeSearchSettingKey(category)) {
+        categoryRows.push({
+          category,
+          keywords,
+          priority: Number.isFinite(priority) ? priority : 0,
+          included,
+          share: Number.isFinite(share) && share > 0 ? (share > 1 ? share / 100 : share) : 0,
+        });
       }
     }
   }
@@ -134,6 +172,7 @@ export function parseSearchConfigSheet(values: string[][]): SearchPolicy {
     discoverEnabled,
     skipDiscoverWhenUnresolvedGte: Math.max(0, unresolvedGte),
     categoryWeights,
+    categoryRows,
     configSource,
     parseWarnings: [...new Set(parseWarnings)],
   };

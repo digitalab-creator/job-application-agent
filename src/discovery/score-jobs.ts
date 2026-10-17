@@ -11,11 +11,18 @@ import { uniqueKeyForUrl } from "./job-url-key.js";
 function discoveryScoreSystemPrompt(): string {
   const categories = CANONICAL_TRACKER_CATEGORIES.join(" | ");
   const policy = getSearchPolicy();
+  const categoryHints = policy.categoryRows
+    .filter((row) => row.included && row.keywords.length > 0)
+    .map((row) => `${row.category}: ${row.keywords.join(", ")}`)
+    .join("; ");
+  const hintsLine = categoryHints
+    ? `Search Config title/keyword hints per category: ${categoryHints}.`
+    : "";
   return `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
 Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"<sheet category>","whyItFits":"one sentence","relevant":true}]}
 category MUST be exactly one of these sheet tracker categories: ${categories}
 Do not collapse into generic AI/Growth/Hybrid labels.
-Target mix follows Search Config policy ${policy.version}.
+Target mix follows Search Config policy ${policy.version}. ${hintsLine}
 matchScore is 0-100. relevant=false when the role is clearly unrelated (pure sales, junior intern, unrelated ops).
 relevant=false for roles that are clearly on-site only outside Israel (US/EU/Iceland/Poland etc.) unless the text explicitly allows remote work from Israel.
 relevant=false for on-site roles outside Israel Central or Tel Aviv District (e.g. Haifa, Jerusalem only) unless remote is stated.

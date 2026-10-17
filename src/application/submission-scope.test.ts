@@ -40,3 +40,18 @@ test("only direct employer applications count toward employer quota", () => {
   assert.equal(countsAsConfirmedEmployerApplication("agency_registration"), false);
   assert.equal(countsAsConfirmedEmployerApplication("agency_job_interest"), false);
 });
+
+test("direct employer dedup keys align across ATS and careers URLs", () => {
+  const board = submissionDedupKey({
+    workspaceId: "internal",
+    scope: "direct_employer_application",
+    jobUrl: "https://boards.greenhouse.io/yotpo/jobs/7633905",
+  });
+  const careers = submissionDedupKey({
+    workspaceId: "internal",
+    scope: "direct_employer_application",
+    jobUrl: "https://www.yotpo.com/careers/gid-7633905/",
+  });
+  assert.equal(board, careers);
+  assert.match(board ?? "", /^direct:internal:greenhouse:yotpo:7633905$/);
+});

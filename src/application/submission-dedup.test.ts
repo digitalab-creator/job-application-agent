@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LedgerEntry } from "./ledger-policy.js";
-import { shouldSkipApplyForScopeDedup } from "./submission-dedup.js";
 
 const gfJobA = "https://www.gotfriends.co.il/jobslobby/ai/ai-engineer/154895/";
 const gfJobB = "https://www.gotfriends.co.il/jobslobby/ai/llm-engineer/151469/";
 
-test("three GotFriends listings share registration dedup but keep distinct job keys", () => {
+async function loadDedup() {
+  process.env.APPLY_API_TOKEN ??= "unit-test-token";
+  process.env.TECHNICAL_CV_PATH ??= "/tmp/technical-cv.pdf";
+  process.env.MARKETING_CV_PATH ??= "/tmp/marketing-cv.pdf";
+  process.env.LLM_API_KEY ??= "unit-test-llm-key";
+  return import("./submission-dedup.js");
+}
+
+test("three GotFriends listings share registration dedup but keep distinct job keys", async () => {
+  const { shouldSkipApplyForScopeDedup } = await loadDedup();
   const entries: LedgerEntry[] = [
     {
       url: gfJobA,
@@ -31,7 +39,8 @@ test("three GotFriends listings share registration dedup but keep distinct job k
   );
 });
 
-test("confirmed job interest blocks repeat for same posting only", () => {
+test("confirmed job interest blocks repeat for same posting only", async () => {
+  const { shouldSkipApplyForScopeDedup } = await loadDedup();
   const entries: LedgerEntry[] = [
     {
       url: gfJobA,

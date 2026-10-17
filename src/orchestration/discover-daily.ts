@@ -5,6 +5,10 @@ import { runDiscovery } from "../discovery/run-discovery.js";
 import { loadSearchPolicyFromSheet } from "./sheets/search-config.js";
 import { log } from "../logging/logger.js";
 import { appendNativeRunLog } from "./native-run-log.js";
+import {
+  filterRowsForSheetAppend,
+  postingKeysFromSheetRows,
+} from "./sheets/sheet-posting-keys.js";
 import { appendDiscoveredJobs, readExcludeCompanies, readJobSheetRows } from "./sheets/job-sheet.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { withDb } from "./db.js";
@@ -47,9 +51,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
     recordPlatformAllocationIfNeeded();
     const rows = await readJobSheetRows(workspace);
     const excluded = await readExcludeCompanies(workspace);
-    const existingUrls = rows
-      .map((row) => String(row["Job URL"] ?? "").trim())
-      .filter(Boolean);
+    const existingPostingKeys = postingKeysFromSheetRows(rows);
     const depth = computeQueueDepthSnapshot(rows, excluded);
     const newQueueStats = {
       ...depth.mix,
@@ -57,7 +59,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
     };
     const searchPolicy = await loadSearchPolicyFromSheet(workspace);
     const discovery = await withSearchPolicy(searchPolicy, async () => runDiscovery({
-      existingUrls,
+      existingPostingKeys,
       newQueueStats,
       boardUrls:
         workspace.discoveryBoardUrls.length > 0 ? workspace.discoveryBoardUrls : undefined,
@@ -73,7 +75,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
       await finishRun(workspace, runSource, startedAt, result, scheduleSlot);
       return result;
     }
-    const sheetRows = discovery.jobs.map((job) => {
+    const sheetRowsRaw = discovery.jobs.map((job) => {
       const header = discovery.mixReport ? `AUTO_DISCOVER\n${discovery.mixReport}` : "AUTO_DISCOVER";
       return {
         "Unique Key": job.uniqueKey,
@@ -90,6 +92,7 @@ export async function runWorkspaceDiscoverDaily(options: DiscoverDailyOptions): 
         Notes: `${header}\n${discovery.notes || ""}`.trim(),
       };
     });
+    const sheetRows = filterRowsForSheetAppend(sheetRowsRaw, existingPostingKeys);
     if (!dryRun) {
       added = await appendDiscoveredJobs(workspace, sheetRows);
     } else {
