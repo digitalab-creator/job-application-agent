@@ -27,6 +27,8 @@ const GENERIC_JOB_URL_PATTERNS = [
   /facebook\.com\/groups\/[^/]+\/?$/i,
   /facebook\.com\/search/i,
   /gotfriends\.co\.il\/jobslobby\/[^/?#]+\/?(?:\?|$)/i,
+  /jobmaster\.co\.il\/jobs\/.*\/q-/i,
+  /drushim\.co\.il\/jobs\/category\/[^/]+\/?$/i,
 ];
 
 export function urlPath(url: string): string {

@@ -27,3 +27,14 @@ test("Greenhouse posting stays automatable", () => {
   assert.equal(verdict.specific, true);
   assert.equal(verdict.automatable, true);
 });
+
+test("Drushim category hub is not a specific posting", () => {
+  const url = "https://www.drushim.co.il/jobs/category/marketing/";
+  assert.equal(isSpecificEmployerJobUrl(url), false);
+});
+
+test("JobMaster search listing is not a specific posting", () => {
+  const url = "https://www.jobmaster.co.il/jobs//q-PPC/l-2026/";
+  assert.equal(isSpecificEmployerJobUrl(url), false);
+  assert.equal(evaluateJobUrlEligibility(url).rejectReason, "non_specific_posting");
+});

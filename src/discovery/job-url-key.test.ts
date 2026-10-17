@@ -9,7 +9,7 @@ test("uniqueKeyForUrl includes hostname to avoid cross-domain path collisions", 
   assert.match(a, /^jobs\.example\.com/);
 });
 
-test("Greenhouse gh_jid is preserved on company career pages", () => {
+test("Greenhouse gh_jid on company career pages maps to canonical greenhouse key", () => {
   const key = uniqueKeyForUrl("https://boards.example.com/careers/open?gh_jid=99");
-  assert.match(key, /gh_jid=99/);
+  assert.equal(key, "greenhouse:boards:99");
 });
