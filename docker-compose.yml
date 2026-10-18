@@ -16,6 +16,30 @@ services:
     networks:
       - n8n_net
 
+  jobagent-mcp-gateway:
+    build: ./mcp-gateway
+    container_name: jobagent-mcp-gateway
+    restart: unless-stopped
+    profiles:
+      - mcp
+    ports:
+      - "127.0.0.1:3101:3101"
+    env_file:
+      - .env
+    environment:
+      MCP_GATEWAY_PORT: "3101"
+      MCP_GATEWAY_BIND_HOST: "0.0.0.0"
+      JOBAGENT_API_BASE_URL: http://job-application-agent:3000
+      JOBAGENT_API_TOKEN: ${APPLY_API_TOKEN}
+      JOBAGENT_MCP_DATABASE_URL: ${JOBAGENT_MCP_DATABASE_URL:-postgres://jobagent:jobagent@workspace-db:5432/jobagent}
+    volumes:
+      - ./data/ledger:/app/data/ledger
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - job-application-agent
+    networks:
+      - n8n_net
+
   job-application-agent:
     build: .
     container_name: job-application-agent
@@ -29,6 +53,7 @@ services:
     volumes:
       - ./data/cv:/app/data/cv:ro
       - ./data/ledger:/app/data/ledger
+      - ./tmp/deploy:/app/tmp/deploy:ro
       - ./data/config:/app/data/config
       - ./generated-cv:/app/generated-cv
       - ./screenshots:/app/screenshots

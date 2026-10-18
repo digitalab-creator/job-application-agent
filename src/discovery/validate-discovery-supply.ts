@@ -6,6 +6,9 @@ import { uniqueKeyForUrl } from "./score-jobs.js";
 
 export type DiscoverySupplyFunnel = {
   rawCandidates: number;
+  /** Openings that were not already on the sheet (posting-key dedup). */
+  freshOpenings: number;
+  /** Scored jobs entering supply validation (after fresh filter). */
   unique: number;
   specificUrls: number;
   verifiedOpen: number;
@@ -23,6 +26,7 @@ export type ValidatedDiscoveryJob = ScoredDiscoveryJob & {
 export function formatDiscoverySupplyFunnel(funnel: DiscoverySupplyFunnel): string {
   return [
     `supply_raw=${funnel.rawCandidates}`,
+    `supply_fresh=${funnel.freshOpenings}`,
     `supply_unique=${funnel.unique}`,
     `supply_specific_urls=${funnel.specificUrls}`,
     `supply_verified_open=${funnel.verifiedOpen}`,
@@ -37,6 +41,7 @@ export function formatDiscoverySupplyFunnel(funnel: DiscoverySupplyFunnel): stri
  */
 export async function validateDiscoverySupply(input: {
   rawOpeningCount: number;
+  freshOpeningCount?: number;
   scored: ScoredDiscoveryJob[];
   maxLivenessChecks?: number;
 }): Promise<{ funnel: DiscoverySupplyFunnel; jobs: ValidatedDiscoveryJob[] }> {
@@ -112,6 +117,7 @@ export async function validateDiscoverySupply(input: {
 
   const funnel: DiscoverySupplyFunnel = {
     rawCandidates: input.rawOpeningCount,
+    freshOpenings: input.freshOpeningCount ?? input.scored.length,
     unique: uniqueJobs.length,
     specificUrls: specificJobs.length,
     verifiedOpen,

@@ -1,0 +1,17 @@
+[Unit]
+Description=Job Application Agent MCP gateway (Docker Compose profile mcp)
+Documentation=file:///opt/apps/job-application-agent/docs/planning/CHATGPT_MCP_INTEGRATION.md
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/apps/job-application-agent
+ExecStart=/usr/bin/docker compose --profile mcp up -d job-application-agent jobagent-mcp-gateway
+ExecStop=/usr/bin/docker compose --profile mcp stop jobagent-mcp-gateway
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

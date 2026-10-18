@@ -49,6 +49,19 @@ import { loadSearchPolicyFromSheet } from "./orchestration/sheets/search-config.
 import { recordExternalSpend, todayCostSummary } from "./llm/cost-ledger.js";
 import { log } from "./logging/logger.js";
 import type { ApplicationResult } from "./models/types.js";
+import { listRecentAttempts, resolveAttemptExport } from "./observability/attempt-export.js";
+import {
+  collectApplyAttemptLedgerPaths,
+  readAttemptsFromLedgerPaths,
+} from "./observability/attempt-sources.js";
+import {
+  collectDockerLogEvents,
+  summarizeAttemptErrors,
+  tailJsonlByAttempt,
+} from "./observability/log-tail.js";
+import { handleMcpApplyOne, handleMcpPreviewCv } from "./observability/mcp-apply-handler.js";
+import { buildJobDetailExport, buildQueueExport } from "./observability/queue-export.js";
+import { listRecentNativeRuns, resolveDeployAttestation } from "./observability/run-export.js";
 
 ensureExcludedCompaniesConfig();
 ensureExcludedLocationsConfig();
@@ -180,6 +193,152 @@ const server = http.createServer(async (req, res) => {
       const saved = setExcludedLocations(locations, source);
       log("EXCLUDED_LOCATIONS_UPDATED", { count: saved.locations.length, source: saved.source });
       send(res, 200, saved);
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/observability/")) {
+      const parsed = new URL(req.url, "http://127.0.0.1");
+      const path = parsed.pathname;
+      const workspaceId = parsed.searchParams.get("workspaceId")?.trim() || "internal";
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      if (path === "/observability/queue") {
+        const limit = Number(parsed.searchParams.get("limit") ?? "25");
+        const statusFilter = parsed.searchParams.get("status") ?? undefined;
+        send(res, 200, await buildQueueExport(workspace, { limit, statusFilter }));
+        return;
+      }
+      if (path === "/observability/job") {
+        const rowNumber = parsed.searchParams.get("rowNumber");
+        const jobUrl = parsed.searchParams.get("url") ?? undefined;
+        const detail = await buildJobDetailExport(workspace, {
+          rowNumber: rowNumber ? Number(rowNumber) : undefined,
+          jobUrl,
+        });
+        if (!detail) {
+          send(res, 404, { error: "job_not_found" });
+          return;
+        }
+        send(res, 200, detail);
+        return;
+      }
+      if (path === "/observability/attempts") {
+        const limit = Number(parsed.searchParams.get("limit") ?? "20");
+        send(res, 200, { attempts: listRecentAttempts(limit, workspace) });
+        return;
+      }
+      if (path.startsWith("/observability/attempt/")) {
+        const attemptId = decodeURIComponent(path.slice("/observability/attempt/".length));
+        const resolved = await resolveAttemptExport(attemptId, workspace);
+        if (resolved.status === "not_found") {
+          send(res, 404, {
+            error: "attempt_not_found",
+            attemptId,
+            ledgerSources: resolved.ledgerSources,
+            message: resolved.message,
+          });
+          return;
+        }
+        if (resolved.status === "sheet_only") {
+          send(res, 200, {
+            resolution: resolved.status,
+            attemptId,
+            sheetHint: resolved.sheetHint,
+            ledgerSources: resolved.ledgerSources,
+            message: resolved.message,
+          });
+          return;
+        }
+        send(res, 200, { ...resolved.attempt, resolution: resolved.status, ledgerSources: resolved.ledgerSources });
+        return;
+      }
+      if (path === "/observability/native-runs") {
+        const limit = Number(parsed.searchParams.get("limit") ?? "20");
+        send(res, 200, { runs: listRecentNativeRuns(limit) });
+        return;
+      }
+      if (path === "/observability/deploy-info") {
+        const attestation = resolveDeployAttestation();
+        send(res, 200, {
+          deployedSha: attestation.deployedSha,
+          deployAttestation: attestation,
+          orchestrationMode: orchestrationMode(),
+          workspaceDatabaseConfigured: Boolean(workspaceDatabaseUrl()),
+        });
+        return;
+      }
+      if (path === "/observability/queue-depth") {
+        const rows = await readJobSheetRows(workspace);
+        const excluded = await readExcludeCompanies(workspace);
+        send(res, 200, {
+          workspaceId: workspace.id,
+          ...computeQueueDepthSnapshot(rows, excluded),
+        });
+        return;
+      }
+      if (path === "/observability/docker-logs") {
+        const sinceMinutes = Number(parsed.searchParams.get("sinceMinutes") ?? "120");
+        const limit = Number(parsed.searchParams.get("limit") ?? "100");
+        const attemptId = parsed.searchParams.get("attemptId") ?? undefined;
+        const event = parsed.searchParams.get("event") ?? undefined;
+        const docker = collectDockerLogEvents({
+          container: process.env.JOB_AGENT_CONTAINER_NAME?.trim() || "job-application-agent",
+          sinceMinutes,
+          attemptId,
+          event,
+          limit,
+        });
+        send(res, 200, docker);
+        return;
+      }
+      if (path === "/observability/attempt-trace") {
+        const attemptId = parsed.searchParams.get("attemptId")?.trim();
+        if (!attemptId) {
+          send(res, 400, { error: "attemptId_required" });
+          return;
+        }
+        const resolved = await resolveAttemptExport(attemptId, workspace);
+        if (resolved.status === "not_found") {
+          send(res, 404, {
+            error: "attempt_not_found",
+            attemptId,
+            ledgerSources: resolved.ledgerSources,
+            message: resolved.message,
+          });
+          return;
+        }
+        const jsonlHits: Record<string, unknown>[] = [];
+        for (const ledgerPath of collectApplyAttemptLedgerPaths(workspace)) {
+          jsonlHits.push(...tailJsonlByAttempt(ledgerPath, attemptId, 80));
+        }
+        const sinceMinutes = Number(parsed.searchParams.get("sinceMinutes") ?? "180");
+        const docker = collectDockerLogEvents({
+          container: process.env.JOB_AGENT_CONTAINER_NAME?.trim() || "job-application-agent",
+          sinceMinutes,
+          attemptId,
+          limit: 80,
+        });
+        send(res, 200, {
+          resolution: resolved.status,
+          attempt: resolved.status === "found" ? resolved.attempt : null,
+          sheetHint: resolved.status === "sheet_only" ? resolved.sheetHint : null,
+          message: resolved.status === "sheet_only" ? resolved.message : undefined,
+          ledgerSources: resolved.ledgerSources,
+          jsonlHits: jsonlHits.slice(-80),
+          docker,
+        });
+        return;
+      }
+      if (path === "/observability/error-summary") {
+        const limit = Number(parsed.searchParams.get("limit") ?? "500");
+        const { attempts } = readAttemptsFromLedgerPaths(collectApplyAttemptLedgerPaths(workspace));
+        const slice = attempts.slice(-Math.min(Math.max(1, limit), 2000));
+        send(res, 200, { summary: summarizeAttemptErrors(slice) });
+        return;
+      }
+      send(res, 404, { error: "observability_route_not_found" });
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/budget")) {
@@ -446,6 +605,63 @@ const server = http.createServer(async (req, res) => {
       } finally {
         releaseBrowserApply();
       }
+      return;
+    }
+    if (req.method === "POST" && req.url === "/mcp/preview-cv") {
+      const body = await readBody(req) as {
+        workspaceId?: string;
+        rowNumber?: number;
+        jobText?: string;
+      };
+      const workspaceId = String(body.workspaceId ?? "internal").trim();
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const rowNumber = Number(body.rowNumber);
+      if (!Number.isFinite(rowNumber) || rowNumber < 2) {
+        send(res, 400, { error: "rowNumber_required" });
+        return;
+      }
+      const preview = await handleMcpPreviewCv({ workspace, rowNumber, jobText: body.jobText });
+      send(res, preview.error ? 404 : 200, preview);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/mcp/apply-one") {
+      const body = await readBody(req) as {
+        workspaceId?: string;
+        rowNumber?: number;
+        submit?: boolean;
+        idempotencyKey?: string;
+        jobText?: string;
+      };
+      const idempotencyKey = String(body.idempotencyKey ?? "").trim();
+      if (!idempotencyKey) {
+        send(res, 400, { error: "idempotencyKey_required" });
+        return;
+      }
+      const workspaceId = String(body.workspaceId ?? "internal").trim();
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const rowNumber = Number(body.rowNumber);
+      if (!Number.isFinite(rowNumber) || rowNumber < 2) {
+        send(res, 400, { error: "rowNumber_required" });
+        return;
+      }
+      const submit = body.submit === true;
+      const result = await handleMcpApplyOne({
+        workspace,
+        rowNumber,
+        submit,
+        idempotencyKey,
+        jobText: body.jobText,
+      });
+      const status = result.error === "apply_in_progress" || result.error === "apply_run_in_progress" ? 409 : result.error ? 404 : 200;
+      send(res, status, result);
       return;
     }
     if (req.method === "POST" && req.url === "/cv/preview") {
