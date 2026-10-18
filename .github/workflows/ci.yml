@@ -41,6 +41,18 @@ jobs:
           npm run build
           npm test
 
+      - name: MCP gateway build and test
+        env:
+          JOBAGENT_MCP_ACCESS_TOKEN: ci-mcp-token
+          JOBAGENT_API_TOKEN: ci-unit-test-token
+          JOBAGENT_API_BASE_URL: http://127.0.0.1:3099
+        run: |
+          set -euo pipefail
+          cd mcp-gateway
+          npm install
+          npm run build
+          npm test
+
       - name: Validate job n8n workflow exports
         run: |
           set -euo pipefail

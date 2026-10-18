@@ -184,6 +184,7 @@ export async function runDiscovery(input: {
     const scoredCandidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>> = [];
     let scanned = 0;
     let rawOpeningCount = 0;
+    let freshOpeningCount = 0;
     for (const boardUrl of boards) {
       if (!budgetIsOpen()) {
         break;
@@ -194,6 +195,7 @@ export async function runDiscovery(input: {
         log("DISCOVERY_BOARD_OPENINGS", { boardUrl, count: openings.length });
         rawOpeningCount += openings.length;
         const fresh = openings.filter((job) => !existing.has(uniqueKeyForUrl(job.href)));
+        freshOpeningCount += fresh.length;
         if (fresh.length === 0) {
           continue;
         }
@@ -211,6 +213,7 @@ export async function runDiscovery(input: {
     }
     const validated = await validateDiscoverySupply({
       rawOpeningCount,
+      freshOpeningCount,
       scored: scoredCandidates,
       maxLivenessChecks: env.discoveryMaxJobsPerRun * 2,
     });

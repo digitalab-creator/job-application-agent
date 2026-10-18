@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenAI Secure MCP Tunnel to Job Application Agent MCP gateway
+Documentation=https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
+After=network-online.target jobagent-mcp-gateway.service docker.service
+Wants=network-online.target jobagent-mcp-gateway.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/apps/job-application-agent
+Environment=HOME=/root
+ExecStartPre=/usr/bin/bash -c 'for i in $(seq 1 60); do curl -fsS http://127.0.0.1:3101/healthz >/dev/null && exit 0; sleep 5; done; exit 1'
+ExecStart=/opt/apps/job-application-agent/scripts/systemd-mcp-tunnel-run.sh
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
