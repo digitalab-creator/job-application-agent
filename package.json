@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "fetch-buster": "node scripts/fetch-buster.mjs",
-    "test": "node --test dist/cv/*.test.js dist/application/*.test.js dist/browser/*.test.js dist/config/*.test.js dist/discovery/*.test.js dist/llm/*.test.js dist/budget/*.test.js dist/orchestration/**/*.test.js dist/freelance/*.test.js dist/time/*.test.js dist/observability/*.test.js"
+    "test": "node --test dist/cv/*.test.js dist/application/*.test.js dist/browser/*.test.js dist/config/*.test.js dist/discovery/*.test.js dist/llm/*.test.js dist/budget/*.test.js dist/orchestration/**/*.test.js dist/freelance/*.test.js dist/time/*.test.js dist/observability/**/*.test.js"
   },
   "dependencies": {
     "pg": "^8.16.3",

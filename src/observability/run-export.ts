@@ -27,6 +27,8 @@ export function listRecentNativeRuns(limit: number): Record<string, unknown>[] {
 
 export type DeployAttestation = {
   deployedSha: string | null;
+  /** Git SHA baked into the running container image at build time. */
+  runningSha: string | null;
   source: string;
   releaseJsonPath: string | null;
   imageBuildSha: string | null;
@@ -55,14 +57,20 @@ function candidateReleaseJsonPaths(): string[] {
   return paths;
 }
 
+function runningImageSha(): string | null {
+  return process.env.IMAGE_BUILD_GIT_SHA?.trim() || null;
+}
+
 export function resolveDeployAttestation(): DeployAttestation {
+  const runningSha = runningImageSha();
   const fromEnv = process.env.DEPLOYED_GIT_SHA?.trim();
   if (fromEnv) {
     return {
       deployedSha: fromEnv,
+      runningSha,
       source: "env:DEPLOYED_GIT_SHA",
       releaseJsonPath: null,
-      imageBuildSha: process.env.IMAGE_BUILD_GIT_SHA?.trim() || null,
+      imageBuildSha: runningSha,
     };
   }
 
@@ -71,17 +79,19 @@ export function resolveDeployAttestation(): DeployAttestation {
     if (sha) {
       return {
         deployedSha: sha,
+        runningSha,
         source: `release_json:${filePath}`,
         releaseJsonPath: filePath,
-        imageBuildSha: process.env.IMAGE_BUILD_GIT_SHA?.trim() || null,
+        imageBuildSha: runningSha,
       };
     }
   }
 
-  const imageBuild = process.env.IMAGE_BUILD_GIT_SHA?.trim();
+  const imageBuild = runningImageSha();
   if (imageBuild) {
     return {
       deployedSha: imageBuild,
+      runningSha: imageBuild,
       source: "env:IMAGE_BUILD_GIT_SHA",
       releaseJsonPath: null,
       imageBuildSha: imageBuild,
@@ -90,10 +100,18 @@ export function resolveDeployAttestation(): DeployAttestation {
 
   return {
     deployedSha: null,
+    runningSha: null,
     source: "unknown",
     releaseJsonPath: null,
     imageBuildSha: null,
   };
+}
+
+export function deployVersionMismatch(attestation: DeployAttestation): boolean {
+  if (!attestation.deployedSha || !attestation.runningSha) {
+    return false;
+  }
+  return attestation.deployedSha !== attestation.runningSha;
 }
 
 /** @deprecated use resolveDeployAttestation */

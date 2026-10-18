@@ -98,6 +98,22 @@ CREATE TABLE IF NOT EXISTS email_message_dedupe (
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (workspace_id, gmail_message_id)
 );
+
+CREATE TABLE IF NOT EXISTS mcp_tool_idempotency (
+  idempotency_key TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  row_number INTEGER NOT NULL,
+  submit BOOLEAN NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  state TEXT NOT NULL,
+  attempt_id TEXT,
+  response_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (idempotency_key, tool)
+);
+CREATE INDEX IF NOT EXISTS mcp_tool_idempotency_workspace_updated ON mcp_tool_idempotency(workspace_id, updated_at DESC);
 `;
 
 export async function ensureWorkspaceSchema(): Promise<void> {
