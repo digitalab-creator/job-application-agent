@@ -13,7 +13,14 @@ import { readJobSheetRows } from "../orchestration/sheets/job-sheet.js";
 import type { WorkspaceRecord } from "../orchestration/workspace-types.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "../orchestration/workspace-runtime.js";
 import { findJobSheetRow } from "./job-sheet-lookup.js";
-import { readMcpIdempotency, rememberMcpIdempotency } from "./mcp-idempotency.js";
+import {
+  beginMcpIdempotency,
+  finishMcpIdempotency,
+  markMcpIdempotencyUncertain,
+  type McpIdempotencyScope,
+} from "./mcp-idempotency-store.js";
+import { loadMcpCvPreview, publicMcpCvPreviewMeta, storeMcpCvPreview } from "./mcp-cv-preview-store.js";
+import type { ApplicationResult } from "../models/types.js";
 
 export type McpApplyOneInput = {
   workspace: WorkspaceRecord;
@@ -24,6 +31,28 @@ export type McpApplyOneInput = {
 };
 
 export type McpApplyOneResult = Record<string, unknown>;
+
+const MCP_APPLY_TOOL = "jobagent_apply_one";
+
+function idempotencyScope(input: McpApplyOneInput, row: Record<string, unknown>): McpIdempotencyScope {
+  return {
+    tool: MCP_APPLY_TOOL,
+    idempotencyKey: input.idempotencyKey,
+    workspaceId: input.workspace.id,
+    rowNumber: input.rowNumber,
+    submit: input.submit,
+    jobUrl: String(row["Job URL"] ?? ""),
+    company: String(row.Company ?? ""),
+    role: String(row.Role ?? ""),
+  };
+}
+
+function uncertainSubmission(outcome: ApplicationResult): boolean {
+  if (outcome.pipeline?.submitted && !outcome.confirmationDetected) {
+    return true;
+  }
+  return outcome.blocker === "submitted_unconfirmed";
+}
 
 export async function handleMcpPreviewCv(input: {
   workspace: WorkspaceRecord;
@@ -51,31 +80,54 @@ export async function handleMcpPreviewCv(input: {
     });
     const outputPath = `${env.generatedCvDir}/mcp-preview-${Date.now()}.pdf`;
     await writeCvPdf(browser, built.doc, persona, outputPath);
-    return { persona, wording: built.wording, cvPath: outputPath, headlineId: built.doc.headlineId };
+    return { persona, headlineId: built.doc.headlineId, cvPath: outputPath };
   });
-  return {
+  const stored = storeMcpCvPreview({
+    workspaceId: input.workspace.id,
     rowNumber: input.rowNumber,
     company,
     role,
-    ...preview,
-  };
+    persona: preview.persona,
+    headlineId: preview.headlineId,
+    cvPath: preview.cvPath,
+  });
+  return publicMcpCvPreviewMeta(stored);
+}
+
+export async function handleMcpGetPreviewCv(input: {
+  workspace: WorkspaceRecord;
+  previewId: string;
+}): Promise<Record<string, unknown>> {
+  const record = loadMcpCvPreview(input.workspace.id, input.previewId);
+  if (!record) {
+    return { error: "preview_not_found_or_expired" };
+  }
+  return publicMcpCvPreviewMeta(record);
 }
 
 export async function handleMcpApplyOne(input: McpApplyOneInput): Promise<McpApplyOneResult> {
-  const tool = "jobagent_apply_one";
-  const cached = readMcpIdempotency(input.idempotencyKey, tool);
-  if (cached) {
-    return { idempotentReplay: true, ...cached.response };
-  }
-
   const rows = await readJobSheetRows(input.workspace);
   const row = findJobSheetRow(rows, { rowNumber: input.rowNumber });
   if (!row) {
     return { error: "job_not_found", rowNumber: input.rowNumber };
   }
 
+  const scope = idempotencyScope(input, row as Record<string, unknown>);
+  const attemptId = randomUUID();
+  const idem = await beginMcpIdempotency(input.workspace, scope, attemptId);
+  if (idem.action === "replay") {
+    return { idempotentReplay: true, ...idem.response };
+  }
+  if (idem.action === "reject") {
+    return { error: idem.error, state: idem.state ?? null };
+  }
+  if (idem.action === "wait") {
+    return { error: idem.error, state: idem.state };
+  }
+
   const runLock = input.submit ? claimApplyRun(input.workspace.id) : { ok: true as const };
   if (!runLock.ok) {
+    await finishMcpIdempotency(scope, attemptId, { state: "FAILED" });
     return { error: "apply_run_in_progress", reason: runLock.reason };
   }
 
@@ -84,21 +136,22 @@ export async function handleMcpApplyOne(input: McpApplyOneInput): Promise<McpApp
     if (input.submit) {
       releaseApplyRun(input.workspace.id);
     }
+    await finishMcpIdempotency(scope, attemptId, { state: "FAILED" });
     return { error: "apply_in_progress", reason: browserClaim.reason };
   }
 
-  const attemptId = randomUUID();
   const startedAt = new Date().toISOString();
   try {
     const applyInput: ApplyInput = {
       row: Number(row.row_number ?? input.rowNumber),
       submit: input.submit,
+      mcpDryRun: !input.submit,
       workspaceId: input.workspace.id,
-      runSource: "native_manual",
+      runSource: input.submit ? "native_manual" : "native_manual",
       runId: input.idempotencyKey,
       batchId: input.idempotencyKey,
       triggeredAt: startedAt,
-      attemptId,
+      attemptId: idem.attemptId,
       startedAt,
       job: {
         role: String(row.Role ?? ""),
@@ -120,18 +173,32 @@ export async function handleMcpApplyOne(input: McpApplyOneInput): Promise<McpApp
     );
 
     const response: Record<string, unknown> = {
-      attemptId,
+      attemptId: idem.attemptId,
       rowNumber: input.rowNumber,
       submit: input.submit,
       outcome,
     };
-    rememberMcpIdempotency({
-      key: input.idempotencyKey,
-      tool,
-      createdAt: new Date().toISOString(),
+
+    let finalState: "CONFIRMED" | "FAILED" | "UNKNOWN" = "CONFIRMED";
+    if (input.submit && uncertainSubmission(outcome)) {
+      finalState = "UNKNOWN";
+    } else if (outcome.status === "review" && outcome.blocker && input.submit) {
+      finalState = outcome.submitted ? "UNKNOWN" : "FAILED";
+    }
+
+    if (finalState === "UNKNOWN") {
+      await markMcpIdempotencyUncertain(scope, idem.attemptId);
+      return { ...response, error: "submission_outcome_uncertain", state: "UNKNOWN" };
+    }
+
+    await finishMcpIdempotency(scope, idem.attemptId, {
+      state: finalState,
       response,
     });
     return response;
+  } catch (error) {
+    await finishMcpIdempotency(scope, attemptId, { state: "FAILED" });
+    throw error;
   } finally {
     releaseBrowserApply();
     if (input.submit) {

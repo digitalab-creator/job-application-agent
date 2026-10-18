@@ -31,10 +31,9 @@ services:
       MCP_GATEWAY_BIND_HOST: "0.0.0.0"
       JOBAGENT_API_BASE_URL: http://job-application-agent:3000
       JOBAGENT_API_TOKEN: ${APPLY_API_TOKEN}
-      JOBAGENT_MCP_DATABASE_URL: ${JOBAGENT_MCP_DATABASE_URL:-postgres://jobagent:jobagent@workspace-db:5432/jobagent}
+      JOBAGENT_MCP_DATABASE_URL: ${JOBAGENT_MCP_DATABASE_URL:?Set JOBAGENT_MCP_DATABASE_URL to jobagent_mcp_readonly}
     volumes:
       - ./data/ledger:/app/data/ledger
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - job-application-agent
     networks:

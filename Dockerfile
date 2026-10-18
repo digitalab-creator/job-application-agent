@@ -1,5 +1,8 @@
 FROM mcr.microsoft.com/playwright:v1.55.1-noble
 
+ARG IMAGE_BUILD_GIT_SHA=
+ENV IMAGE_BUILD_GIT_SHA=${IMAGE_BUILD_GIT_SHA}
+
 USER root
 WORKDIR /app
 

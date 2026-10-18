@@ -6,7 +6,6 @@ import { auditToolCall } from "./audit.js";
 import { requireMcpBearer } from "./auth.js";
 import { gatewayConfig } from "./config.js";
 import { runReadonlyQuery } from "./db-readonly.js";
-import { collectGatewayDockerLogEvents } from "./docker-logs.js";
 import { JobAgentClient } from "./job-agent-client.js";
 
 const client = new JobAgentClient();
@@ -234,7 +233,7 @@ function createServer(): McpServer {
   server.registerTool(
     "jobagent_logs",
     {
-      description: "Filter docker logs for the worker container (bounded, redacted).",
+      description: "Filter worker ledger logs (bounded, redacted; no Docker socket on gateway).",
       inputSchema: {
         attemptId: z.string().optional(),
         event: z.string().optional(),
@@ -254,15 +253,7 @@ function createServer(): McpServer {
         query.set("event", event);
       }
       return withAudit("jobagent_logs", { attemptId, event, sinceMinutes, limit }, async () =>
-        textResult(
-          collectGatewayDockerLogEvents({
-            container: process.env.JOB_AGENT_CONTAINER_NAME?.trim() || "job-application-agent",
-            sinceMinutes: sinceMinutes ?? 120,
-            attemptId,
-            event,
-            limit: limit ?? 100,
-          }),
-        ),
+        textResult(await client.getJson(`/observability/app-logs?${query}`)),
       );
     },
   );
@@ -327,8 +318,15 @@ function createServer(): McpServer {
             githubHead = { branch: ref, error: `github_http_${res.status}` };
           }
         }
+        const configuredReleaseSha =
+          (deploy.configuredReleaseSha as string | null | undefined) ?? deploy.deployedSha ?? null;
+        const runningSha = (deploy.runningSha as string | null | undefined) ?? attestation?.runningSha ?? null;
+        const versionMismatch = Boolean(deploy.versionMismatch);
         return textResult({
-          deployedSha: deploy.deployedSha ?? null,
+          configuredReleaseSha,
+          runningSha,
+          versionMismatch,
+          deployedSha: configuredReleaseSha,
           deployAttestation: attestation ?? null,
           githubDevHead: githubHead,
           orchestrationMode: deploy.orchestrationMode,

@@ -14,8 +14,9 @@ import { isLinkedInHost, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult
 import { syncApplyOutcomeToJobSheet } from "../orchestration/sync-apply-outcome-to-sheet.js";
 
 export async function executeApply(input: ApplyInput): Promise<ApplicationResult> {
+  const mcpPreview = input.mcpDryRun === true || input.submit === false;
   recordPlatformAllocationIfNeeded();
-  if (input.attemptId) {
+  if (input.attemptId && !mcpPreview) {
     rememberAttemptStarted(
     attemptRecordFromResult(
       {
@@ -58,10 +59,12 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       notes: "result=budget_reached",
     };
     recordApplyAttemptDebug(input, outcome);
-    rememberAttempt(input, outcome);
+    if (!mcpPreview) {
+      rememberAttempt(input, outcome);
+    }
     return finishApply(input, outcome);
   }
-  if (applyAttemptQuotaEnforced() && !quotaIsOpen()) {
+  if (!mcpPreview && applyAttemptQuotaEnforced() && !quotaIsOpen()) {
     const quota = quotaSnapshot();
     const outcome: ApplicationResult = {
       attemptId: input.attemptId,
@@ -76,7 +79,9 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       notes: "result=quota_reached",
     };
     recordApplyAttemptDebug(input, outcome);
-    rememberAttempt(input, outcome);
+    if (!mcpPreview) {
+      rememberAttempt(input, outcome);
+    }
     return finishApply(input, outcome);
   }
   if (isLinkedInHost(input.job.url) && !linkedinEasyApplyEnabled()) {
@@ -85,7 +90,9 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     outcome.attemptId = input.attemptId;
     outcome.pipeline = input.pipeline ?? emptyPipeline();
     recordApplyAttemptDebug(input, outcome);
-    rememberAttempt(input, outcome);
+    if (!mcpPreview) {
+      rememberAttempt(input, outcome);
+    }
     return finishApply(input, outcome);
   }
   try {
@@ -96,11 +103,13 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
           withApplySession((context) => applyToJob(context, input)),
         ),
     );
-    rememberQuotaUse({
-      url: input.job.url,
-      status: tracked.result.status,
-      submissionScope: tracked.result.submissionScope,
-    });
+    if (!mcpPreview) {
+      rememberQuotaUse({
+        url: input.job.url,
+        status: tracked.result.status,
+        submissionScope: tracked.result.submissionScope,
+      });
+    }
     const outcome = tracked.result;
     attachManualFillGuide(outcome);
     outcome.llmCostUsd = tracked.usd;
@@ -108,7 +117,9 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     outcome.budget = compactBudget(budgetSnapshot());
     outcome.notes = [outcome.notes, `llm_cost_usd=${tracked.usd}`].filter(Boolean).join("\n");
     recordApplyAttemptDebug(input, outcome);
-    rememberAttempt(input, outcome);
+    if (!mcpPreview) {
+      rememberAttempt(input, outcome);
+    }
     return finishApply(input, outcome);
   } catch (error) {
     const message = error instanceof Error ? error.message : "request_failed";
@@ -125,9 +136,13 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
       blocker: "navigation_failed",
       notes: ["result=review", "blocker=navigation_failed", message.split("\n", 1)[0]].join("\n"),
     };
-    rememberQuotaUse({ url: input.job.url, status: outcome.status });
+    if (!mcpPreview) {
+      rememberQuotaUse({ url: input.job.url, status: outcome.status });
+    }
     recordApplyAttemptDebug(input, outcome);
-    rememberAttempt(input, outcome);
+    if (!mcpPreview) {
+      rememberAttempt(input, outcome);
+    }
     return finishApply(input, outcome);
   }
 }

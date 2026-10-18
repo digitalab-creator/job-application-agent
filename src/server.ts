@@ -59,9 +59,18 @@ import {
   summarizeAttemptErrors,
   tailJsonlByAttempt,
 } from "./observability/log-tail.js";
-import { handleMcpApplyOne, handleMcpPreviewCv } from "./observability/mcp-apply-handler.js";
+import { collectAppLogEvents } from "./observability/app-log-export.js";
+import {
+  handleMcpApplyOne,
+  handleMcpGetPreviewCv,
+  handleMcpPreviewCv,
+} from "./observability/mcp-apply-handler.js";
 import { buildJobDetailExport, buildQueueExport } from "./observability/queue-export.js";
-import { listRecentNativeRuns, resolveDeployAttestation } from "./observability/run-export.js";
+import {
+  deployVersionMismatch,
+  listRecentNativeRuns,
+  resolveDeployAttestation,
+} from "./observability/run-export.js";
 
 ensureExcludedCompaniesConfig();
 ensureExcludedLocationsConfig();
@@ -262,11 +271,28 @@ const server = http.createServer(async (req, res) => {
       if (path === "/observability/deploy-info") {
         const attestation = resolveDeployAttestation();
         send(res, 200, {
+          configuredReleaseSha: attestation.deployedSha,
+          runningSha: attestation.runningSha,
+          versionMismatch: deployVersionMismatch(attestation),
           deployedSha: attestation.deployedSha,
           deployAttestation: attestation,
           orchestrationMode: orchestrationMode(),
           workspaceDatabaseConfigured: Boolean(workspaceDatabaseUrl()),
         });
+        return;
+      }
+      if (path === "/observability/app-logs") {
+        const sinceMinutes = Number(parsed.searchParams.get("sinceMinutes") ?? "120");
+        const limit = Number(parsed.searchParams.get("limit") ?? "100");
+        const attemptId = parsed.searchParams.get("attemptId") ?? undefined;
+        const event = parsed.searchParams.get("event") ?? undefined;
+        const logs = collectAppLogEvents(workspace, {
+          sinceMinutes,
+          attemptId,
+          event,
+          limit,
+        });
+        send(res, 200, logs);
         return;
       }
       if (path === "/observability/queue-depth") {
@@ -605,6 +631,19 @@ const server = http.createServer(async (req, res) => {
       } finally {
         releaseBrowserApply();
       }
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/mcp/preview-cv/")) {
+      const previewId = decodeURIComponent(req.url.slice("/mcp/preview-cv/".length).split("?")[0] ?? "");
+      const parsed = new URL(req.url, "http://127.0.0.1");
+      const workspaceId = String(parsed.searchParams.get("workspaceId") ?? "internal").trim();
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const preview = await handleMcpGetPreviewCv({ workspace, previewId });
+      send(res, preview.error ? 404 : 200, preview);
       return;
     }
     if (req.method === "POST" && req.url === "/mcp/preview-cv") {

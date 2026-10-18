@@ -34,11 +34,8 @@ const QUERIES = {
 
 let pool: Pool | null = null;
 
-async function getPool(): Promise<Pool | null> {
+async function getPool(): Promise<Pool> {
   const url = gatewayConfig.readOnlyDatabaseUrl;
-  if (!url) {
-    return null;
-  }
   if (!pool) {
     const pg = await import("pg");
     pool = new pg.Pool({ connectionString: url, max: 3 });
@@ -52,9 +49,6 @@ export async function runReadonlyQuery(
   rowLimit: number,
 ): Promise<Record<string, unknown>> {
   const p = await getPool();
-  if (!p) {
-    return { configured: false, rows: [] };
-  }
   const client = await p.connect();
   try {
     await client.query(`SET statement_timeout = ${STATEMENT_TIMEOUT_MS}`);

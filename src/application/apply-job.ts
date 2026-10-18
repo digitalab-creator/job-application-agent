@@ -86,6 +86,8 @@ export type ApplyInput = {
   };
   row?: number;
   submit: boolean;
+  /** MCP preview / submit=false: no attempt ledger, quota, or sheet writes. */
+  mcpDryRun?: boolean;
   ignoreLedger?: boolean;
   workspaceId?: string;
   runSource?: import("../models/types.js").ApplyRunSource;
