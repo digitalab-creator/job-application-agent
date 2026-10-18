@@ -18,7 +18,8 @@ permissions:
 jobs:
   build-test:
     name: Typecheck and unit tests
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'digitalab-prod' }}
+    # TODO: use github-hosted runners for pull_request when org billing allows (untrusted PR code).
+    runs-on: [self-hosted, digitalab-prod]
     timeout-minutes: 20
     steps:
       - name: Checkout
