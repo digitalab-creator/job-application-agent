@@ -18,7 +18,7 @@ permissions:
 jobs:
   build-test:
     name: Typecheck and unit tests
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "digitalab-prod"]') }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'digitalab-prod' }}
     timeout-minutes: 20
     steps:
       - name: Checkout
