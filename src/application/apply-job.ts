@@ -103,6 +103,10 @@ export type ApplyInput = {
     estimatedSalary?: string;
     opportunityKind?: "employment" | "contract" | "freelance_project";
   };
+  /** MCP submit safety: persist checkpoint before/after the final Submit click. */
+  onSubmissionCheckpoint?: (stage: "pre_submit" | "post_submit_click") => Promise<void>;
+  /** Shared owner for PostgreSQL canonical job submit guard (scheduler + MCP). */
+  canonicalSubmitGuardOwnerToken?: string;
 };
 
 export async function applyToJob(context: BrowserContext, input: ApplyInput): Promise<ApplicationResult> {
@@ -777,8 +781,14 @@ export async function applyToJob(context: BrowserContext, input: ApplyInput): Pr
     const gotfriendsHost = /gotfriends\.co\.il/i.test(page.url());
     const applyPost = gotfriendsHost ? null : watchApplyPost(page);
     const gfEvidenceBeforeSubmit = gotfriendsHost ? await readGotFriendsFormEvidence(page) : null;
+    if (input.onSubmissionCheckpoint) {
+      await input.onSubmissionCheckpoint("pre_submit");
+    }
     let activeScope = scope;
     let submitAttempt = await submitApplication(page, activeScope);
+    if (submitAttempt.clicked && input.onSubmissionCheckpoint) {
+      await input.onSubmissionCheckpoint("post_submit_click");
+    }
     log("SUBMIT_CLICKED", { url: page.url(), clicked: submitAttempt.clicked, invalid: submitAttempt.invalid });
     log("APPLICATION_STATE", {
       state: applicationStateFromEvidence({ submitted: submitAttempt.clicked && submitAttempt.advanced !== true, nextStep: submitAttempt.advanced === true }),

@@ -109,11 +109,33 @@ CREATE TABLE IF NOT EXISTS mcp_tool_idempotency (
   state TEXT NOT NULL,
   attempt_id TEXT,
   response_json JSONB,
+  job_dedup_key TEXT,
+  submission_stage TEXT,
+  owner_token TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (idempotency_key, tool)
 );
 CREATE INDEX IF NOT EXISTS mcp_tool_idempotency_workspace_updated ON mcp_tool_idempotency(workspace_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS mcp_tool_idempotency_job_dedup ON mcp_tool_idempotency(workspace_id, job_dedup_key)
+  WHERE submit = true AND job_dedup_key IS NOT NULL;
+
+ALTER TABLE mcp_tool_idempotency ADD COLUMN IF NOT EXISTS job_dedup_key TEXT;
+ALTER TABLE mcp_tool_idempotency ADD COLUMN IF NOT EXISTS submission_stage TEXT;
+ALTER TABLE mcp_tool_idempotency ADD COLUMN IF NOT EXISTS owner_token TEXT;
+
+CREATE TABLE IF NOT EXISTS canonical_job_submit_guard (
+  workspace_id TEXT NOT NULL,
+  job_dedup_key TEXT NOT NULL,
+  attempt_id TEXT NOT NULL,
+  owner_token TEXT NOT NULL,
+  state TEXT NOT NULL,
+  idempotency_key TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (workspace_id, job_dedup_key)
+);
+CREATE INDEX IF NOT EXISTS canonical_job_submit_guard_state ON canonical_job_submit_guard(state);
 `;
 
 export async function ensureWorkspaceSchema(): Promise<void> {

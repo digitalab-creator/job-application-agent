@@ -13,14 +13,17 @@ import { readJobSheetRows } from "../orchestration/sheets/job-sheet.js";
 import type { WorkspaceRecord } from "../orchestration/workspace-types.js";
 import { runtimeFromWorkspace, withWorkspaceRuntime } from "../orchestration/workspace-runtime.js";
 import { findJobSheetRow } from "./job-sheet-lookup.js";
+import { markCanonicalJobSubmitGuard } from "./canonical-job-submit-guard.js";
 import {
   beginMcpIdempotency,
   finishMcpIdempotency,
   markMcpIdempotencyUncertain,
+  recordMcpSubmissionStage,
   type McpIdempotencyScope,
 } from "./mcp-idempotency-store.js";
 import { loadMcpCvPreview, publicMcpCvPreviewMeta, storeMcpCvPreview } from "./mcp-cv-preview-store.js";
 import type { ApplicationResult } from "../models/types.js";
+import { log } from "../logging/logger.js";
 
 export type McpApplyOneInput = {
   workspace: WorkspaceRecord;
@@ -125,9 +128,12 @@ export async function handleMcpApplyOne(input: McpApplyOneInput): Promise<McpApp
     return { error: idem.error, state: idem.state };
   }
 
+  const ownerToken = idem.ownerToken;
+  const jobUrl = String(row["Job URL"] ?? "");
+
   const runLock = input.submit ? claimApplyRun(input.workspace.id) : { ok: true as const };
   if (!runLock.ok) {
-    await finishMcpIdempotency(scope, attemptId, { state: "FAILED" });
+    await finishMcpIdempotency(scope, idem.attemptId, { state: "FAILED" }, ownerToken);
     return { error: "apply_run_in_progress", reason: runLock.reason };
   }
 
@@ -136,27 +142,35 @@ export async function handleMcpApplyOne(input: McpApplyOneInput): Promise<McpApp
     if (input.submit) {
       releaseApplyRun(input.workspace.id);
     }
-    await finishMcpIdempotency(scope, attemptId, { state: "FAILED" });
+    await finishMcpIdempotency(scope, idem.attemptId, { state: "FAILED" }, ownerToken);
     return { error: "apply_in_progress", reason: browserClaim.reason };
   }
 
   const startedAt = new Date().toISOString();
+  let enteredSubmissionStage = false;
   try {
     const applyInput: ApplyInput = {
       row: Number(row.row_number ?? input.rowNumber),
       submit: input.submit,
       mcpDryRun: !input.submit,
       workspaceId: input.workspace.id,
-      runSource: input.submit ? "native_manual" : "native_manual",
+      runSource: "native_manual",
       runId: input.idempotencyKey,
       batchId: input.idempotencyKey,
       triggeredAt: startedAt,
       attemptId: idem.attemptId,
       startedAt,
+      canonicalSubmitGuardOwnerToken: input.submit ? ownerToken : undefined,
+      onSubmissionCheckpoint: input.submit
+        ? async (stage) => {
+            enteredSubmissionStage = true;
+            await recordMcpSubmissionStage(scope, idem.attemptId, ownerToken, stage);
+          }
+        : undefined,
       job: {
         role: String(row.Role ?? ""),
         company: String(row.Company ?? ""),
-        url: String(row["Job URL"] ?? ""),
+        url: jobUrl,
         matchScore: sheetMatchScore(row),
         category: String(row.Category ?? ""),
         estimatedSalary: String(row["Est. Salary Range"] ?? ""),
@@ -183,21 +197,52 @@ export async function handleMcpApplyOne(input: McpApplyOneInput): Promise<McpApp
     if (input.submit && uncertainSubmission(outcome)) {
       finalState = "UNKNOWN";
     } else if (outcome.status === "review" && outcome.blocker && input.submit) {
-      finalState = outcome.submitted ? "UNKNOWN" : "FAILED";
+      finalState = outcome.submitted || enteredSubmissionStage ? "UNKNOWN" : "FAILED";
     }
 
     if (finalState === "UNKNOWN") {
-      await markMcpIdempotencyUncertain(scope, idem.attemptId);
-      return { ...response, error: "submission_outcome_uncertain", state: "UNKNOWN" };
+      if (input.submit) {
+        await markCanonicalJobSubmitGuard(input.workspace.id, jobUrl, idem.attemptId, ownerToken, "UNCERTAIN");
+      }
+      await markMcpIdempotencyUncertain(scope, idem.attemptId, ownerToken);
+      return { ...response, error: "submission_outcome_uncertain", state: finalState };
+    }
+
+    if (input.submit) {
+      await markCanonicalJobSubmitGuard(
+        input.workspace.id,
+        jobUrl,
+        idem.attemptId,
+        ownerToken,
+        finalState === "CONFIRMED" ? "CONFIRMED" : "RELEASED",
+      );
     }
 
     await finishMcpIdempotency(scope, idem.attemptId, {
       state: finalState,
       response,
-    });
+    }, ownerToken);
     return response;
   } catch (error) {
-    await finishMcpIdempotency(scope, attemptId, { state: "FAILED" });
+    log("MCP_APPLY_HANDLER_FAILED", {
+      attemptId: idem.attemptId,
+      submit: input.submit,
+      enteredSubmissionStage,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    if (input.submit && enteredSubmissionStage) {
+      await markCanonicalJobSubmitGuard(input.workspace.id, jobUrl, idem.attemptId, ownerToken, "UNCERTAIN");
+      await markMcpIdempotencyUncertain(scope, idem.attemptId, ownerToken);
+      return {
+        error: "submission_outcome_uncertain",
+        state: "UNKNOWN",
+        attemptId: idem.attemptId,
+      };
+    }
+    if (input.submit) {
+      await markCanonicalJobSubmitGuard(input.workspace.id, jobUrl, idem.attemptId, ownerToken, "RELEASED");
+    }
+    await finishMcpIdempotency(scope, idem.attemptId, { state: "FAILED" }, ownerToken);
     throw error;
   } finally {
     releaseBrowserApply();
