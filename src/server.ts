@@ -637,6 +637,11 @@ const server = http.createServer(async (req, res) => {
       const previewId = decodeURIComponent(req.url.slice("/mcp/preview-cv/".length).split("?")[0] ?? "");
       const parsed = new URL(req.url, "http://127.0.0.1");
       const workspaceId = String(parsed.searchParams.get("workspaceId") ?? "internal").trim();
+      const { assertMcpWorkspaceAccess } = await import("./observability/mcp-workspace-guard.js");
+      if (!assertMcpWorkspaceAccess(workspaceId)) {
+        send(res, 403, { error: "workspace_forbidden" });
+        return;
+      }
       const workspace = await getWorkspace(workspaceId);
       if (!workspace) {
         send(res, 404, { error: "workspace_not_found" });
@@ -653,6 +658,11 @@ const server = http.createServer(async (req, res) => {
         jobText?: string;
       };
       const workspaceId = String(body.workspaceId ?? "internal").trim();
+      const { assertMcpWorkspaceAccess } = await import("./observability/mcp-workspace-guard.js");
+      if (!assertMcpWorkspaceAccess(workspaceId)) {
+        send(res, 403, { error: "workspace_forbidden" });
+        return;
+      }
       const workspace = await getWorkspace(workspaceId);
       if (!workspace) {
         send(res, 404, { error: "workspace_not_found" });
@@ -681,6 +691,11 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const workspaceId = String(body.workspaceId ?? "internal").trim();
+      const { assertMcpWorkspaceAccess } = await import("./observability/mcp-workspace-guard.js");
+      if (!assertMcpWorkspaceAccess(workspaceId)) {
+        send(res, 403, { error: "workspace_forbidden" });
+        return;
+      }
       const workspace = await getWorkspace(workspaceId);
       if (!workspace) {
         send(res, 404, { error: "workspace_not_found" });

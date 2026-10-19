@@ -24,14 +24,17 @@ services:
       - mcp
     ports:
       - "127.0.0.1:3101:3101"
-    env_file:
-      - .env
     environment:
       MCP_GATEWAY_PORT: "3101"
       MCP_GATEWAY_BIND_HOST: "0.0.0.0"
+      JOBAGENT_MCP_ACCESS_TOKEN: ${JOBAGENT_MCP_ACCESS_TOKEN:?Set JOBAGENT_MCP_ACCESS_TOKEN for the MCP gateway}
+      JOBAGENT_DEFAULT_WORKSPACE_ID: ${JOBAGENT_DEFAULT_WORKSPACE_ID:-internal}
       JOBAGENT_API_BASE_URL: http://job-application-agent:3000
       JOBAGENT_API_TOKEN: ${APPLY_API_TOKEN}
       JOBAGENT_MCP_DATABASE_URL: ${JOBAGENT_MCP_DATABASE_URL:?Set JOBAGENT_MCP_DATABASE_URL to jobagent_mcp_readonly}
+      JOBAGENT_GITHUB_REPO: ${JOBAGENT_GITHUB_REPO:-digitalab-creator/job-application-agent}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      MCP_GATEWAY_AUDIT_LOG: /app/data/ledger/mcp-gateway-audit.jsonl
     volumes:
       - ./data/ledger:/app/data/ledger
     depends_on:
@@ -40,13 +43,18 @@ services:
       - n8n_net
 
   job-application-agent:
-    build: .
+    build:
+      context: .
+      args:
+        IMAGE_BUILD_GIT_SHA: ${IMAGE_BUILD_GIT_SHA:-}
     container_name: job-application-agent
     restart: unless-stopped
     ports:
       - "127.0.0.1:3099:3000"
     env_file:
       - .env
+    environment:
+      JOBAGENT_MCP_ALLOWED_WORKSPACE_ID: ${JOBAGENT_MCP_ALLOWED_WORKSPACE_ID:-internal}
     shm_size: "1gb"
     mem_limit: 3g
     volumes:

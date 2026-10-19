@@ -8,6 +8,11 @@ export type DiscoverySupplyFunnel = {
   rawCandidates: number;
   /** Openings that were not already on the sheet (posting-key dedup). */
   freshOpenings: number;
+  /** Openings sent to the discovery LLM scorer (after per-board cap). */
+  scoredInput: number;
+  llmParseFailures: number;
+  llmRejected: number;
+  locationRejected: number;
   /** Scored jobs entering supply validation (after fresh filter). */
   unique: number;
   specificUrls: number;
@@ -27,6 +32,10 @@ export function formatDiscoverySupplyFunnel(funnel: DiscoverySupplyFunnel): stri
   return [
     `supply_raw=${funnel.rawCandidates}`,
     `supply_fresh=${funnel.freshOpenings}`,
+    `supply_scored_input=${funnel.scoredInput}`,
+    `supply_llm_parse_failures=${funnel.llmParseFailures}`,
+    `supply_llm_rejected=${funnel.llmRejected}`,
+    `supply_location_rejected=${funnel.locationRejected}`,
     `supply_unique=${funnel.unique}`,
     `supply_specific_urls=${funnel.specificUrls}`,
     `supply_verified_open=${funnel.verifiedOpen}`,
@@ -42,6 +51,12 @@ export function formatDiscoverySupplyFunnel(funnel: DiscoverySupplyFunnel): stri
 export async function validateDiscoverySupply(input: {
   rawOpeningCount: number;
   freshOpeningCount?: number;
+  scoreStats?: {
+    scoredInput: number;
+    llmParseFailures: number;
+    llmRejected: number;
+    locationRejected: number;
+  };
   scored: ScoredDiscoveryJob[];
   maxLivenessChecks?: number;
 }): Promise<{ funnel: DiscoverySupplyFunnel; jobs: ValidatedDiscoveryJob[] }> {
@@ -118,6 +133,10 @@ export async function validateDiscoverySupply(input: {
   const funnel: DiscoverySupplyFunnel = {
     rawCandidates: input.rawOpeningCount,
     freshOpenings: input.freshOpeningCount ?? input.scored.length,
+    scoredInput: input.scoreStats?.scoredInput ?? input.scored.length,
+    llmParseFailures: input.scoreStats?.llmParseFailures ?? 0,
+    llmRejected: input.scoreStats?.llmRejected ?? 0,
+    locationRejected: input.scoreStats?.locationRejected ?? 0,
     unique: uniqueJobs.length,
     specificUrls: specificJobs.length,
     verifiedOpen,

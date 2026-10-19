@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import * as z from "zod";
 import { auditToolCall } from "./audit.js";
-import { requireMcpBearer } from "./auth.js";
+import { requireMcpBearer, resolveAuthorizedWorkspaceId } from "./auth.js";
 import { gatewayConfig } from "./config.js";
 import { runReadonlyQuery } from "./db-readonly.js";
 import { JobAgentClient } from "./job-agent-client.js";
@@ -71,7 +71,7 @@ function createServer(): McpServer {
       },
     },
     async ({ workspaceId, limit, status }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       const query = new URLSearchParams({
         workspaceId: ws,
         limit: String(limit ?? 25),
@@ -96,7 +96,7 @@ function createServer(): McpServer {
       },
     },
     async ({ workspaceId, rowNumber, url }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       const query = new URLSearchParams({ workspaceId: ws });
       if (rowNumber !== undefined && rowNumber !== null) {
         query.set("rowNumber", String(rowNumber));
@@ -136,7 +136,7 @@ function createServer(): McpServer {
       },
     },
     async ({ workspaceId, limit }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       const bounded = limit ?? 20;
       return withAudit("jobagent_recent_runs", { workspaceId: ws, limit: bounded }, async () =>
         textResult({
@@ -179,7 +179,7 @@ function createServer(): McpServer {
       inputSchema: { workspaceId: z.string().optional(), limit: z.number().int().min(1).max(50).optional() },
     },
     async ({ workspaceId, limit }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       const bounded = limit ?? 20;
       return withAudit("jobagent_db_recent_runs", { workspaceId: ws, limit: bounded }, async () =>
         textResult(await runReadonlyQuery("recentRuns", [ws, bounded], bounded)),
@@ -194,7 +194,7 @@ function createServer(): McpServer {
       inputSchema: { workspaceId: z.string().optional(), limit: z.number().int().min(1).max(50).optional() },
     },
     async ({ workspaceId, limit }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       const bounded = limit ?? 20;
       return withAudit("jobagent_db_schedule_slots", { workspaceId: ws, limit: bounded }, async () =>
         textResult(await runReadonlyQuery("scheduleSlots", [ws, bounded], bounded)),
@@ -209,7 +209,7 @@ function createServer(): McpServer {
       inputSchema: { workspaceId: z.string().optional() },
     },
     async ({ workspaceId }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       return withAudit("jobagent_db_failure_summary", { workspaceId: ws }, async () =>
         textResult(await runReadonlyQuery("failureSummary", [ws], 20)),
       );
@@ -223,7 +223,7 @@ function createServer(): McpServer {
       inputSchema: { workspaceId: z.string().optional() },
     },
     async ({ workspaceId }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       return withAudit("jobagent_db_workspace_status", { workspaceId: ws }, async () =>
         textResult(await runReadonlyQuery("workspaceStatus", [ws], 1)),
       );
@@ -345,7 +345,7 @@ function createServer(): McpServer {
       },
     },
     async ({ workspaceId, rowNumber, jobText }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       return withAudit("jobagent_preview_cv", { workspaceId: ws, rowNumber }, async () =>
         textResult(await client.postJson("/mcp/preview-cv", { workspaceId: ws, rowNumber, jobText })),
       );
@@ -365,7 +365,7 @@ function createServer(): McpServer {
       },
     },
     async ({ workspaceId, rowNumber, submit, idempotencyKey }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       return withAudit("jobagent_apply_one", { workspaceId: ws, rowNumber, submit, idempotencyKey }, async () =>
         textResult(
           await client.postJson("/mcp/apply-one", {
@@ -386,7 +386,7 @@ function createServer(): McpServer {
       inputSchema: { workspaceId: z.string().optional() },
     },
     async ({ workspaceId }) => {
-      const ws = workspaceId ?? gatewayConfig.defaultWorkspaceId;
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
       return withAudit("jobagent_queue_depth", { workspaceId: ws }, async () =>
         textResult(await client.getJson(`/observability/queue-depth?workspaceId=${encodeURIComponent(ws)}`)),
       );

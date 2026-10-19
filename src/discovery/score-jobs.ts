@@ -6,7 +6,17 @@ import { sheetCategoryFromDiscovery } from "./category-map.js";
 import { resolveJobLocationVerdict } from "./resolve-location-eligibility.js";
 import { getSearchPolicy } from "../config/search-policy-runtime.js";
 import { CANONICAL_TRACKER_CATEGORIES } from "./tracker-category-weights.js";
+import { log } from "../logging/logger.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
+
+export type DiscoveryScoreStats = {
+  openingsIn: number;
+  llmRowsParsed: number;
+  llmParseFailed: boolean;
+  llmRejected: number;
+  locationRejected: number;
+  accepted: number;
+};
 
 function discoveryScoreSystemPrompt(): string {
   const categories = CANONICAL_TRACKER_CATEGORIES.join(" | ");
@@ -61,9 +71,17 @@ export async function scoreDiscoveryJobs(
   boardUrl: string,
   openings: RawBoardJob[],
   scoringBias: "marketing" | "balanced" = "balanced",
-): Promise<ScoredDiscoveryJob[]> {
+): Promise<{ jobs: ScoredDiscoveryJob[]; stats: DiscoveryScoreStats }> {
+  const stats: DiscoveryScoreStats = {
+    openingsIn: openings.length,
+    llmRowsParsed: 0,
+    llmParseFailed: false,
+    llmRejected: 0,
+    locationRejected: 0,
+    accepted: 0,
+  };
   if (openings.length === 0) {
-    return [];
+    return { jobs: [], stats };
   }
   const company = companyFromBoardUrl(boardUrl);
   const payload = openings.map((job, index) => ({
@@ -83,12 +101,20 @@ export async function scoreDiscoveryJobs(
   );
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
-    return [];
+    stats.llmParseFailed = true;
+    log("DISCOVERY_SCORE_PARSE_FAILED", {
+      boardUrl,
+      openings: openings.length,
+      issues: parsed.error.issues.slice(0, 5).map((issue) => issue.message),
+    });
+    return { jobs: [], stats };
   }
+  stats.llmRowsParsed = parsed.data.jobs.length;
   const out: ScoredDiscoveryJob[] = [];
   for (const row of parsed.data.jobs) {
     const minScore = getSearchPolicy().discoveryMinMatchScore;
     if (!row.relevant || row.matchScore < minScore) {
+      stats.llmRejected += 1;
       continue;
     }
     const opening = openings[row.index];
@@ -101,8 +127,10 @@ export async function scoreDiscoveryJobs(
       url: opening.href,
     });
     if (!locationVerdict.eligible) {
+      stats.locationRejected += 1;
       continue;
     }
+    stats.accepted += 1;
     out.push({
       uniqueKey: uniqueKeyForUrl(opening.href),
       role: opening.title,
@@ -115,7 +143,7 @@ export async function scoreDiscoveryJobs(
       location: `${locationVerdict.source}: ${locationVerdict.reason}`.slice(0, LOCATION_EVIDENCE_MAX_CHARS),
     });
   }
-  return out;
+  return { jobs: out, stats };
 }
 
 export { uniqueKeyForUrl } from "./job-url-key.js";

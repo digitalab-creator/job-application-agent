@@ -21,6 +21,7 @@ import {
 import type { JobSheetRow } from "../orchestration/sheets/job-sheet.js";
 import { resolveDiscoveryBoardUrls } from "./resolve-discovery-boards.js";
 import { fetchBoardJobs } from "./scan-boards.js";
+import { prioritizeFreshOpeningsForScoring } from "./prioritize-fresh-openings.js";
 import { scoreDiscoveryJobs, uniqueKeyForUrl } from "./score-jobs.js";
 import {
   formatDiscoverySupplyFunnel,
@@ -181,10 +182,15 @@ export async function runDiscovery(input: {
   }
   const foundDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date());
   const tracked = await withJobCost("discovery://scan", async () => {
-    const scoredCandidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>> = [];
+    const scoredCandidates: Awaited<ReturnType<typeof scoreDiscoveryJobs>>["jobs"] = [];
     let scanned = 0;
     let rawOpeningCount = 0;
     let freshOpeningCount = 0;
+    let scoredInput = 0;
+    let llmParseFailures = 0;
+    let llmRejected = 0;
+    let locationRejected = 0;
+    const searchPolicyForRank = getSearchPolicy();
     for (const boardUrl of boards) {
       if (!budgetIsOpen()) {
         break;
@@ -199,9 +205,16 @@ export async function runDiscovery(input: {
         if (fresh.length === 0) {
           continue;
         }
-        const capped = fresh.slice(0, env.discoveryMaxJobsPerBoard);
+        const ranked = prioritizeFreshOpeningsForScoring(fresh, searchPolicyForRank);
+        const capped = ranked.slice(0, env.discoveryMaxJobsPerBoard);
+        scoredInput += capped.length;
         const scored = await scoreDiscoveryJobs(boardUrl, capped, mixPolicy.scoringBias);
-        for (const job of scored) {
+        if (scored.stats.llmParseFailed) {
+          llmParseFailures += 1;
+        }
+        llmRejected += scored.stats.llmRejected;
+        locationRejected += scored.stats.locationRejected;
+        for (const job of scored.jobs) {
           if (!existing.has(job.uniqueKey)) {
             scoredCandidates.push(job);
           }
@@ -214,6 +227,12 @@ export async function runDiscovery(input: {
     const validated = await validateDiscoverySupply({
       rawOpeningCount,
       freshOpeningCount,
+      scoreStats: {
+        scoredInput,
+        llmParseFailures,
+        llmRejected,
+        locationRejected,
+      },
       scored: scoredCandidates,
       maxLivenessChecks: env.discoveryMaxJobsPerRun * 2,
     });
