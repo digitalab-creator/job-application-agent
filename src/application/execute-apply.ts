@@ -12,9 +12,42 @@ import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./manual-fill
 import { env } from "../config/env.js";
 import { isLinkedInHost, linkedinEasyApplyEnabled, linkedinFeatureDisabledResult } from "./linkedin-easy-apply.js";
 import { syncApplyOutcomeToJobSheet } from "../orchestration/sync-apply-outcome-to-sheet.js";
+import {
+  claimCanonicalJobSubmitGuard,
+  markCanonicalJobSubmitGuard,
+} from "../observability/canonical-job-submit-guard.js";
+import { randomUUID } from "node:crypto";
 
 export async function executeApply(input: ApplyInput): Promise<ApplicationResult> {
   const mcpPreview = input.mcpDryRun === true || input.submit === false;
+  const canonicalGuardToken = input.submit && input.workspaceId && input.attemptId
+    ? (input.canonicalSubmitGuardOwnerToken ?? randomUUID())
+    : null;
+  if (canonicalGuardToken && input.workspaceId && input.attemptId) {
+    const guard = await claimCanonicalJobSubmitGuard({
+      workspaceId: input.workspaceId,
+      jobUrl: input.job.url,
+      attemptId: input.attemptId,
+      ownerToken: canonicalGuardToken,
+      idempotencyKey: input.runId,
+    });
+    if (!guard.ok) {
+      const outcome: ApplicationResult = {
+        attemptId: input.attemptId,
+        status: "already_submitted",
+        jobUrl: input.job.url,
+        submitted: false,
+        confirmationDetected: false,
+        terminalOutcome: "already_submitted",
+        pipeline: emptyPipeline(),
+        blocker: guard.reason,
+        notes: `result=already_submitted\nblocker=${guard.reason}`,
+      };
+      recordApplyAttemptDebug(input, outcome);
+      rememberAttempt(input, outcome);
+      return finishApply(input, outcome);
+    }
+  }
   recordPlatformAllocationIfNeeded();
   if (input.attemptId && !mcpPreview) {
     rememberAttemptStarted(
@@ -120,6 +153,14 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     if (!mcpPreview) {
       rememberAttempt(input, outcome);
     }
+    if (canonicalGuardToken && input.workspaceId && input.attemptId) {
+      const guardState = outcome.confirmationDetected || outcome.status === "applied"
+        ? "CONFIRMED"
+        : uncertainSubmitOutcome(outcome)
+          ? "UNCERTAIN"
+          : "RELEASED";
+      await markCanonicalJobSubmitGuard(input.workspaceId, input.job.url, input.attemptId, canonicalGuardToken, guardState);
+    }
     return finishApply(input, outcome);
   } catch (error) {
     const message = error instanceof Error ? error.message : "request_failed";
@@ -143,8 +184,24 @@ export async function executeApply(input: ApplyInput): Promise<ApplicationResult
     if (!mcpPreview) {
       rememberAttempt(input, outcome);
     }
+    if (canonicalGuardToken && input.workspaceId && input.attemptId) {
+      await markCanonicalJobSubmitGuard(
+        input.workspaceId,
+        input.job.url,
+        input.attemptId,
+        canonicalGuardToken,
+        outcome.submitted ? "UNCERTAIN" : "RELEASED",
+      );
+    }
     return finishApply(input, outcome);
   }
+}
+
+function uncertainSubmitOutcome(outcome: ApplicationResult): boolean {
+  if (outcome.pipeline?.submitted && !outcome.confirmationDetected) {
+    return true;
+  }
+  return outcome.blocker === "submitted_unconfirmed";
 }
 
 async function finishApply(input: ApplyInput, outcome: ApplicationResult): Promise<ApplicationResult> {
