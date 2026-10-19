@@ -131,13 +131,9 @@ jobs:
               bash orchestration/n8n/scripts/sync-workflows-to-live.sh
             fi
           fi
-          if printf '%s\n' "$changed" | grep -Eq '(^|/)Dockerfile$|(^|/)package\.json$|^docker-compose\.yml$|^package-lock\.json$'; then
-            echo "Image or compose changed. Rebuilding job-application-agent."
-            docker compose up -d --build job-application-agent
-          else
-            echo "Source-only SHA. Rebuilding to refresh dist inside the image."
-            docker compose up -d --build job-application-agent
-          fi
+          export IMAGE_BUILD_GIT_SHA="$APPLIED"
+          echo "Building job-application-agent with IMAGE_BUILD_GIT_SHA=$IMAGE_BUILD_GIT_SHA"
+          docker compose up -d --build job-application-agent
 
       - name: Health check
         run: |

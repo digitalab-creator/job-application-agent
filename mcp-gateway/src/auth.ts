@@ -17,3 +17,13 @@ export function requireMcpBearer(req: Request, res: Response, next: NextFunction
   }
   next();
 }
+
+/** Reject cross-tenant MCP tool calls — credential is bound to one workspace. */
+export function resolveAuthorizedWorkspaceId(workspaceId?: string | null): string {
+  const requested = workspaceId?.trim();
+  const allowed = gatewayConfig.defaultWorkspaceId.trim();
+  if (requested && requested !== allowed) {
+    throw new Error(`workspace_forbidden:${requested}`);
+  }
+  return allowed;
+}

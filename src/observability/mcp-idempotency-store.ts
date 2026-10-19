@@ -154,6 +154,60 @@ async function writeDbRow(row: StoredRow): Promise<void> {
   });
 }
 
+const STALE_IN_PROGRESS_MINUTES = Math.max(
+  5,
+  Math.floor(Number(process.env.MCP_IDEMPOTENCY_STALE_MINUTES ?? "45")),
+);
+
+async function claimInProgressDb(
+  scope: McpIdempotencyScope,
+  fingerprint: string,
+  attemptId: string,
+  fromStates: McpIdempotencyState[],
+  allowStaleOnly: boolean,
+): Promise<StoredRow | null> {
+  return withDb(async (client) => {
+    const res = await client.query(
+      `UPDATE mcp_tool_idempotency
+         SET state = 'IN_PROGRESS', attempt_id = $4, updated_at = NOW()
+       WHERE idempotency_key = $1
+         AND tool = $2
+         AND request_fingerprint = $3
+         AND state = ANY($5::text[])
+         AND (
+           $6::boolean = false
+           OR updated_at < NOW() - ($7::text || ' minutes')::interval
+         )
+       RETURNING idempotency_key, tool, workspace_id, row_number, submit, request_fingerprint, state, attempt_id, response_json, updated_at`,
+      [
+        scope.idempotencyKey,
+        scope.tool,
+        fingerprint,
+        attemptId,
+        fromStates,
+        allowStaleOnly,
+        String(STALE_IN_PROGRESS_MINUTES),
+      ],
+    );
+    const row = res.rows[0];
+    if (!row) {
+      return null;
+    }
+    return {
+      key: String(row.idempotency_key),
+      tool: String(row.tool),
+      workspaceId: String(row.workspace_id),
+      rowNumber: Number(row.row_number),
+      submit: Boolean(row.submit),
+      fingerprint: String(row.request_fingerprint),
+      state: "IN_PROGRESS",
+      attemptId: String(row.attempt_id),
+      response: row.response_json as Record<string, unknown> | undefined,
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  });
+}
+
 async function reserveDb(scope: McpIdempotencyScope, fingerprint: string, attemptId: string): Promise<StoredRow | null> {
   return withDb(async (client) => {
     const insert = await client.query(
@@ -193,7 +247,14 @@ function decideFromStored(
     return { action: "replay", response: stored.response };
   }
   if (stored.state === "IN_PROGRESS" || stored.state === "RESERVED") {
-    return { action: "wait", error: "idempotency_in_progress", state: stored.state };
+    const updatedMs = Date.parse(stored.updatedAt);
+    const stale =
+      Number.isFinite(updatedMs)
+      && Date.now() - updatedMs > STALE_IN_PROGRESS_MINUTES * 60_000;
+    if (!stale) {
+      return { action: "wait", error: "idempotency_in_progress", state: stored.state };
+    }
+    return { action: "proceed", attemptId: stored.attemptId ?? randomUUID(), state: stored.state };
   }
   if (stored.state === "UNKNOWN") {
     return { action: "reject", error: "prior_submission_outcome_uncertain", state: "UNKNOWN" };
@@ -235,6 +296,30 @@ export async function beginMcpIdempotency(
       }
       const decision = decideFromStored(existing, fingerprint, workspace);
       if (decision.action === "proceed") {
+        if (existing.state === "FAILED") {
+          const claimed = await claimInProgressDb(scope, fingerprint, attemptId, ["FAILED"], false);
+          if (!claimed) {
+            const latest = await readDbRow(scope.idempotencyKey, scope.tool);
+            if (latest) {
+              return decideFromStored(latest, fingerprint, workspace);
+            }
+            return { action: "reject", error: "idempotency_retry_claim_failed" };
+          }
+          return { action: "proceed", attemptId, state: "IN_PROGRESS" };
+        }
+        if (existing.state === "RESERVED" || existing.state === "IN_PROGRESS") {
+          const claimed = await claimInProgressDb(
+            scope,
+            fingerprint,
+            attemptId,
+            ["RESERVED", "IN_PROGRESS"],
+            true,
+          );
+          if (!claimed) {
+            return { action: "wait", error: "idempotency_in_progress", state: existing.state };
+          }
+          return { action: "proceed", attemptId, state: "IN_PROGRESS" };
+        }
         await writeDbRow({ ...existing, state: "IN_PROGRESS", attemptId, updatedAt: new Date().toISOString() });
         return { action: "proceed", attemptId, state: "IN_PROGRESS" };
       }
