@@ -17,7 +17,7 @@ Never stage `.env`, `generated-cv/`, `screenshots/`, `audit/`, `data/ledger/`, `
 Load the server GitHub token. Do not print it.
 
 ```bash
-source /opt/apps/n8n/scripts/load-github-token.sh
+source scripts/load-github-token.sh
 load_server_github_token
 ```
 
