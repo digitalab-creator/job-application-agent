@@ -8,6 +8,7 @@ import { getSearchPolicy } from "../config/search-policy-runtime.js";
 import { CANONICAL_TRACKER_CATEGORIES } from "./tracker-category-weights.js";
 import { log } from "../logging/logger.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
+import { specialistDiscoveryReason } from "./specialist-role.js";
 
 export type DiscoveryScoreStats = {
   openingsIn: number;
@@ -119,6 +120,9 @@ export async function scoreDiscoveryJobs(
     }
     const opening = openings[row.index];
     if (!opening) {
+      continue;
+    }
+    if (specialistDiscoveryReason(opening.title)) {
       continue;
     }
     const locationVerdict = await resolveJobLocationVerdict({

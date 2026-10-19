@@ -134,3 +134,20 @@ test("unrelated profession is skipped even with a stray matching fact", () => {
   assert.equal(result.decision, "skip");
   assert.equal(result.persona, null);
 });
+
+test("a supported requirement must have grounded evidence, not merely an LLM matched label", () => {
+  const base = analysis();
+  const result = evaluateJobFit(analysis({
+    requirementEvidence: base.requirementEvidence.filter((row) => row.requirement !== "backend APIs"),
+    matchedMustHaves: ["Python", "backend APIs", "production AI"],
+    missingMustHaves: [],
+  }));
+  assert.equal(result.decision, "skip");
+  assert.ok(result.missingMustHaves.includes("backend APIs"));
+});
+
+test("contradictory missing labels never override a supported evidence row", () => {
+  const result = evaluateJobFit(analysis({ missingMustHaves: ["Python"] }));
+  assert.equal(result.decision, "apply");
+  assert.ok(!result.missingMustHaves.includes("Python"));
+});
