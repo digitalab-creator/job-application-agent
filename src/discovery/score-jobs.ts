@@ -7,6 +7,7 @@ import { resolveJobLocationVerdict } from "./resolve-location-eligibility.js";
 import { getSearchPolicy } from "../config/search-policy-runtime.js";
 import { CANONICAL_TRACKER_CATEGORIES } from "./tracker-category-weights.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
+import { specialistDiscoveryReason } from "./specialist-role.js";
 
 function discoveryScoreSystemPrompt(): string {
   const categories = CANONICAL_TRACKER_CATEGORIES.join(" | ");
@@ -93,6 +94,9 @@ export async function scoreDiscoveryJobs(
     }
     const opening = openings[row.index];
     if (!opening) {
+      continue;
+    }
+    if (specialistDiscoveryReason(opening.title)) {
       continue;
     }
     const locationVerdict = await resolveJobLocationVerdict({
