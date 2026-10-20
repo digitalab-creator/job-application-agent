@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { internalCandidateProfile } from "../config/candidate.js";
 import { buildSheetManualNotes, shouldPromoteToManualSheet } from "./manual-fill-guide.js";
 
 test("manual sheet notes include apply embed, cv, and profile fields", () => {
@@ -11,7 +12,7 @@ test("manual sheet notes include apply embed, cv, and profile fields", () => {
   });
   assert.match(notes, /embed\/job_app\?for=similarweb&token=8239378/);
   assert.match(notes, /cv=https:\/\/example.com\/cv.pdf/);
-  assert.match(notes, /or\.shvartz70@gmail\.com/);
+  assert.match(notes, new RegExp(internalCandidateProfile.email.replace(".", "\\.")));
   assert.doesNotMatch(notes, /console/i);
 });
 

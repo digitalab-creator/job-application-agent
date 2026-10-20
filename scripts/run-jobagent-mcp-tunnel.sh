@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TC="${ROOT}/bin/tunnel-client-dist/tunnel-client"
 PROFILE="${TUNNEL_CLIENT_PROFILE:-jobagent-mcp}"
-TUNNEL_ID="${CONTROL_PLANE_TUNNEL_ID:-tunnel_6ad4f22e3d0c8191b14aa2155a7a4714}"
+TUNNEL_ID="${CONTROL_PLANE_TUNNEL_ID:?Set CONTROL_PLANE_TUNNEL_ID in .env}"
 
 if [[ ! -x "$TC" ]]; then
   echo "Missing tunnel-client at $TC — see docs/planning/CHATGPT_MCP_INTEGRATION.md"

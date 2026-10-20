@@ -3,7 +3,7 @@ import type { BrowserContext, Page } from "playwright";
 import { env } from "../config/env.js";
 import { classifyJobPage, isLoginWallUrl } from "../application/classify-page.js";
 import { applyFormScope, fillFields, pageHasDeepEmailInput, pageHasDeepFileInput, readFields, revealApplicationForm, uploadResume, waitForReadableApplyForm, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
-import { candidate } from "../config/candidate.js";
+import { activeCandidate, candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
 import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
 import { directGreenhouseUrlsForCareersUrl, navigationRetryUrls } from "./job-navigation-url.js";
@@ -1212,7 +1212,8 @@ async function prepareCv(
   portfolioUrl: string;
   relevance: CvRelevanceResult;
 }> {
-  const outputPath = `${env.generatedCvDir}/${day}/${jobSlug}-redacted-candidate.pdf`;
+  const nameSlug = activeCandidate().lastName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const outputPath = `${env.generatedCvDir}/${day}/${jobSlug}-${nameSlug}.pdf`;
   const leadIdentity = resolveLeadIdentity({ persona, trackerCategory: input.job.category });
   let feedback = "";
   let lastFailure = "CV did not pass quality gates.";

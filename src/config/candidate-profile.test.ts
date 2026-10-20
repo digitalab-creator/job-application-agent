@@ -21,5 +21,5 @@ test("a workspace profile replaces identity only inside the run", async () => {
     assert.match(factById("media-hands-on")?.text ?? "", /250000/);
   });
   assert.equal(candidate.email, internalCandidateProfile.email);
-  assert.match(factById("summary-marketing")?.text ?? "", /1,500,000/);
+  assert.match(factById("summary-marketing")?.text ?? "", /500,000/);
 });

@@ -13,7 +13,7 @@
     "logs": "clasp logs",
     "check": "node scripts/check-setup.js",
     "deploy-help": "node scripts/deploy-checklist.js",
-    "create-bound": "clasp create --type sheets --title \"Or Opportunity Pipeline\" --rootDir ./src --parentId REDACTED_SPREADSHEET_ID",
+    "create-bound": "clasp create --type sheets --title \"Opportunity Pipeline\" --rootDir ./src --parentId YOUR_GOOGLE_SPREADSHEET_ID",
     "test": "node --test tests/**/*.test.js",
     "backfill": "node scripts/backfill-sheet-local.js"
   },

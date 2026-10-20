@@ -96,19 +96,19 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "YOUR_GOOGLE_SPREADSHEET_ID",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "REDACTED_SHEET_GID",
+          "value": "0",
           "mode": "id"
         },
         "options": {}
       },
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       }
@@ -222,12 +222,12 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "YOUR_GOOGLE_SPREADSHEET_ID",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "REDACTED_SHEET_GID",
+          "value": "0",
           "mode": "id"
         },
         "columns": {
@@ -413,7 +413,7 @@
       },
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       },
@@ -707,19 +707,19 @@
         "parameters": {
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "YOUR_GOOGLE_SPREADSHEET_ID",
             "mode": "id"
           },
           "sheetName": {
             "__rl": true,
-            "value": "REDACTED_SHEET_GID",
+            "value": "0",
             "mode": "id"
           },
           "options": {}
         },
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         }
@@ -833,12 +833,12 @@
           "operation": "append",
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "YOUR_GOOGLE_SPREADSHEET_ID",
             "mode": "id"
           },
           "sheetName": {
             "__rl": true,
-            "value": "REDACTED_SHEET_GID",
+            "value": "0",
             "mode": "id"
           },
           "columns": {
@@ -1024,7 +1024,7 @@
         },
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         },
@@ -1198,7 +1198,7 @@
         ]
       }
     },
-    "authors": "operator",
+    "authors": "job-application-agent",
     "name": null,
     "description": null,
     "autosaved": false

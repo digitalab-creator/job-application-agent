@@ -16,8 +16,8 @@ from n8n_orchestration import N8N_API_BASE, WORKFLOW_EXPORT_DIR, read_n8n_api_ke
 EXPORT = WORKFLOW_EXPORT_DIR / "wf-fcYSvcG7IiP8xAqr.json"
 WORKFLOW_ID = "fcYSvcG7IiP8xAqr"
 
-SPREADSHEET_ID = "REDACTED_SPREADSHEET_ID"
-SHEET_ID = REDACTED_SHEET_GID
+SPREADSHEET_ID = "YOUR_GOOGLE_SPREADSHEET_ID"
+SHEET_ID = 0
 RULE_VERSION = 1
 
 ENSURE_CODE = f"""const staticData = $getWorkflowStaticData('global');
@@ -112,7 +112,7 @@ def patch_workflow(wf: dict) -> bool:
                 "continueOnFail": True,
                 "credentials": {
                     "googleSheetsOAuth2Api": {
-                        "id": "UsVIraYKqvdQZt4b",
+                        "id": "REPLACE_N8N_CREDENTIAL_ID",
                         "name": "or Google Sheets account",
                     }
                 },
@@ -163,7 +163,7 @@ def apply_manual_highlight_rule_now() -> None:
     """Install conditional format on the Jobs sheet."""
     import subprocess
 
-    cred_id = "UsVIraYKqvdQZt4b"
+    cred_id = "REPLACE_N8N_CREDENTIAL_ID"
     tmp_path = "/tmp/n8n-sheet-cred-export.json"
     try:
         subprocess.run(

@@ -3,9 +3,9 @@
  * Prefer Search Config preferences for tunables that change often.
  */
 const CONFIG = Object.freeze({
-  SPREADSHEET_ID: 'REDACTED_SPREADSHEET_ID',
+  SPREADSHEET_ID: 'YOUR_GOOGLE_SPREADSHEET_ID',
   // Standard GCP project number for OAuth consent (set in Apps Script Project Settings).
-  GCP_PROJECT_NUMBER: 'REDACTED_GCP_PROJECT',
+  GCP_PROJECT_NUMBER: 'YOUR_GCP_PROJECT_NUMBER',
   TIME_ZONE: 'Asia/Jerusalem',
   OPENAI_URL: 'https://api.openai.com/v1/responses',
   // Free, tiny endpoint used only to prove a stored key still works.

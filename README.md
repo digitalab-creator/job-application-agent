@@ -3,6 +3,17 @@
 **Status: complete and archived (October 2026).**  
 This repository is published as a reference implementation. Scheduled job discovery and auto-apply are **turned off** by default (`NATIVE_SCHEDULER_ENABLED=false`). Do not run it against real job boards or inboxes without your own legal review, API keys, and consent.
 
+### Branches (public vs private data)
+
+| Branch | Purpose |
+|--------|---------|
+| **`main`** | Scrubbed demo profile, no real CV PDFs, placeholder Sheet/n8n IDs — safe to expose when the repo is **public**. |
+| **`private/full`** | Operator copy with real candidate profile, CV paths, and production Sheet IDs. **Keep the GitHub repo private** while this branch exists on `origin`, or delete `private/full` from the remote before switching visibility to public. |
+
+On GitHub, **every branch on a public repo is readable**. There is no “private branch” inside a public repository. Workflow: keep the repo private → push both branches → set default branch to `main` → delete `dev`, `private/full`, and other stale branches from GitHub → then make the repo public.
+
+Locally, `git checkout private/full` restores the full operator tree; merge or cherry-pick from `private/full` into your working branch when updating scrubbed `main`.
+
 A TypeScript worker that:
 
 1. **Discovers** openings from configured boards and writes them to a Google Sheet queue.

@@ -6,6 +6,7 @@ import { sheetCategoryFromDiscovery } from "./category-map.js";
 import { resolveJobLocationVerdict } from "./resolve-location-eligibility.js";
 import { getSearchPolicy } from "../config/search-policy-runtime.js";
 import { CANONICAL_TRACKER_CATEGORIES } from "./tracker-category-weights.js";
+import { activeCandidate } from "../config/candidate.js";
 import { log } from "../logging/logger.js";
 import { uniqueKeyForUrl } from "./job-url-key.js";
 import { specialistDiscoveryReason } from "./specialist-role.js";
@@ -29,7 +30,8 @@ function discoveryScoreSystemPrompt(): string {
   const hintsLine = categoryHints
     ? `Search Config title/keyword hints per category: ${categoryHints}.`
     : "";
-  return `You score job openings for Example Operator (AI engineer, full-stack, performance marketing, growth).
+  const who = activeCandidate().fullName;
+  return `You score job openings for ${who} (AI engineer, full-stack, performance marketing, growth).
 Return JSON only: {"jobs":[{"index":0,"matchScore":0,"category":"<sheet category>","whyItFits":"one sentence","relevant":true}]}
 category MUST be exactly one of these sheet tracker categories: ${categories}
 Do not collapse into generic AI/Growth/Hybrid labels.

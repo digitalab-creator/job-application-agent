@@ -61,7 +61,7 @@ function hashToken(token) {
 }
 
 const spreadsheetId =
-  process.env.WORKSPACE_INTERNAL_SPREADSHEET_ID?.trim() || "REDACTED_SPREADSHEET_ID";
+  process.env.WORKSPACE_INTERNAL_SPREADSHEET_ID?.trim() || "YOUR_GOOGLE_SPREADSHEET_ID";
 const jobsSheetGid = process.env.WORKSPACE_INTERNAL_JOBS_SHEET_GID?.trim() || "REDACTED_SHEET_GID";
 const boards = (process.env.JOB_DISCOVERY_BOARD_URLS || "")
   .split(/[\n,]+/)
@@ -74,8 +74,7 @@ if (!refreshToken) {
   process.exit(1);
 }
 const mailboxRefresh = process.env.WORKSPACE_INTERNAL_MAILBOX_REFRESH_TOKEN?.trim() || null;
-const mailboxEmail =
-  process.env.WORKSPACE_INTERNAL_MAILBOX_EMAIL?.trim() || "redacted@example.com";
+const mailboxEmail = process.env.WORKSPACE_INTERNAL_MAILBOX_EMAIL?.trim() || "";
 
 const runToken = required("WORKSPACE_INTERNAL_RUN_TOKEN");
 const dbUrl = required("WORKSPACE_DATABASE_URL");

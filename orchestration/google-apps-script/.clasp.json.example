@@ -1,0 +1,12 @@
+{
+  "scriptId": "YOUR_APPS_SCRIPT_ID",
+  "rootDir": "src",
+  "parentId": "YOUR_GOOGLE_SPREADSHEET_ID",
+  "projectId": "YOUR_GCP_PROJECT_NUMBER",
+  "projectNumber": "YOUR_GCP_PROJECT_NUMBER",
+  "scriptExtensions": [".js", ".gs"],
+  "htmlExtensions": [".html"],
+  "jsonExtensions": [".json"],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}

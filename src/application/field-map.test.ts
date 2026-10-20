@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { internalCandidateProfile } from "../config/candidate.js";
 import { decideField } from "./field-map.js";
 
 const ctx = {
@@ -88,7 +89,7 @@ test("Hebrew email label uses the candidate profile", () => {
   });
   assert.equal(decision.action, "fill");
   if (decision.action === "fill") {
-    assert.equal(decision.value, "redacted@example.com");
+    assert.equal(decision.value, internalCandidateProfile.email);
     assert.equal(decision.source, "candidate_profile");
   }
 });
@@ -192,7 +193,7 @@ test("empty label resolves from name=name to full name", () => {
   });
   assert.equal(decision.action, "fill");
   if (decision.action === "fill") {
-    assert.equal(decision.value, "Example Operator");
+    assert.equal(decision.value, internalCandidateProfile.fullName);
   }
 });
 
@@ -275,7 +276,7 @@ test("Guidde-style UA years and budget fill as text when there are no dropdown o
   });
   assert.equal(budget.action, "fill");
   if (budget.action === "fill") {
-    assert.match(budget.value, /1,500,000/);
+    assert.match(budget.value, /500,000/);
   }
 });
 

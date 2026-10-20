@@ -9,7 +9,7 @@ const { google } = require('googleapis');
 const salary = require('../lib/salaryBenchmark');
 const logic = require('../lib/opportunityLogic');
 
-const SPREADSHEET_ID = 'REDACTED_SPREADSHEET_ID';
+const SPREADSHEET_ID = 'YOUR_GOOGLE_SPREADSHEET_ID';
 const SHEETS = {
   JOBS: 'Jobs',
   FREELANCE: 'Freelance',

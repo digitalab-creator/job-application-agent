@@ -3,6 +3,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 /**
  * Buyer identity for forms, CV, and fit. Workspace `internal` is seeded from
  * `internalCandidateProfile`. A run installs another buyer's copy via `withCandidateProfile`.
+ *
+ * On branch `main` this is fictional demo data for public reference. Real profile: branch `private/full`.
  */
 export type CandidateProfile = {
   firstName: string;
@@ -47,104 +49,78 @@ export type CandidateProfile = {
   crm: { hasUsedHubSpot: boolean; summary: string };
 };
 
-/** Seed for workspace `internal` only. Not a product rule for every buyer. */
+/** Seed for workspace `internal` only. Replace with your profile before production use. */
 export const internalCandidateProfile: CandidateProfile = {
-  firstName: "Or",
-  lastName: "Redacted",
-  fullName: "Example Operator",
-  email: "redacted@example.com",
+  firstName: "Alex",
+  lastName: "Demo",
+  fullName: "Alex Demo",
+  email: "alex.demo@example.com",
   phone: {
-    local: "0000000000",
-    display: "000-000-0000",
-    international: "+10000000000",
+    local: "5550100",
+    display: "555-0100",
+    international: "+15550100",
   },
   location: {
     city: "Petah Tikva",
     country: "Israel",
   },
-  /**
-   * Hybrid / on-site commute screening (Greenhouse etc.). Answered Yes only for offices
-   * in our pursue geography — see location-eligibility (Central + Tel Aviv District metro).
-   */
   workLocation: {
     willingToCommuteToEligibleOffices: true,
   },
-  linkedin: "https://www.linkedin.com/in/redacted/",
-  github: "https://github.com/digitalab-creator",
+  linkedin: "https://www.linkedin.com/in/example",
+  github: "https://github.com/example",
   portfolio: {
-    marketing: "https://digitalab.co.il/portfolio/?capability=performance",
-    build: "https://digitalab.co.il/portfolio/?capability=build",
-    automation: "https://digitalab.co.il/portfolio/?capability=automate",
+    marketing: "https://example.com/portfolio/marketing",
+    build: "https://example.com/portfolio/build",
+    automation: "https://example.com/portfolio/automation",
   },
   workAuthorization: {
     israel: true,
     sponsorshipIsrael: false,
-    euCitizen: true,
-    euCountry: "Poland",
-    passports: ["Israel", "Poland"],
+    euCitizen: false,
+    euCountry: "",
+    passports: ["Example"],
   },
-  noticePeriod: "1 week after signing",
+  noticePeriod: "2 weeks",
   lastSalary: {
-    amount: 25000,
+    amount: 22000,
     currency: "ILS",
     period: "month" as const,
-    annualAmount: 300000,
+    annualAmount: 264000,
   },
   salaryExpectation: {
-    /** Lowest monthly figure we may enter on forms (role quotes stay above this). */
     minimum: 20000,
-    maximum: 32000,
+    maximum: 30000,
     currency: "ILS",
     period: "month" as const,
-    /** Published-ad filtering only — not the number we quote on applications. */
     opportunityFilter: {
       excludeBelow: 18000,
       processingMinimum: 20000,
     },
   },
   languages: [
-    { language: "Hebrew", level: "Native" },
     { language: "English", level: "Fluent" },
+    { language: "Hebrew", level: "Professional" },
   ],
-  /**
-   * Confirmed by the candidate for application forms.
-   * Dropdowns and platform checkboxes read this object. Do not copy the numbers elsewhere.
-   */
   media: {
-    ppcYears: 12,
-    maxMonthlyBudgetIls: 1_500_000,
-    /** Maps to “primary paid media focus” style dropdowns; forms read this, not ad-hoc facts. */
+    ppcYears: 8,
+    maxMonthlyBudgetIls: 500_000,
     primaryPaidMediaFocus: "Full-funnel growth (acquisition, CRO, and analytics)",
-    platforms: [
-      "Google",
-      "Meta",
-      "Taboola",
-      "Outbrain",
-      "X",
-      "ChatGPT Ads",
-      "LinkedIn",
-      "Snapchat",
-      "Traffic Junky",
-      "Mantis",
-      "Microsoft Ads",
-    ],
+    platforms: ["Google", "Meta", "Taboola", "LinkedIn", "Microsoft Ads"],
   },
-  /** Motivation snippets for opaque ATS fields (e.g. SmartRecruiters “human-reason”). Persona picks the line. */
   screening: {
     motivationTechnical:
-      "Applied AI engineer focused on production engineering and demonstrated AI delivery (RAG, APIs, shipped product); excited to own end-to-end systems in production.",
+      "Full-stack engineer with production AI delivery experience; interested in owning reliable systems end-to-end.",
     motivationMarketing:
-      "Performance marketing lead (10+ years): paid acquisition, budget ownership, measurement, and results across Google, Meta, and full-funnel optimization.",
+      "Performance marketer with paid acquisition, measurement, and budget ownership across major platforms.",
     motivationHybrid:
-      "Revenue & MarTech lead connecting marketing, CRM, data, and operations — built and integrated CRM workflows, APIs, and attribution (not HubSpot).",
+      "Revenue and MarTech lead connecting marketing, CRM, data, and operations.",
     motivationRevenueMartech:
-      "Revenue & MarTech lead connecting marketing, CRM, data, and operations — built and integrated CRM workflows, APIs, and attribution (not HubSpot).",
+      "Revenue and MarTech lead connecting marketing, CRM, data, and operations.",
   },
-  /** Hard boundary for CV/job-fit — never claim tools the candidate has not used. */
   crm: {
     hasUsedHubSpot: false,
-    summary:
-      "Integrated multiple CRM platforms and built one custom CRM; has not used HubSpot.",
+    summary: "Integrated CRM workflows via APIs; has not used HubSpot.",
   },
 };
 
@@ -197,7 +173,7 @@ export function salaryMaximum(): number {
 export function workAuthorizationSummary(): string {
   const { passports, euCitizen, euCountry, sponsorshipIsrael } = activeCandidate().workAuthorization;
   const passportList = passports.join(" and ");
-  const euLine = euCitizen ? ` EU citizen (${euCountry}).` : "";
+  const euLine = euCitizen && euCountry ? ` EU citizen (${euCountry}).` : "";
   const israelLine = sponsorshipIsrael
     ? " May require employer visa sponsorship for work in Israel."
     : " Authorized to work in Israel without employer visa sponsorship.";

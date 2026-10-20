@@ -1,7 +1,7 @@
 config_version: 1
 control_plane:
   base_url: "https://api.openai.com"
-  tunnel_id: "tunnel_6ad4f22e3d0c8191b14aa2155a7a4714"
+  tunnel_id: "env:CONTROL_PLANE_TUNNEL_ID"
   api_key: "env:CONTROL_PLANE_API_KEY"
 health:
   listen_addr: "127.0.0.1:8080"

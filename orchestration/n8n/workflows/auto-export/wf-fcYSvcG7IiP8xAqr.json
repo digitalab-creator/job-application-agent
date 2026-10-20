@@ -55,19 +55,19 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "YOUR_GOOGLE_SPREADSHEET_ID",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "REDACTED_SHEET_GID",
+          "value": "0",
           "mode": "id"
         },
         "options": {}
       },
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       }
@@ -119,12 +119,12 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "YOUR_GOOGLE_SPREADSHEET_ID",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "REDACTED_SHEET_GID",
+          "value": "0",
           "mode": "id"
         },
         "columns": {
@@ -192,7 +192,7 @@
       },
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       },
@@ -270,12 +270,12 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "YOUR_GOOGLE_SPREADSHEET_ID",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "REDACTED_SHEET_GID",
+          "value": "0",
           "mode": "id"
         },
         "columns": {
@@ -345,7 +345,7 @@
       },
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       },
@@ -615,7 +615,7 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "YOUR_GOOGLE_SPREADSHEET_ID",
           "mode": "id"
         },
         "sheetName": {
@@ -637,7 +637,7 @@
       "alwaysOutputData": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       }
@@ -688,7 +688,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'REDACTED_SPREADSHEET_ID', sheetId: REDACTED_SHEET_GID } }];\n"
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'YOUR_GOOGLE_SPREADSHEET_ID', sheetId: 0 } }];\n"
       },
       "id": "571e9b13-00b0-4277-ae47-daffc9a4c97e",
       "name": "Ensure Manual row highlight",
@@ -735,12 +735,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/REDACTED_SPREADSHEET_ID:batchUpdate",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/YOUR_GOOGLE_SPREADSHEET_ID:batchUpdate",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ requests: [{ addConditionalFormatRule: { rule: { ranges: [{ sheetId: REDACTED_SHEET_GID, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 17 }], booleanRule: { condition: { type: \"CUSTOM_FORMULA\", values: [{ userEnteredValue: '=$O2=\"Manual\"' }] }, format: { backgroundColor: { red: 1, green: 0.898, blue: 0.6 }, textFormat: { bold: true } } } }, index: 0 } }] }) }}",
+        "jsonBody": "={{ JSON.stringify({ requests: [{ addConditionalFormatRule: { rule: { ranges: [{ sheetId: 0, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 17 }], booleanRule: { condition: { type: \"CUSTOM_FORMULA\", values: [{ userEnteredValue: '=$O2=\"Manual\"' }] }, format: { backgroundColor: { red: 1, green: 0.898, blue: 0.6 }, textFormat: { bold: true } } } }, index: 0 } }] }) }}",
         "options": {
           "response": {
             "response": {
@@ -761,7 +761,7 @@
       "continueOnFail": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "UsVIraYKqvdQZt4b",
+          "id": "REPLACE_N8N_CREDENTIAL_ID",
           "name": "or Google Sheets account"
         }
       }
@@ -1203,19 +1203,19 @@
         "parameters": {
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "YOUR_GOOGLE_SPREADSHEET_ID",
             "mode": "id"
           },
           "sheetName": {
             "__rl": true,
-            "value": "REDACTED_SHEET_GID",
+            "value": "0",
             "mode": "id"
           },
           "options": {}
         },
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         }
@@ -1267,12 +1267,12 @@
           "operation": "update",
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "YOUR_GOOGLE_SPREADSHEET_ID",
             "mode": "id"
           },
           "sheetName": {
             "__rl": true,
-            "value": "REDACTED_SHEET_GID",
+            "value": "0",
             "mode": "id"
           },
           "columns": {
@@ -1340,7 +1340,7 @@
         },
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         },
@@ -1418,12 +1418,12 @@
           "operation": "update",
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "YOUR_GOOGLE_SPREADSHEET_ID",
             "mode": "id"
           },
           "sheetName": {
             "__rl": true,
-            "value": "REDACTED_SHEET_GID",
+            "value": "0",
             "mode": "id"
           },
           "columns": {
@@ -1493,7 +1493,7 @@
         },
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         },
@@ -1763,7 +1763,7 @@
         "parameters": {
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "YOUR_GOOGLE_SPREADSHEET_ID",
             "mode": "id"
           },
           "sheetName": {
@@ -1785,7 +1785,7 @@
         "alwaysOutputData": true,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         }
@@ -1836,7 +1836,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'REDACTED_SPREADSHEET_ID', sheetId: REDACTED_SHEET_GID } }];\n"
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'YOUR_GOOGLE_SPREADSHEET_ID', sheetId: 0 } }];\n"
         },
         "id": "571e9b13-00b0-4277-ae47-daffc9a4c97e",
         "name": "Ensure Manual row highlight",
@@ -1883,12 +1883,12 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://sheets.googleapis.com/v4/spreadsheets/REDACTED_SPREADSHEET_ID:batchUpdate",
+          "url": "https://sheets.googleapis.com/v4/spreadsheets/YOUR_GOOGLE_SPREADSHEET_ID:batchUpdate",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "googleSheetsOAuth2Api",
           "sendBody": true,
           "specifyBody": "json",
-          "jsonBody": "={{ JSON.stringify({ requests: [{ addConditionalFormatRule: { rule: { ranges: [{ sheetId: REDACTED_SHEET_GID, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 17 }], booleanRule: { condition: { type: \"CUSTOM_FORMULA\", values: [{ userEnteredValue: '=$O2=\"Manual\"' }] }, format: { backgroundColor: { red: 1, green: 0.898, blue: 0.6 }, textFormat: { bold: true } } } }, index: 0 } }] }) }}",
+          "jsonBody": "={{ JSON.stringify({ requests: [{ addConditionalFormatRule: { rule: { ranges: [{ sheetId: 0, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 17 }], booleanRule: { condition: { type: \"CUSTOM_FORMULA\", values: [{ userEnteredValue: '=$O2=\"Manual\"' }] }, format: { backgroundColor: { red: 1, green: 0.898, blue: 0.6 }, textFormat: { bold: true } } } }, index: 0 } }] }) }}",
           "options": {
             "response": {
               "response": {
@@ -1909,7 +1909,7 @@
         "continueOnFail": true,
         "credentials": {
           "googleSheetsOAuth2Api": {
-            "id": "UsVIraYKqvdQZt4b",
+            "id": "REPLACE_N8N_CREDENTIAL_ID",
             "name": "or Google Sheets account"
           }
         }
@@ -2267,7 +2267,7 @@
         ]
       }
     },
-    "authors": "operator",
+    "authors": "job-application-agent",
     "name": null,
     "description": null,
     "autosaved": false

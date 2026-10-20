@@ -3,7 +3,10 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const GCP_PROJECTS = ['REDACTED_GCP_PROJECT', '1072944905499'];
+const GCP_PROJECTS = (process.env.GCP_PROJECT_NUMBERS || 'YOUR_GCP_PROJECT_NUMBER')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 const SERVICES = [
   'script.googleapis.com',
   'sheets.googleapis.com',

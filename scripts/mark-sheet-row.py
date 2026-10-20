@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -16,9 +17,12 @@ from n8n_orchestration import n8n_env_file, read_n8n_api_key  # noqa: E402
 
 N8N = "http://127.0.0.1:5678"
 ENV = n8n_env_file()
-CREDENTIAL = {"id": "UsVIraYKqvdQZt4b", "name": "or Google Sheets account"}
-DOC = "REDACTED_SPREADSHEET_ID"
-SHEET = "REDACTED_SHEET_GID"
+CREDENTIAL = {
+    "id": os.environ.get("N8N_GOOGLE_SHEETS_CREDENTIAL_ID", "REPLACE_N8N_CREDENTIAL_ID"),
+    "name": os.environ.get("N8N_GOOGLE_SHEETS_CREDENTIAL_NAME", "Google Sheets account"),
+}
+DOC = os.environ.get("JOB_SHEET_SPREADSHEET_ID", "YOUR_GOOGLE_SPREADSHEET_ID")
+SHEET = os.environ.get("JOB_SHEET_GID", "0")
 
 
 def api_key() -> str:
