@@ -2,7 +2,7 @@ services:
   workspace-db:
     image: postgres:16-alpine
     container_name: job-application-agent-db
-    restart: unless-stopped
+    restart: "no"
     profiles:
       - native
     environment:
@@ -19,7 +19,7 @@ services:
   jobagent-mcp-gateway:
     build: ./mcp-gateway
     container_name: jobagent-mcp-gateway
-    restart: unless-stopped
+    restart: "no"
     profiles:
       - mcp
     ports:
@@ -48,7 +48,7 @@ services:
       args:
         IMAGE_BUILD_GIT_SHA: ${IMAGE_BUILD_GIT_SHA:-}
     container_name: job-application-agent
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "127.0.0.1:3099:3000"
     env_file:

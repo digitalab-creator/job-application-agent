@@ -1,5 +1,5 @@
 import { log } from "../logging/logger.js";
-import { orchestrationMode } from "../config/env.js";
+import { nativeSchedulerEnabled, orchestrationMode } from "../config/env.js";
 import { localScheduleParts } from "../time/jerusalem-day.js";
 import { ensureWorkspaceSchema, workspaceDatabaseUrl } from "./db.js";
 import { runWorkspaceApplyDaily } from "./apply-daily.js";
@@ -18,6 +18,10 @@ let timer: NodeJS.Timeout | null = null;
 const lastTriggered = new Map<string, number>();
 
 export async function startNativeScheduler(): Promise<void> {
+  if (!nativeSchedulerEnabled()) {
+    log("NATIVE_SCHEDULER_SKIPPED", { reason: "NATIVE_SCHEDULER_ENABLED=false" });
+    return;
+  }
   if (orchestrationMode() !== "native") {
     return;
   }

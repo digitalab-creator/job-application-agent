@@ -53,6 +53,11 @@ export function orchestrationMode(): OrchestrationMode {
   return raw === "native" ? "native" : "n8n";
 }
 
+/** When false, native discover/apply/outcome cron never starts (project archived or manual-only). */
+export function nativeSchedulerEnabled(): boolean {
+  return optional("NATIVE_SCHEDULER_ENABLED", "true") === "true";
+}
+
 export function cvFileStatus(): { technical: boolean; marketing: boolean } {
   return {
     technical: fileReady(env.technicalCvPath),
