@@ -8,6 +8,7 @@ data/ledger/
 data/config/
 data/browser-profile/
 vendor/buster/
+bin/tunnel-client-dist/
 .runners/
 scripts/__pycache__/
 *.log
