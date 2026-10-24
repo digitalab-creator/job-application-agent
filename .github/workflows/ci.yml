@@ -29,7 +29,7 @@ jobs:
           POSTGRES_PASSWORD: jobagent
           POSTGRES_DB: jobagent
         ports:
-          - 5432:5432
+          - 55432:5432
         options: >-
           --health-cmd "pg_isready -U jobagent -d jobagent"
           --health-interval 5s
@@ -50,7 +50,7 @@ jobs:
           TECHNICAL_CV_PATH: /tmp/ci-technical-cv.pdf
           MARKETING_CV_PATH: /tmp/ci-marketing-cv.pdf
           LLM_API_KEY: ci-unit-test-key
-          MCP_IDEMPOTENCY_TEST_DATABASE_URL: ${{ github.event_name == 'pull_request' && 'postgres://jobagent:jobagent@127.0.0.1:5432/jobagent' || '' }}
+          MCP_IDEMPOTENCY_TEST_DATABASE_URL: postgres://jobagent:jobagent@127.0.0.1:55432/jobagent
         run: |
           set -euo pipefail
           npm install
@@ -60,7 +60,7 @@ jobs:
       - name: MCP gateway build and test
         env:
           JOBAGENT_MCP_ACCESS_TOKEN: ci-mcp-token
-          JOBAGENT_MCP_DATABASE_URL: postgres://jobagent_mcp_readonly:ci-readonly@127.0.0.1:5433/jobagent
+          JOBAGENT_MCP_DATABASE_URL: postgres://jobagent:jobagent@127.0.0.1:55432/jobagent
           JOBAGENT_API_TOKEN: ci-unit-test-token
           JOBAGENT_API_BASE_URL: http://127.0.0.1:3099
         run: |
