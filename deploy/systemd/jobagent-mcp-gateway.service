@@ -9,7 +9,7 @@ Requires=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/apps/job-application-agent
-ExecStart=/usr/bin/docker compose --profile mcp up -d job-application-agent jobagent-mcp-gateway
+ExecStart=/usr/bin/docker compose --profile native --profile mcp up -d job-application-agent workspace-db jobagent-mcp-gateway
 ExecStop=/usr/bin/docker compose --profile mcp stop jobagent-mcp-gateway
 TimeoutStartSec=300
 
