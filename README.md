@@ -1,7 +1,6 @@
 # Job Application Agent
 
-**Status: complete and archived (October 2026).**  
-This repository is published as a reference implementation. Scheduled job discovery and auto-apply are **turned off** by default (`NATIVE_SCHEDULER_ENABLED=false`). Do not run it against real job boards or inboxes without your own legal review, API keys, and consent.
+**Private operator repo** for automated job discovery and apply. Native scheduling runs when `NATIVE_SCHEDULER_ENABLED=true` (default in `.env.example`). Use your own legal review, API keys, and consent before targeting real job boards.
 
 A TypeScript worker that:
 
@@ -82,13 +81,11 @@ Uploads generated CV and fills fields but does not click Submit. With `submit: t
 
 | Goal | Action |
 |------|--------|
-| **Archived default** | `NATIVE_SCHEDULER_ENABLED=false` (in `.env.example`) |
-| **Enable daily runs** | Set `NATIVE_SCHEDULER_ENABLED=true`, `ORCHESTRATION_MODE=native`, configure `WORKSPACE_DATABASE_URL`, seed workspace (`scripts/seed-internal-workspace.mjs`) |
-| **Stop a running server** | `docker compose stop` (all services); disable systemd units `jobagent-mcp-gateway` / `jobagent-mcp-tunnel` if installed; set `enabled=false` on workspace rows in Postgres |
+| **Enable daily runs** | `NATIVE_SCHEDULER_ENABLED=true`, `ORCHESTRATION_MODE=native`, `WORKSPACE_DATABASE_URL`, seed workspace (`scripts/seed-internal-workspace.mjs`) |
+| **Pause scheduling** | `NATIVE_SCHEDULER_ENABLED=false` (API/manual apply can still run) |
+| **Stop a running server** | `docker compose stop`; disable `jobagent-mcp-gateway` / `jobagent-mcp-tunnel` if installed; `enabled=false` on workspace rows in Postgres |
 
-Compose **`restart: "no"`** so containers do not come back after a host reboot unless you explicitly start them again.
-
-## Daily operations (when automation was active)
+## Daily operations
 
 ```bash
 python3 scripts/daily-apply-report.py
@@ -126,7 +123,3 @@ npm ci && npm run build && npm test
 ## License
 
 No license file is included; treat the code as **all rights reserved** unless the repository owner adds an explicit license. Fork and reuse at your own risk.
-
-## Why this project stopped
-
-The personal automation goal was met for its phase: discovery, fit gating, CV tailoring, and guarded submit were built and operated on a private stack. Further work (multi-tenant productization, CAPTCHA-at-scale, compliance packaging) is out of scope for this archive.
