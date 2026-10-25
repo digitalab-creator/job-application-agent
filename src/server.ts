@@ -62,9 +62,11 @@ import {
 import { collectAppLogEvents } from "./observability/app-log-export.js";
 import {
   handleMcpApplyOne,
+  handleMcpRequestApplication,
   handleMcpGetPreviewCv,
   handleMcpPreviewCv,
 } from "./observability/mcp-apply-handler.js";
+import { resolveMcpAttemptStatus } from "./observability/mcp-attempt-status.js";
 import { buildJobDetailExport, buildQueueExport } from "./observability/queue-export.js";
 import {
   deployVersionMismatch,
@@ -362,6 +364,20 @@ const server = http.createServer(async (req, res) => {
         const { attempts } = readAttemptsFromLedgerPaths(collectApplyAttemptLedgerPaths(workspace));
         const slice = attempts.slice(-Math.min(Math.max(1, limit), 2000));
         send(res, 200, { summary: summarizeAttemptErrors(slice) });
+        return;
+      }
+      if (path === "/observability/mcp-attempt-status") {
+        const attemptId = parsed.searchParams.get("attemptId")?.trim();
+        if (!attemptId) {
+          send(res, 400, { error: "attemptId_required" });
+          return;
+        }
+        const { assertMcpWorkspaceAccess } = await import("./observability/mcp-workspace-guard.js");
+        if (!assertMcpWorkspaceAccess(workspaceId)) {
+          send(res, 403, { error: "workspace_forbidden" });
+          return;
+        }
+        send(res, 200, await resolveMcpAttemptStatus(attemptId, workspace));
         return;
       }
       send(res, 404, { error: "observability_route_not_found" });
@@ -714,7 +730,60 @@ const server = http.createServer(async (req, res) => {
         idempotencyKey,
         jobText: body.jobText,
       });
-      const status = result.error === "apply_in_progress" || result.error === "apply_run_in_progress" ? 409 : result.error ? 404 : 200;
+      const status =
+        result.error === "apply_in_progress" || result.error === "apply_run_in_progress"
+          ? 409
+          : result.error === "budget_exhausted" || result.error === "daily_quota_reached" || result.error === "job_not_eligible"
+            ? 422
+            : result.error
+              ? 404
+              : 200;
+      send(res, status, result);
+      return;
+    }
+    if (req.method === "POST" && req.url === "/mcp/request-application") {
+      const body = await readBody(req) as {
+        workspaceId?: string;
+        idempotencyKey?: string;
+        rowNumber?: number;
+        jobUrl?: string;
+        canonicalJobId?: string;
+      };
+      const idempotencyKey = String(body.idempotencyKey ?? "").trim();
+      if (!idempotencyKey) {
+        send(res, 400, { error: "idempotencyKey_required" });
+        return;
+      }
+      const workspaceId = String(body.workspaceId ?? "internal").trim();
+      const { assertMcpWorkspaceAccess } = await import("./observability/mcp-workspace-guard.js");
+      if (!assertMcpWorkspaceAccess(workspaceId)) {
+        send(res, 403, { error: "workspace_forbidden" });
+        return;
+      }
+      const workspace = await getWorkspace(workspaceId);
+      if (!workspace) {
+        send(res, 404, { error: "workspace_not_found" });
+        return;
+      }
+      const result = await handleMcpRequestApplication({
+        workspace,
+        idempotencyKey,
+        rowNumber: body.rowNumber !== undefined ? Number(body.rowNumber) : undefined,
+        jobUrl: body.jobUrl,
+        canonicalJobId: body.canonicalJobId,
+      });
+      const status =
+        result.error === "exactly_one_job_identifier_required"
+          ? 400
+          : result.error === "workspace_forbidden"
+            ? 403
+            : result.error === "job_not_found"
+              ? 404
+              : result.error === "budget_exhausted" || result.error === "daily_quota_reached" || result.error === "job_not_eligible"
+                ? 422
+                : result.error && !result.attemptId
+                  ? 409
+                  : 202;
       send(res, status, result);
       return;
     }

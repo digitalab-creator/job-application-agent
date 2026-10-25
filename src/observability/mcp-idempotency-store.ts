@@ -628,3 +628,98 @@ export async function confirmMcpIdempotencyLate(
   await finishMcpIdempotency(scope, attemptId, { state: "CONFIRMED", response }, ownerToken ?? existing.ownerToken);
   return true;
 }
+
+export type McpIdempotencyPublicRecord = {
+  idempotencyKey: string;
+  tool: string;
+  workspaceId: string;
+  rowNumber: number;
+  submit: boolean;
+  state: McpIdempotencyState;
+  attemptId?: string;
+  submissionStage?: McpSubmissionStage | null;
+  updatedAt: string;
+};
+
+function toPublicRecord(row: StoredRow): McpIdempotencyPublicRecord {
+  return {
+    idempotencyKey: row.key,
+    tool: row.tool,
+    workspaceId: row.workspaceId,
+    rowNumber: row.rowNumber,
+    submit: row.submit,
+    state: row.state,
+    attemptId: row.attemptId,
+    submissionStage: row.submissionStage ?? null,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function readFileRowByAttemptId(attemptId: string, workspaceId: string): StoredRow | null {
+  const file = fileStorePath();
+  if (!fs.existsSync(file)) {
+    return null;
+  }
+  const lines = fs.readFileSync(file, "utf8").split("\n").map((line) => line.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const row = JSON.parse(lines[i]!) as StoredRow;
+      if (row.attemptId === attemptId && row.workspaceId === workspaceId) {
+        return row;
+      }
+    } catch {
+      // skip
+    }
+  }
+  return null;
+}
+
+export async function findMcpIdempotencyForScope(
+  scope: Pick<McpIdempotencyScope, "idempotencyKey" | "tool">,
+): Promise<McpIdempotencyPublicRecord | null> {
+  if (workspaceDatabaseUrl()) {
+    try {
+      const row = await readDbRow(scope.idempotencyKey, scope.tool);
+      return row ? toPublicRecord(row) : null;
+    } catch {
+      return null;
+    }
+  }
+  const row = readFileRow(scope.idempotencyKey, scope.tool);
+  return row ? toPublicRecord(row) : null;
+}
+
+export async function findMcpIdempotencyByAttemptId(
+  attemptId: string,
+  workspaceId: string,
+): Promise<McpIdempotencyPublicRecord | null> {
+  const trimmed = attemptId.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (workspaceDatabaseUrl()) {
+    try {
+      const row = await withDb(async (client) => {
+        const res = await client.query(
+          `SELECT idempotency_key, tool, workspace_id, row_number, submit, request_fingerprint, state, attempt_id, response_json, updated_at,
+                  job_dedup_key, submission_stage, owner_token
+           FROM mcp_tool_idempotency
+           WHERE attempt_id = $1 AND workspace_id = $2
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [trimmed, workspaceId],
+        );
+        const hit = res.rows[0];
+        return hit ? rowFromDb(hit) : null;
+      });
+      return row ? toPublicRecord(row) : null;
+    } catch (error) {
+      log("MCP_IDEMPOTENCY_LOOKUP_FAILED", {
+        attemptId: trimmed,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const fileRow = readFileRowByAttemptId(trimmed, workspaceId);
+  return fileRow ? toPublicRecord(fileRow) : null;
+}

@@ -353,6 +353,57 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
+    "jobagent_request_application",
+    {
+      description:
+        "Enqueue a real native-worker application for one canonical job (sheet row). Requires idempotencyKey. Returns attemptId immediately; poll jobagent_attempt_status for outcome.",
+      inputSchema: {
+        workspaceId: z.string().optional(),
+        idempotencyKey: z.string().min(8).max(120),
+        canonicalJobId: z.string().min(3).optional(),
+        rowNumber: z.number().int().min(2).optional(),
+        jobUrl: z.string().url().optional(),
+      },
+    },
+    async ({ workspaceId, idempotencyKey, canonicalJobId, rowNumber, jobUrl }) => {
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
+      return withAudit(
+        "jobagent_request_application",
+        { workspaceId: ws, idempotencyKey, canonicalJobId, rowNumber, jobUrl },
+        async () =>
+          textResult(
+            await client.postJson("/mcp/request-application", {
+              workspaceId: ws,
+              idempotencyKey,
+              canonicalJobId,
+              rowNumber,
+              jobUrl,
+            }),
+          ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "jobagent_attempt_status",
+    {
+      description:
+        "Lifecycle status for one apply attempt: queued/running/blocked/failed/confirmed/unknown with safe blocker and evidence hints.",
+      inputSchema: {
+        workspaceId: z.string().optional(),
+        attemptId: z.string().uuid(),
+      },
+    },
+    async ({ workspaceId, attemptId }) => {
+      const ws = resolveAuthorizedWorkspaceId(workspaceId);
+      const query = new URLSearchParams({ workspaceId: ws, attemptId });
+      return withAudit("jobagent_attempt_status", { workspaceId: ws, attemptId }, async () =>
+        textResult(await client.getJson(`/observability/mcp-attempt-status?${query}`)),
+      );
+    },
+  );
+
+  server.registerTool(
     "jobagent_apply_one",
     {
       description:
