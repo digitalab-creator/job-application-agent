@@ -212,21 +212,21 @@ export async function runDiscovery(input: {
         let progress: ReturnType<typeof prepareDiscoveryScoringBatch> | undefined;
         try {
           progress = prepareDiscoveryScoringBatch({
-          ranked,
-          limit: env.discoveryMaxJobsPerBoard,
-          statePath: discoveryProgressPath(
-            path.dirname(resolveLedgerPath(env.ledgerPath)),
-            getWorkspaceRuntime()?.workspaceId ?? "internal",
-            boardUrl,
-          ),
-          scope: JSON.stringify({
-            version: searchPolicyForRank.version,
-            rows: searchPolicyForRank.categoryRows,
-            weights: [...searchPolicyForRank.categoryWeights],
-            minScore: searchPolicyForRank.discoveryMinMatchScore,
-            model: env.llmModel,
-          }),
-        });
+            ranked,
+            limit: env.discoveryMaxJobsPerBoard,
+            statePath: discoveryProgressPath(
+              path.dirname(resolveLedgerPath(env.ledgerPath)),
+              getWorkspaceRuntime()?.workspaceId ?? "internal",
+              boardUrl,
+            ),
+            scope: JSON.stringify({
+              version: searchPolicyForRank.version,
+              rows: searchPolicyForRank.categoryRows,
+              weights: [...searchPolicyForRank.categoryWeights],
+              minScore: searchPolicyForRank.discoveryMinMatchScore,
+              model: env.llmModel,
+            }),
+          });
         } catch (error) {
           log("DISCOVERY_PROGRESS_READ_FAILED", { boardUrl, message: `Arrr, scoring without progress: ${String(error)}` });
         }
