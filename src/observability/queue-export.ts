@@ -1,10 +1,10 @@
 import { resolveApplyCapability } from "../application/ats-capability.js";
-import { shouldSkipApplyForScopeDedup } from "../application/submission-dedup.js";
 import { isEligibleApplySheetRow, sheetMatchScore } from "../orchestration/pick-jobs.js";
 import { readExcludeCompanies, readJobSheetRows, type JobSheetRow } from "../orchestration/sheets/job-sheet.js";
 import type { WorkspaceRecord } from "../orchestration/workspace-types.js";
 import { findJobSheetRow } from "./job-sheet-lookup.js";
 import { readAttemptsFromLedgerPaths, collectApplyAttemptLedgerPaths } from "./attempt-sources.js";
+import { blockersForMcpApply } from "./mcp-apply-eligibility-blockers.js";
 import { redactRecord } from "./redact.js";
 
 export type QueueRowExport = {
@@ -23,18 +23,9 @@ export type QueueRowExport = {
 };
 
 function blockersForRow(row: JobSheetRow, excludedCompanies: string[]): string[] {
-  const blockers: string[] = [];
-  const url = String(row["Job URL"] ?? "").trim();
+  const blockers = blockersForMcpApply(row, excludedCompanies);
   if (!isEligibleApplySheetRow(row)) {
     blockers.push("not_eligible_for_auto_apply");
-  }
-  const company = String(row.Company ?? "");
-  if (excludedCompanies.some((item) => item.toLowerCase() === company.toLowerCase())) {
-    blockers.push("excluded_company");
-  }
-  const dedup = shouldSkipApplyForScopeDedup(url);
-  if (dedup.skip) {
-    blockers.push(`dedup:${dedup.reason}`);
   }
   return blockers;
 }

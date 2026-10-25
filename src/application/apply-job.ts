@@ -5,7 +5,7 @@ import { classifyJobPage, isLoginWallUrl } from "../application/classify-page.js
 import { applyFormScope, fillFields, pageHasDeepEmailInput, pageHasDeepFileInput, readFields, revealApplicationForm, uploadResume, waitForReadableApplyForm, waitForResumeUploadTarget, type DetectedField, type FormScope } from "../browser/form-filler.js";
 import { candidate } from "../config/candidate.js";
 import { enterGreenhouseSecurityCode, finalizeGreenhouseApplyForm, greenhouseJobAppFrame, inspectGreenhouseAfterSubmit, scrollGreenhouseFormIntoView } from "./greenhouse.js";
-import { pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
+import { greenhouseOtpFailureHint, pollGreenhouseOtp } from "./greenhouse-otp-fetch.js";
 import { directGreenhouseUrlsForCareersUrl, navigationRetryUrls } from "./job-navigation-url.js";
 import {
   greenhouseNavAttemptsPerUrl,
@@ -1596,12 +1596,12 @@ async function resolveGreenhouseEmailVerification(
   }
   log("EMAIL_VERIFICATION_REQUIRED", { company: input.job.company, url: page.url() });
   const notBefore = new Date(Date.now() - 45_000).toISOString();
-  const code = await pollGreenhouseOtp({
+  const otpOutcome = await pollGreenhouseOtp({
     mailbox: candidate.email,
     notBefore,
     company: input.job.company,
   });
-  if (!code) {
+  if (!otpOutcome.ok) {
     ctx.screenshots.push(await saveScreenshot(page, ctx.shotDir, "blocker.png"));
     return result(input, {
       status: "review",
@@ -1615,13 +1615,13 @@ async function resolveGreenhouseEmailVerification(
       notes: lines([
         "result=review",
         "blocker=email_verification_required",
-        "Greenhouse asked for an email verification code. n8n Gmail OTP webhook returned no code in time.",
-        "Check GREENHOUSE_OTP_WEBHOOK_URL and that the greenhouse-apply-otp workflow is active.",
+        `otp_failure=${otpOutcome.reason}`,
+        greenhouseOtpFailureHint(otpOutcome.reason),
       ]),
       screenshots: ctx.screenshots,
     });
   }
-  const entered = await enterGreenhouseSecurityCode(page, code);
+  const entered = await enterGreenhouseSecurityCode(page, otpOutcome.code);
   if (!entered) {
     ctx.screenshots.push(await saveScreenshot(page, ctx.shotDir, "blocker.png"));
     return result(input, {

@@ -11,6 +11,16 @@ export type NativeOtpPollInput = {
   pollIntervalMs: number;
 };
 
+export type GmailOtpFailureReason =
+  | "gmail_authorization_failed"
+  | "gmail_list_failed"
+  | "no_matching_message"
+  | "poll_timeout";
+
+export type GmailOtpPollOutcome =
+  | { ok: true; code: string }
+  | { ok: false; reason: GmailOtpFailureReason };
+
 type GmailMessageList = { messages?: Array<{ id: string }> };
 type GmailMessage = {
   id: string;
@@ -23,22 +33,35 @@ type GmailMessage = {
   };
 };
 
-export async function pollGreenhouseOtpFromGmail(input: NativeOtpPollInput): Promise<string | null> {
+export async function pollGreenhouseOtpFromGmail(input: NativeOtpPollInput): Promise<GmailOtpPollOutcome> {
   const deadline = Date.now() + input.timeoutMs;
+  let lastReason: GmailOtpFailureReason = "no_matching_message";
   while (Date.now() < deadline) {
-    const code = await fetchOtpOnce(input);
-    if (code) {
-      log("GREENHOUSE_OTP_RECEIVED", { mailbox: input.mailbox, source: "gmail_api", codeLength: code.length });
-      return code;
+    const once = await fetchOtpOnce(input);
+    if (once.ok) {
+      return once;
+    }
+    lastReason = once.reason;
+    if (once.reason === "gmail_authorization_failed" || once.reason === "gmail_list_failed") {
+      return once;
     }
     await sleep(input.pollIntervalMs);
   }
   log("GREENHOUSE_OTP_TIMEOUT", { mailbox: input.mailbox, source: "gmail_api", timeoutMs: input.timeoutMs });
-  return null;
+  return { ok: false, reason: lastReason === "no_matching_message" ? "poll_timeout" : lastReason };
 }
 
-async function fetchOtpOnce(input: NativeOtpPollInput): Promise<string | null> {
-  const token = await googleAccessTokenFromRefresh(input.refreshToken);
+async function fetchOtpOnce(
+  input: NativeOtpPollInput,
+): Promise<GmailOtpPollOutcome> {
+  let token: string;
+  try {
+    token = await googleAccessTokenFromRefresh(input.refreshToken);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "gmail_auth_failed";
+    log("GREENHOUSE_OTP_GMAIL_AUTH_FAILED", { message });
+    return { ok: false, reason: "gmail_authorization_failed" };
+  }
   const query = [
     "newer_than:2d",
     '(from:greenhouse-mail.io OR from:greenhouse.io OR subject:"security code")',
@@ -52,12 +75,12 @@ async function fetchOtpOnce(input: NativeOtpPollInput): Promise<string | null> {
   if (!listRes.ok) {
     const text = await listRes.text();
     log("GREENHOUSE_OTP_GMAIL_LIST_FAILED", { status: listRes.status, body: text.slice(0, 200) });
-    return null;
+    return { ok: false, reason: "gmail_list_failed" };
   }
   const list = (await listRes.json()) as GmailMessageList;
   const messages = list.messages ?? [];
   if (messages.length === 0) {
-    return null;
+    return { ok: false, reason: "no_matching_message" };
   }
   const notBeforeMs = input.notBefore ? Date.parse(input.notBefore) : Date.now() - 15 * 60_000;
   for (const msg of messages) {
@@ -79,10 +102,10 @@ async function fetchOtpOnce(input: NativeOtpPollInput): Promise<string | null> {
     const text = `${subject}\n${full.snippet || ""}\n${bodies.join("\n")}`;
     const code = parseGreenhouseOtpFromText(text);
     if (code) {
-      return code;
+      return { ok: true, code };
     }
   }
-  return null;
+  return { ok: false, reason: "no_matching_message" };
 }
 
 function collectBodies(part: GmailMessage["payload"] | undefined, out: string[]): void {
