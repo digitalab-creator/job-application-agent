@@ -29,8 +29,8 @@ export const unitTestCandidateProfile: CandidateProfile = {
     israel: true,
     sponsorshipIsrael: false,
     euCitizen: true,
-    euCountry: "Exampleland",
-    passports: ["Israel", "Exampleland"],
+    euCountry: "Poland",
+    passports: ["Israel", "Poland"],
   },
   noticePeriod: "2 weeks",
   lastSalary: {
@@ -56,7 +56,7 @@ export const unitTestCandidateProfile: CandidateProfile = {
   media: {
     ppcYears: 12,
     maxMonthlyBudgetIls: 1_500_000,
-    primaryPaidMediaFocus: "Full-funnel growth (acquisition, CRO, and analytics)",
+    primaryPaidMediaFocus: "Full-funnel growth",
     platforms: [
       "Google",
       "Meta",
@@ -72,10 +72,12 @@ export const unitTestCandidateProfile: CandidateProfile = {
     ],
   },
   screening: {
-    motivationTechnical: "Example technical motivation for tests.",
-    motivationMarketing: "Example marketing motivation for tests.",
-    motivationHybrid: "Example hybrid motivation for tests.",
-    motivationRevenueMartech: "Example martech motivation for tests.",
+    motivationTechnical:
+      "Applied AI engineer focused on production engineering and demonstrated AI delivery (RAG, APIs, shipped product).",
+    motivationMarketing:
+      "Performance marketing lead (10+ years): paid acquisition, budget ownership, measurement, and full-funnel optimization.",
+    motivationHybrid: "Revenue & MarTech lead connecting marketing, CRM, data, and operations.",
+    motivationRevenueMartech: "Revenue & MarTech lead connecting marketing, CRM, data, and operations.",
   },
   crm: {
     hasUsedHubSpot: false,
