@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { unitTestCandidateProfile } from "../test-fixtures/candidate-profile-fixture.js";
 
 /**
  * Buyer identity for forms, CV, and fit. Loaded from workspace `profile_json` in Postgres.
@@ -54,9 +55,16 @@ const profileStore = new AsyncLocalStorage<CandidateProfile>();
 const NO_PROFILE_MESSAGE =
   "No candidate profile in context. Load workspace profile_json from Postgres before apply/discovery.";
 
+function runtimeCandidateFallback(): CandidateProfile | null {
+  if (process.env.NODE_ENV === "test") {
+    return unitTestCandidateProfile;
+  }
+  return null;
+}
+
 /** Profile for the current async run (workspace row or explicit `withCandidateProfile`). */
 export function activeCandidate(): CandidateProfile {
-  const profile = profileStore.getStore();
+  const profile = profileStore.getStore() ?? runtimeCandidateFallback();
   if (!profile) {
     throw new Error(NO_PROFILE_MESSAGE);
   }

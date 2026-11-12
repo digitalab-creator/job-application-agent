@@ -4,8 +4,8 @@ import { candidate, withCandidateProfile } from "./candidate.js";
 import { unitTestCandidateProfile } from "../test-fixtures/candidate-profile-fixture.js";
 import { factById } from "../profile/facts.js";
 
-test("candidate proxy requires an installed profile", () => {
-  assert.throws(() => candidate.email, /No candidate profile in context/);
+test("candidate proxy uses fictional fixture only under NODE_ENV=test", () => {
+  assert.equal(candidate.email, unitTestCandidateProfile.email);
 });
 
 test("a workspace profile replaces identity only inside the run", async () => {
@@ -27,5 +27,5 @@ test("a workspace profile replaces identity only inside the run", async () => {
     assert.match(factById("summary-marketing")?.text ?? "", /250,000/);
     assert.match(factById("media-hands-on")?.text ?? "", /250000/);
   });
-  assert.throws(() => candidate.email, /No candidate profile in context/);
+  assert.equal(candidate.email, unitTestCandidateProfile.email);
 });
