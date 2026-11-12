@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { activeCandidate } from "../config/candidate.js";
 import { env } from "../config/env.js";
 import { completeJson } from "../llm/client.js";
 import { log } from "../logging/logger.js";
@@ -307,10 +308,11 @@ export async function openChosen(page: Page, job: ListedJob): Promise<void> {
 }
 
 function candidateBrief(): string {
+  const { city, country } = activeCandidate().location;
   return [
     factById("summary-technical")?.text ?? "",
     factById("summary-marketing")?.text ?? "",
-    "Location: Petah Tikva, Israel. Do not pick intern, student, or junior-only roles.",
+    `Location: ${city}, ${country}. Do not pick intern, student, or junior-only roles.`,
   ].filter(Boolean).join("\n");
 }
 

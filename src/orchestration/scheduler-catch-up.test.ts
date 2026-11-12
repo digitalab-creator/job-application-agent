@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DailyPipelineResult } from "./daily-pipeline.js";
 import { runStartupApplyCatchUp } from "./scheduler-catch-up.js";
-import { internalCandidateProfile } from "../config/candidate.js";
+import { unitTestCandidateProfile } from "../test-fixtures/candidate-profile-fixture.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 
 function workspace(id: string, lastApplyRunKey: string | null): WorkspaceRecord {
@@ -28,7 +28,7 @@ function workspace(id: string, lastApplyRunKey: string | null): WorkspaceRecord 
     browserUserDataDir: null,
     ledgerPath: null,
     applyAttemptsPath: null,
-    profile: internalCandidateProfile,
+    profile: unitTestCandidateProfile,
     lastDiscoverRunKey: null,
     lastApplyRunKey,
     lastOutcomeRunKey: null,

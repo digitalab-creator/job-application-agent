@@ -1,11 +1,26 @@
 /**
  * Single source of truth for Apps Script constants.
- * Prefer Search Config preferences for tunables that change often.
+ * Operator values live in Script Properties (SPREADSHEET_ID, GCP_PROJECT_NUMBER, BASE_CITY, CANDIDATE_PROFILE).
  */
+function scriptConfig_(key, fallback) {
+  try {
+    const value = PropertiesService.getScriptProperties().getProperty(key);
+    if (value && String(value).trim()) {
+      return String(value).trim();
+    }
+  } catch (e) {
+    // unit tests / clasp push without PropertiesService
+  }
+  return fallback;
+}
+
 const CONFIG = Object.freeze({
-  SPREADSHEET_ID: 'REDACTED_SPREADSHEET_ID',
-  // Standard GCP project number for OAuth consent (set in Apps Script Project Settings).
-  GCP_PROJECT_NUMBER: 'REDACTED_GCP_PROJECT',
+  get SPREADSHEET_ID() {
+    return scriptConfig_('SPREADSHEET_ID', '');
+  },
+  get GCP_PROJECT_NUMBER() {
+    return scriptConfig_('GCP_PROJECT_NUMBER', '');
+  },
   TIME_ZONE: 'Asia/Jerusalem',
   OPENAI_URL: 'https://api.openai.com/v1/responses',
   // Free, tiny endpoint used only to prove a stored key still works.
@@ -154,7 +169,9 @@ const CONFIG = Object.freeze({
     'funnel',
   ]),
   // Commute policy: remote OK anywhere (if Israel-eligible); office/hybrid must be ~1h from base.
-  BASE_CITY: 'Petah Tikva',
+  get BASE_CITY() {
+    return scriptConfig_('BASE_CITY', 'Tel Aviv');
+  },
   COMMUTE_MAX_MINUTES: 60,
   GEOGRAPHY_RULE: [
     'GEOGRAPHY / COMMUTE (hard rule)',
@@ -310,16 +327,14 @@ const CONFIG = Object.freeze({
       enabled: true,
     },
   ]),
-  CANDIDATE_PROFILE: [
-    'Candidate: Example Operator, based in Petah Tikva, Israel.',
-    '12+ years in PPC and performance marketing, including leadership and large-budget campaigns.',
-    '5-6 years hands-on software development: Node.js, TypeScript, React, Python, PHP, APIs, databases and cloud deployment.',
-    'Hands-on GenAI/LLM work: OpenAI APIs, LangChain/LangGraph, RAG, agents, automations, OCR and production AI products.',
-    'Strong overlap across growth, analytics, CRO, product, marketing operations, technical delivery and business problem solving.',
-    'Preferred seniority: Mid-Senior, Senior or Lead. Preferred work mode: remote or hybrid.',
-    'Office/hybrid commute: office must be within ~1 hour drive of Petah Tikva (Gush Dan / Sharon / nearby center).',
-    'Reject office roles in Haifa, Be\'er Sheva, Eilat, far north/south, or abroad requiring relocation.',
-    'Also open to freelance/consulting: growth, PPC, funnel, landing pages, AI agents, automation and technical delivery.',
-    'Prioritize opportunities with strong compensation and a credible path to an interview or paid engagement.',
-  ].join('\n'),
+  get CANDIDATE_PROFILE() {
+    const fromProps = scriptConfig_('CANDIDATE_PROFILE', '');
+    if (fromProps) {
+      return fromProps;
+    }
+    return [
+      'Set CANDIDATE_PROFILE in Script Properties before running discovery.',
+      'Include base city, commute policy, skills summary, and seniority preferences.',
+    ].join('\n');
+  },
 });

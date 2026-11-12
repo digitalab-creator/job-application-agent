@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
- * Buyer identity for forms, CV, and fit. Workspace `internal` is seeded from
- * `internalCandidateProfile`. A run installs another buyer's copy via `withCandidateProfile`.
+ * Buyer identity for forms, CV, and fit. Loaded from workspace `profile_json` in Postgres.
+ * Installed per run via `withCandidateProfile` / `withWorkspaceRuntime`.
  */
 export type CandidateProfile = {
   firstName: string;
@@ -47,117 +47,28 @@ export type CandidateProfile = {
   crm: { hasUsedHubSpot: boolean; summary: string };
 };
 
-/** Seed for workspace `internal` only. Not a product rule for every buyer. */
-export const internalCandidateProfile: CandidateProfile = {
-  firstName: "Or",
-  lastName: "Redacted",
-  fullName: "Example Operator",
-  email: "redacted@example.com",
-  phone: {
-    local: "0000000000",
-    display: "000-000-0000",
-    international: "+10000000000",
-  },
-  location: {
-    city: "Petah Tikva",
-    country: "Israel",
-  },
-  /**
-   * Hybrid / on-site commute screening (Greenhouse etc.). Answered Yes only for offices
-   * in our pursue geography — see location-eligibility (Central + Tel Aviv District metro).
-   */
-  workLocation: {
-    willingToCommuteToEligibleOffices: true,
-  },
-  linkedin: "https://www.linkedin.com/in/redacted/",
-  github: "https://github.com/digitalab-creator",
-  portfolio: {
-    marketing: "https://digitalab.co.il/portfolio/?capability=performance",
-    build: "https://digitalab.co.il/portfolio/?capability=build",
-    automation: "https://digitalab.co.il/portfolio/?capability=automate",
-  },
-  workAuthorization: {
-    israel: true,
-    sponsorshipIsrael: false,
-    euCitizen: true,
-    euCountry: "Poland",
-    passports: ["Israel", "Poland"],
-  },
-  noticePeriod: "1 week after signing",
-  lastSalary: {
-    amount: 25000,
-    currency: "ILS",
-    period: "month" as const,
-    annualAmount: 300000,
-  },
-  salaryExpectation: {
-    /** Lowest monthly figure we may enter on forms (role quotes stay above this). */
-    minimum: 20000,
-    maximum: 32000,
-    currency: "ILS",
-    period: "month" as const,
-    /** Published-ad filtering only — not the number we quote on applications. */
-    opportunityFilter: {
-      excludeBelow: 18000,
-      processingMinimum: 20000,
-    },
-  },
-  languages: [
-    { language: "Hebrew", level: "Native" },
-    { language: "English", level: "Fluent" },
-  ],
-  /**
-   * Confirmed by the candidate for application forms.
-   * Dropdowns and platform checkboxes read this object. Do not copy the numbers elsewhere.
-   */
-  media: {
-    ppcYears: 12,
-    maxMonthlyBudgetIls: 1_500_000,
-    /** Maps to “primary paid media focus” style dropdowns; forms read this, not ad-hoc facts. */
-    primaryPaidMediaFocus: "Full-funnel growth (acquisition, CRO, and analytics)",
-    platforms: [
-      "Google",
-      "Meta",
-      "Taboola",
-      "Outbrain",
-      "X",
-      "ChatGPT Ads",
-      "LinkedIn",
-      "Snapchat",
-      "Traffic Junky",
-      "Mantis",
-      "Microsoft Ads",
-    ],
-  },
-  /** Motivation snippets for opaque ATS fields (e.g. SmartRecruiters “human-reason”). Persona picks the line. */
-  screening: {
-    motivationTechnical:
-      "Applied AI engineer focused on production engineering and demonstrated AI delivery (RAG, APIs, shipped product); excited to own end-to-end systems in production.",
-    motivationMarketing:
-      "Performance marketing lead (10+ years): paid acquisition, budget ownership, measurement, and results across Google, Meta, and full-funnel optimization.",
-    motivationHybrid:
-      "Revenue & MarTech lead connecting marketing, CRM, data, and operations — built and integrated CRM workflows, APIs, and attribution (not HubSpot).",
-    motivationRevenueMartech:
-      "Revenue & MarTech lead connecting marketing, CRM, data, and operations — built and integrated CRM workflows, APIs, and attribution (not HubSpot).",
-  },
-  /** Hard boundary for CV/job-fit — never claim tools the candidate has not used. */
-  crm: {
-    hasUsedHubSpot: false,
-    summary:
-      "Integrated multiple CRM platforms and built one custom CRM; has not used HubSpot.",
-  },
-};
-
 export type PersonaMotivation = keyof CandidateProfile["screening"];
 
 const profileStore = new AsyncLocalStorage<CandidateProfile>();
 
-/** Profile for the current run, or the internal seed when no workspace is installed. */
+const NO_PROFILE_MESSAGE =
+  "No candidate profile in context. Load workspace profile_json from Postgres before apply/discovery.";
+
+/** Profile for the current async run (workspace row or explicit `withCandidateProfile`). */
 export function activeCandidate(): CandidateProfile {
-  return profileStore.getStore() ?? internalCandidateProfile;
+  const profile = profileStore.getStore();
+  if (!profile) {
+    throw new Error(NO_PROFILE_MESSAGE);
+  }
+  return profile;
 }
 
 export function withCandidateProfile<T>(profile: CandidateProfile, fn: () => Promise<T>): Promise<T> {
+  return profileStore.run(profile, fn);
+}
+
+/** Sync helper for unit tests. */
+export function runWithCandidateProfile<T>(profile: CandidateProfile, fn: () => T): T {
   return profileStore.run(profile, fn);
 }
 
@@ -165,7 +76,7 @@ export function withCandidateProfile<T>(profile: CandidateProfile, fn: () => Pro
  * Reads follow the active workspace profile. Call sites keep `candidate.email`
  * and still see the buyer for this run.
  */
-export const candidate: CandidateProfile = new Proxy(internalCandidateProfile, {
+export const candidate: CandidateProfile = new Proxy({} as CandidateProfile, {
   get(_target, prop, receiver) {
     return Reflect.get(activeCandidate(), prop, receiver);
   },
@@ -183,6 +94,14 @@ export function parseCandidateProfile(value: unknown): CandidateProfile | null {
     return null;
   }
   return row as CandidateProfile;
+}
+
+export function candidateCvFileSlug(profile: CandidateProfile = activeCandidate()): string {
+  const base = `${profile.firstName}-${profile.lastName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || "candidate";
 }
 
 export function salaryMinimum(): number {

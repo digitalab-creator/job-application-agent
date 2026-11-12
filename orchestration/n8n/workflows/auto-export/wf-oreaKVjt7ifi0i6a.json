@@ -96,7 +96,7 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -222,7 +222,7 @@
         "operation": "append",
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -707,7 +707,7 @@
         "parameters": {
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
             "mode": "id"
           },
           "sheetName": {
@@ -833,7 +833,7 @@
           "operation": "append",
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
             "mode": "id"
           },
           "sheetName": {

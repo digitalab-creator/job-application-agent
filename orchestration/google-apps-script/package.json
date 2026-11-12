@@ -13,7 +13,7 @@
     "logs": "clasp logs",
     "check": "node scripts/check-setup.js",
     "deploy-help": "node scripts/deploy-checklist.js",
-    "create-bound": "clasp create --type sheets --title \"Or Opportunity Pipeline\" --rootDir ./src --parentId REDACTED_SPREADSHEET_ID",
+    "create-bound": "node -e \"const id=process.env.WORKSPACE_INTERNAL_SPREADSHEET_ID;if(!id){console.error('Set WORKSPACE_INTERNAL_SPREADSHEET_ID');process.exit(1)}\" && clasp create --type sheets --title \"Opportunity Pipeline\" --rootDir ./src --parentId \"$WORKSPACE_INTERNAL_SPREADSHEET_ID\"",
     "test": "node --test tests/**/*.test.js",
     "backfill": "node scripts/backfill-sheet-local.js"
   },

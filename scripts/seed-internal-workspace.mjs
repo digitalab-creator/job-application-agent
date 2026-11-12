@@ -60,9 +60,8 @@ function hashToken(token) {
   return crypto.createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-const spreadsheetId =
-  process.env.WORKSPACE_INTERNAL_SPREADSHEET_ID?.trim() || "REDACTED_SPREADSHEET_ID";
-const jobsSheetGid = process.env.WORKSPACE_INTERNAL_JOBS_SHEET_GID?.trim() || "REDACTED_SHEET_GID";
+const spreadsheetId = required("WORKSPACE_INTERNAL_SPREADSHEET_ID");
+const jobsSheetGid = required("WORKSPACE_INTERNAL_JOBS_SHEET_GID");
 const boards = (process.env.JOB_DISCOVERY_BOARD_URLS || "")
   .split(/[\n,]+/)
   .map((part) => part.trim())
@@ -74,8 +73,29 @@ if (!refreshToken) {
   process.exit(1);
 }
 const mailboxRefresh = process.env.WORKSPACE_INTERNAL_MAILBOX_REFRESH_TOKEN?.trim() || null;
-const mailboxEmail =
-  process.env.WORKSPACE_INTERNAL_MAILBOX_EMAIL?.trim() || "redacted@example.com";
+const mailboxEmail = mailboxRefresh ? required("WORKSPACE_INTERNAL_MAILBOX_EMAIL") : null;
+
+function loadCandidateProfileJson() {
+  const inline = process.env.WORKSPACE_INTERNAL_CANDIDATE_PROFILE_JSON?.trim();
+  if (inline) {
+    return JSON.parse(inline);
+  }
+  const profilePath =
+    process.env.WORKSPACE_INTERNAL_CANDIDATE_PROFILE_PATH?.trim() ||
+    path.join(root, "data/config/internal-candidate-profile.json");
+  if (fs.existsSync(profilePath)) {
+    return JSON.parse(fs.readFileSync(profilePath, "utf8"));
+  }
+  return null;
+}
+
+const candidateProfile = loadCandidateProfileJson();
+if (!candidateProfile) {
+  console.error(
+    "Set WORKSPACE_INTERNAL_CANDIDATE_PROFILE_JSON or WORKSPACE_INTERNAL_CANDIDATE_PROFILE_PATH (gitignored JSON).",
+  );
+  process.exit(1);
+}
 
 const runToken = required("WORKSPACE_INTERNAL_RUN_TOKEN");
 const dbUrl = required("WORKSPACE_DATABASE_URL");
@@ -121,8 +141,9 @@ await client.query(
     id, display_name, timezone, schedule_json, enabled, spreadsheet_id, jobs_sheet_gid,
     discovery_board_urls, monthly_budget_ils, run_token_hash, google_refresh_token_enc,
     mailbox_refresh_token_enc, mailbox_email,
-    greenhouse_otp_webhook_url, browser_user_data_dir, ledger_path, apply_attempts_path
-  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+    greenhouse_otp_webhook_url, browser_user_data_dir, ledger_path, apply_attempts_path,
+    profile_json
+  ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
   ON CONFLICT (id) DO UPDATE SET
     spreadsheet_id = EXCLUDED.spreadsheet_id,
     jobs_sheet_gid = EXCLUDED.jobs_sheet_gid,
@@ -135,6 +156,7 @@ await client.query(
     ledger_path = EXCLUDED.ledger_path,
     apply_attempts_path = EXCLUDED.apply_attempts_path,
     monthly_budget_ils = EXCLUDED.monthly_budget_ils,
+    profile_json = EXCLUDED.profile_json,
     updated_at = NOW()`,
   [
     "internal",
@@ -154,6 +176,7 @@ await client.query(
     process.env.BROWSER_USER_DATA_DIR || "/app/data/browser-profile/internal",
     process.env.LEDGER_PATH || "/app/data/ledger/internal/applications.jsonl",
     process.env.APPLY_ATTEMPTS_PATH || "/app/data/ledger/internal/apply-attempts.jsonl",
+    JSON.stringify(candidateProfile),
   ],
 );
 

@@ -55,7 +55,7 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -119,7 +119,7 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -270,7 +270,7 @@
         "operation": "update",
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -615,7 +615,7 @@
       "parameters": {
         "documentId": {
           "__rl": true,
-          "value": "REDACTED_SPREADSHEET_ID",
+          "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
           "mode": "id"
         },
         "sheetName": {
@@ -688,7 +688,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'REDACTED_SPREADSHEET_ID', sheetId: REDACTED_SHEET_GID } }];\n"
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: '={{ $env.JOB_AGENT_SPREADSHEET_ID }}', sheetId: REDACTED_SHEET_GID } }];\n"
       },
       "id": "571e9b13-00b0-4277-ae47-daffc9a4c97e",
       "name": "Ensure Manual row highlight",
@@ -735,7 +735,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://sheets.googleapis.com/v4/spreadsheets/REDACTED_SPREADSHEET_ID:batchUpdate",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/={{ $env.JOB_AGENT_SPREADSHEET_ID }}:batchUpdate",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleSheetsOAuth2Api",
         "sendBody": true,
@@ -1203,7 +1203,7 @@
         "parameters": {
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
             "mode": "id"
           },
           "sheetName": {
@@ -1267,7 +1267,7 @@
           "operation": "update",
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
             "mode": "id"
           },
           "sheetName": {
@@ -1418,7 +1418,7 @@
           "operation": "update",
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
             "mode": "id"
           },
           "sheetName": {
@@ -1763,7 +1763,7 @@
         "parameters": {
           "documentId": {
             "__rl": true,
-            "value": "REDACTED_SPREADSHEET_ID",
+            "value": "={{ $env.JOB_AGENT_SPREADSHEET_ID }}",
             "mode": "id"
           },
           "sheetName": {
@@ -1836,7 +1836,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: 'REDACTED_SPREADSHEET_ID', sheetId: REDACTED_SHEET_GID } }];\n"
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst RULE_VERSION = 1;\nif (staticData.jobSheetManualHighlightRuleV === RULE_VERSION) {\n  return [{ json: { skipped: true } }];\n}\nstaticData.jobSheetManualHighlightRuleV = RULE_VERSION;\nreturn [{ json: { skipped: false, spreadsheetId: '={{ $env.JOB_AGENT_SPREADSHEET_ID }}', sheetId: REDACTED_SHEET_GID } }];\n"
         },
         "id": "571e9b13-00b0-4277-ae47-daffc9a4c97e",
         "name": "Ensure Manual row highlight",
@@ -1883,7 +1883,7 @@
       {
         "parameters": {
           "method": "POST",
-          "url": "https://sheets.googleapis.com/v4/spreadsheets/REDACTED_SPREADSHEET_ID:batchUpdate",
+          "url": "https://sheets.googleapis.com/v4/spreadsheets/={{ $env.JOB_AGENT_SPREADSHEET_ID }}:batchUpdate",
           "authentication": "predefinedCredentialType",
           "nodeCredentialType": "googleSheetsOAuth2Api",
           "sendBody": true,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import uuid
 import urllib.error
@@ -16,8 +17,12 @@ from n8n_orchestration import N8N_API_BASE, WORKFLOW_EXPORT_DIR, read_n8n_api_ke
 EXPORT = WORKFLOW_EXPORT_DIR / "wf-fcYSvcG7IiP8xAqr.json"
 WORKFLOW_ID = "fcYSvcG7IiP8xAqr"
 
-SPREADSHEET_ID = "REDACTED_SPREADSHEET_ID"
-SHEET_ID = REDACTED_SHEET_GID
+SPREADSHEET_ID = os.environ.get("WORKSPACE_INTERNAL_SPREADSHEET_ID", "").strip()
+if not SPREADSHEET_ID:
+    raise SystemExit("Set WORKSPACE_INTERNAL_SPREADSHEET_ID")
+SHEET_ID = int(os.environ.get("WORKSPACE_INTERNAL_JOBS_SHEET_GID", "0").strip() or "0")
+if SHEET_ID <= 0:
+    raise SystemExit("Set WORKSPACE_INTERNAL_JOBS_SHEET_GID")
 RULE_VERSION = 1
 
 ENSURE_CODE = f"""const staticData = $getWorkflowStaticData('global');

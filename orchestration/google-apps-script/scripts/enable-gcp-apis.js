@@ -3,7 +3,14 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const GCP_PROJECTS = ['REDACTED_GCP_PROJECT', '1072944905499'];
+const fromEnv = (process.env.GOOGLE_CLOUD_PROJECT_NUMBERS || '')
+  .split(/[,\s]+/)
+  .map((part) => part.trim())
+  .filter(Boolean);
+const GCP_PROJECTS = fromEnv.length > 0 ? fromEnv : [];
+if (GCP_PROJECTS.length === 0) {
+  throw new Error('Set GOOGLE_CLOUD_PROJECT_NUMBERS (comma-separated project numbers).');
+}
 const SERVICES = [
   'script.googleapis.com',
   'sheets.googleapis.com',

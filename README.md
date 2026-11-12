@@ -1,6 +1,6 @@
 # Job Application Agent
 
-**Private operator repo** for automated job discovery and apply. Native scheduling runs when `NATIVE_SCHEDULER_ENABLED=true` (default in `.env.example`). Use your own legal review, API keys, and consent before targeting real job boards.
+Open-source **job apply worker** — operator PII and sheet IDs live in Postgres (`profile_json`) and `.env` / GitHub Secrets, not in source. Native scheduling runs when `NATIVE_SCHEDULER_ENABLED=true` (default in `.env.example`). Use your own legal review, API keys, and consent before targeting real job boards.
 
 A TypeScript worker that:
 
@@ -116,9 +116,11 @@ npm ci && npm run build && npm test
 
 ## Security
 
-- Keep `.env`, OAuth refresh tokens, and sheet IDs out of git (see `.gitignore`).
+- Keep `.env`, OAuth refresh tokens, sheet IDs, and `internal-candidate-profile.json` out of git (see `.gitignore`).
+- Seed buyer identity with `WORKSPACE_INTERNAL_CANDIDATE_PROFILE_PATH` → Postgres `profile_json` (`scripts/seed-internal-workspace.mjs`).
 - `APPLY_API_TOKEN` protects all mutating HTTP routes.
 - Treat browser profiles and ledgers as sensitive (PII).
+- After cloning a public repo, **rotate** any keys that were ever on a shared machine.
 
 ## License
 

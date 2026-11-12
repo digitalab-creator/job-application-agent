@@ -1,0 +1,12 @@
+{
+  "scriptId": "SET_AFTER_CLASP_CREATE",
+  "rootDir": "src",
+  "parentId": "SET_SPREADSHEET_ID_IN_SCRIPT_PROPERTIES",
+  "projectId": "SET_GCP_PROJECT_NUMBER",
+  "projectNumber": "SET_GCP_PROJECT_NUMBER",
+  "scriptExtensions": [".js", ".gs"],
+  "htmlExtensions": [".html"],
+  "jsonExtensions": [".json"],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}

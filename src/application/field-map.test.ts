@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runWithCandidateProfile } from "../config/candidate.js";
+import { unitTestCandidateProfile } from "../test-fixtures/candidate-profile-fixture.js";
 import { decideField } from "./field-map.js";
+
+function testWithProfile(name: string, fn: () => void) {
+  test(name, () => runWithCandidateProfile(unitTestCandidateProfile, fn));
+}
 
 const ctx = {
   persona: "technical" as const,
@@ -9,7 +15,7 @@ const ctx = {
   euRole: false,
 };
 
-test("previous salary uses the verified monthly figure", () => {
+testWithProfile("previous salary uses the verified monthly figure", () => {
   const decision = decideField({
     label: "What was your previous salary?",
     required: true,
@@ -24,7 +30,7 @@ test("previous salary uses the verified monthly figure", () => {
   }
 });
 
-test("a required degree question is blocked", () => {
+testWithProfile("a required degree question is blocked", () => {
   const decision = decideField({
     label: "What university degree do you hold?",
     required: true,
@@ -35,7 +41,7 @@ test("a required degree question is blocked", () => {
   assert.equal(decision.action, "block");
 });
 
-test("Greenhouse privacy combobox picks Yes", () => {
+testWithProfile("Greenhouse privacy combobox picks Yes", () => {
   const decision = decideField({
     label: "I agree to allow Orca Security to store and process my data for the purpose of considering my eligibility regarding my current application for employment.*",
     required: true,
@@ -49,7 +55,7 @@ test("Greenhouse privacy combobox picks Yes", () => {
   }
 });
 
-test("Greenhouse third-party consent combobox picks Confirm", () => {
+testWithProfile("Greenhouse third-party consent combobox picks Confirm", () => {
   const decision = decideField({
     label: "By submitting your application you consent to us sharing your information with a third party supporting us in this hiring process*",
     required: true,
@@ -63,7 +69,7 @@ test("Greenhouse third-party consent combobox picks Confirm", () => {
   }
 });
 
-test("location-based questions use verified city and country", () => {
+testWithProfile("location-based questions use verified city and country", () => {
   const decision = decideField({
     label: "Where are you currently based?",
     required: true,
@@ -73,12 +79,12 @@ test("location-based questions use verified city and country", () => {
   });
   assert.equal(decision.action, "fill");
   if (decision.action === "fill") {
-    assert.equal(decision.value, "Petah Tikva, Israel");
+    assert.equal(decision.value, "Ramat Gan, Israel");
     assert.equal(decision.source, "candidate_profile");
   }
 });
 
-test("Hebrew email label uses the candidate profile", () => {
+testWithProfile("Hebrew email label uses the candidate profile", () => {
   const decision = decideField({
     label: "מייל",
     required: true,
@@ -88,12 +94,12 @@ test("Hebrew email label uses the candidate profile", () => {
   });
   assert.equal(decision.action, "fill");
   if (decision.action === "fill") {
-    assert.equal(decision.value, "redacted@example.com");
+    assert.equal(decision.value, "candidate.fixture@example.com");
     assert.equal(decision.source, "candidate_profile");
   }
 });
 
-test("Hunt PPC years, budget, platforms, and about-yourself are answered from the profile", () => {
+testWithProfile("Hunt PPC years, budget, platforms, and about-yourself are answered from the profile", () => {
   const years = decideField({
     label: "Years of hands-on PPC experience*",
     required: true,
@@ -156,7 +162,7 @@ test("Hunt PPC years, budget, platforms, and about-yourself are answered from th
   }
 });
 
-test("expected salary uses the role-specific monthly quote from apply context", () => {
+testWithProfile("expected salary uses the role-specific monthly quote from apply context", () => {
   const decision = decideField({
     label: "Expected salary",
     required: true,
@@ -170,7 +176,7 @@ test("expected salary uses the role-specific monthly quote from apply context", 
   }
 });
 
-test("privacy policy checkbox with long label is checked", () => {
+testWithProfile("privacy policy checkbox with long label is checked", () => {
   const decision = decideField({
     label: "I read and understood the privacy policy*",
     required: true,
@@ -181,7 +187,7 @@ test("privacy policy checkbox with long label is checked", () => {
   assert.equal(decision.action, "check");
 });
 
-test("empty label resolves from name=name to full name", () => {
+testWithProfile("empty label resolves from name=name to full name", () => {
   const decision = decideField({
     label: "",
     name: "name",
@@ -192,11 +198,11 @@ test("empty label resolves from name=name to full name", () => {
   });
   assert.equal(decision.action, "fill");
   if (decision.action === "fill") {
-    assert.equal(decision.value, "Example Operator");
+    assert.equal(decision.value, "Alex Fixture");
   }
 });
 
-test("country phone code selects Israel not full mobile number", () => {
+testWithProfile("country phone code selects Israel not full mobile number", () => {
   const decision = decideField({
     label: "country phone code",
     name: "country_phone_code",
@@ -211,7 +217,7 @@ test("country phone code selects Israel not full mobile number", () => {
   }
 });
 
-test("country phone code never invents a full phone-number answer", () => {
+testWithProfile("country phone code never invents a full phone-number answer", () => {
   const decision = decideField({
     label: "country phone code",
     name: "country_phone_code",
@@ -223,7 +229,7 @@ test("country phone code never invents a full phone-number answer", () => {
   assert.equal(decision.action, "block");
 });
 
-test("unknown required CRM fields are blocked instead of receiving invented facts", () => {
+testWithProfile("unknown required CRM fields are blocked instead of receiving invented facts", () => {
   const decision = decideField({
     label: "",
     name: "hubspot__estimated_monthly_orders",
@@ -238,7 +244,7 @@ test("unknown required CRM fields are blocked instead of receiving invented fact
   }
 });
 
-test("LLM experience yes/no uses verified years", () => {
+testWithProfile("LLM experience yes/no uses verified years", () => {
   const decision = decideField({
     label: "Do you have 3+ years of production LLM serving experience?",
     required: true,
@@ -252,7 +258,7 @@ test("LLM experience yes/no uses verified years", () => {
   }
 });
 
-test("Guidde-style UA years and budget fill as text when there are no dropdown options", () => {
+testWithProfile("Guidde-style UA years and budget fill as text when there are no dropdown options", () => {
   const years = decideField({
     label:
       "How many years of hands-on experience do you have managing user acquisition campaigns end-to-end (Search, Performance Max, Display, YouTube)?*",
@@ -279,7 +285,7 @@ test("Guidde-style UA years and budget fill as text when there are no dropdown o
   }
 });
 
-test("primary paid media focus and human-reason use verified screening profile", () => {
+testWithProfile("primary paid media focus and human-reason use verified screening profile", () => {
   const focus = decideField({
     label: "Which best describes your primary paid media focus?*",
     required: true,
@@ -317,7 +323,7 @@ test("primary paid media focus and human-reason use verified screening profile",
   }
 });
 
-test("how did you hear prefers LinkedIn option", () => {
+testWithProfile("how did you hear prefers LinkedIn option", () => {
   const decision = decideField({
     label: "How did you hear about this job?",
     required: true,
@@ -331,7 +337,7 @@ test("how did you hear prefers LinkedIn option", () => {
   }
 });
 
-test("Tel Aviv office commute several days per week answers Yes", () => {
+testWithProfile("Tel Aviv office commute several days per week answers Yes", () => {
   const decision = decideField({
     label: "Are you comfortable commuting to our Tel Aviv office location three days a week?",
     required: true,
@@ -345,7 +351,7 @@ test("Tel Aviv office commute several days per week answers Yes", () => {
   }
 });
 
-test("Haifa office commute skips the job", () => {
+testWithProfile("Haifa office commute skips the job", () => {
   const decision = decideField({
     label: "Are you comfortable commuting to our Haifa office three days a week?",
     required: true,
@@ -356,7 +362,7 @@ test("Haifa office commute skips the job", () => {
   assert.equal(decision.action, "skip_job");
 });
 
-test("citizenship and passport questions use verified dual passports", () => {
+testWithProfile("citizenship and passport questions use verified dual passports", () => {
   const dual = decideField({
     label: "Do you hold dual citizenship?",
     required: true,
@@ -406,7 +412,7 @@ test("citizenship and passport questions use verified dual passports", () => {
   }
 });
 
-test("visa sponsorship questions answer No from candidate profile", () => {
+testWithProfile("visa sponsorship questions answer No from candidate profile", () => {
   const english = decideField({
     label: "Will you now or in the future require visa sponsorship?",
     required: true,
@@ -432,7 +438,7 @@ test("visa sponsorship questions answer No from candidate profile", () => {
   }
 });
 
-test("BI analytics 1-10 scale uses grounded self rating", () => {
+testWithProfile("BI analytics 1-10 scale uses grounded self rating", () => {
   const decision = decideField({
     label:
       "On a scale of 1-10, 10 being expert level, how would you rate your BI/analytics tools (Looker, Tableau, Amplitude, etc.) and SQL skills?*",

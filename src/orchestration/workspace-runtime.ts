@@ -1,9 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import {
-  internalCandidateProfile,
-  withCandidateProfile,
-  type CandidateProfile,
-} from "../config/candidate.js";
+import { withCandidateProfile, type CandidateProfile } from "../config/candidate.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 import { decryptSecret } from "./crypto.js";
 
@@ -45,15 +41,14 @@ export function withWorkspaceRuntime<T>(runtime: WorkspaceRuntime, fn: () => Pro
   return run();
 }
 
-/** Workspace row wins. Internal with an empty profile uses the code seed. Any other buyer must have a profile. */
+/** Workspace row is the only source for buyer identity (stored in Postgres `profile_json`). */
 export function profileForWorkspace(workspace: Pick<WorkspaceRecord, "id" | "profile">): CandidateProfile {
   if (workspace.profile) {
     return workspace.profile;
   }
-  if (workspace.id === "internal") {
-    return internalCandidateProfile;
-  }
-  throw new Error(`Workspace ${workspace.id} has no candidate profile. Store profile_json before applying.`);
+  throw new Error(
+    `Workspace ${workspace.id} has no candidate profile. Seed profile_json (see scripts/seed-internal-workspace.mjs).`,
+  );
 }
 
 export function runtimeFromWorkspace(

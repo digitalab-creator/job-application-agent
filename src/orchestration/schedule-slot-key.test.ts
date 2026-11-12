@@ -5,7 +5,7 @@ import {
   shouldMarkWorkspaceScheduleComplete,
   workspaceScheduleSlotKey,
 } from "./schedule-slot-key.js";
-import { internalCandidateProfile } from "../config/candidate.js";
+import { unitTestCandidateProfile } from "../test-fixtures/candidate-profile-fixture.js";
 import type { WorkspaceRecord } from "./workspace-types.js";
 
 function workspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
@@ -31,7 +31,7 @@ function workspace(overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {
     browserUserDataDir: null,
     ledgerPath: null,
     applyAttemptsPath: null,
-    profile: internalCandidateProfile,
+    profile: unitTestCandidateProfile,
     lastDiscoverRunKey: null,
     lastApplyRunKey: null,
     lastOutcomeRunKey: null,

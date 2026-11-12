@@ -6,6 +6,8 @@ screenshots/
 audit/
 data/ledger/
 data/config/
+data/config/internal-candidate-profile.json
+orchestration/google-apps-script/.clasp.json
 data/browser-profile/
 vendor/buster/
 bin/tunnel-client-dist/

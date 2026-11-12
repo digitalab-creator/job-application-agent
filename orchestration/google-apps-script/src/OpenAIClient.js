@@ -47,7 +47,7 @@ function callOpenAI_(prompt, schema, schemaName, instructions, options) {
         user_location: {
           type: 'approximate',
           country: 'IL',
-          city: 'Petah Tikva',
+          city: CONFIG.BASE_CITY,
           region: 'Central District',
           timezone: CONFIG.TIME_ZONE,
         },

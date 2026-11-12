@@ -1,5 +1,4 @@
 import type { Pool, PoolClient } from "pg";
-import { internalCandidateProfile } from "../config/candidate.js";
 import { log } from "../logging/logger.js";
 
 let pool: Pool | null = null;
@@ -146,17 +145,6 @@ export async function ensureWorkspaceSchema(): Promise<void> {
   try {
     await withDb(async (client) => {
       await client.query(WORKSPACES_DDL);
-      const seeded = await client.query(
-        `UPDATE workspaces
-         SET profile_json = $1::jsonb, updated_at = NOW()
-         WHERE id = 'internal'
-           AND (profile_json IS NULL OR profile_json = '{}'::jsonb)
-         RETURNING id`,
-        [JSON.stringify(internalCandidateProfile)],
-      );
-      if ((seeded.rowCount ?? 0) > 0) {
-        log("WORKSPACE_PROFILE_SEEDED", { workspaceId: "internal" });
-      }
     });
     log("WORKSPACE_SCHEMA_READY", {});
   } catch (error) {
