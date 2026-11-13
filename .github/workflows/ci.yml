@@ -18,8 +18,8 @@ permissions:
 jobs:
   build-test:
     name: Typecheck and unit tests
-    # Untrusted PR code must not run on production-adjacent runners.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "digitalab-prod"]') }}
+    # Fork PRs stay on GitHub-hosted runners. Same-repo PRs use self-hosted — hosted jobs currently fail at spawn (~4s, no steps).
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || fromJSON('["self-hosted", "digitalab-prod"]') }}
     timeout-minutes: 20
     services:
       postgres:

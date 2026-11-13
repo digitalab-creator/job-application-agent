@@ -1,3 +1,6 @@
+import path from "node:path";
+import { getWorkspaceRuntime, resolveLedgerPath } from "../orchestration/workspace-runtime.js";
+import { discoveryProgressPath, prepareDiscoveryScoringBatch } from "./scoring-progress.js";
 import { budgetIsOpen, budgetSnapshot, recordPlatformAllocationIfNeeded } from "../budget/monthly-budget.js";
 import { env } from "../config/env.js";
 import { withJobCost } from "../llm/cost-ledger.js";
@@ -206,11 +209,38 @@ export async function runDiscovery(input: {
           continue;
         }
         const ranked = prioritizeFreshOpeningsForScoring(fresh, searchPolicyForRank);
-        const capped = ranked.slice(0, env.discoveryMaxJobsPerBoard);
+        let progress: ReturnType<typeof prepareDiscoveryScoringBatch> | undefined;
+        try {
+          progress = prepareDiscoveryScoringBatch({
+            ranked,
+            limit: env.discoveryMaxJobsPerBoard,
+            statePath: discoveryProgressPath(
+              path.dirname(resolveLedgerPath(env.ledgerPath)),
+              getWorkspaceRuntime()?.workspaceId ?? "internal",
+              boardUrl,
+            ),
+            scope: JSON.stringify({
+              version: searchPolicyForRank.version,
+              rows: searchPolicyForRank.categoryRows,
+              weights: [...searchPolicyForRank.categoryWeights],
+              minScore: searchPolicyForRank.discoveryMinMatchScore,
+              model: env.llmModel,
+            }),
+          });
+        } catch (error) {
+          log("DISCOVERY_PROGRESS_READ_FAILED", { boardUrl, message: `Arrr, scoring without progress: ${String(error)}` });
+        }
+        const capped = progress?.jobs ?? ranked.slice(0, env.discoveryMaxJobsPerBoard);
         scoredInput += capped.length;
         const scored = await scoreDiscoveryJobs(boardUrl, capped, mixPolicy.scoringBias);
         if (scored.stats.llmParseFailed) {
           llmParseFailures += 1;
+        } else {
+          try {
+            progress?.commit();
+          } catch (error) {
+            log("DISCOVERY_PROGRESS_WRITE_FAILED", { boardUrl, message: `Arrr, keeping scored results: ${String(error)}` });
+          }
         }
         llmRejected += scored.stats.llmRejected;
         locationRejected += scored.stats.locationRejected;
