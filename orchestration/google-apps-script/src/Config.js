@@ -175,7 +175,7 @@ const CONFIG = Object.freeze({
   COMMUTE_MAX_MINUTES: 60,
   GEOGRAPHY_RULE: [
     'GEOGRAPHY / COMMUTE (hard rule)',
-    '- Base: Petah Tikva, Israel. The candidate can only work from Israel and has Israeli work authorization only.',
+    '- Base: operator home city (Script Properties BASE_CITY), Israel. The candidate can only work from Israel and has Israeli work authorization only.',
     '- Remote: ACCEPT only when the listing page allows applicants based in Israel',
     '  (worldwide / anywhere / EMEA / Israel named explicitly, or no country restriction at all).',
     '- REJECT any remote role whose page limits hiring to countries or regions that exclude Israel',
@@ -191,7 +191,7 @@ const CONFIG = Object.freeze({
     '    restricted_excludes_israel — hiring is limited to countries/regions that exclude Israel',
     '    unknown                  — you could not read the eligibility section',
     '  When a restriction exists, quote the exact restriction sentence in notes.',
-    '- Hybrid / on-site / office: office must be within ~1 hour drive of Petah Tikva',
+    '- Hybrid / on-site / office: office must be within ~1 hour drive of the base city (Script Properties BASE_CITY)',
     '  (Gush Dan / Sharon / nearby center: Tel Aviv, Ramat Gan, Bnei Brak, Herzliya,',
     '  Ra\'anana, Rishon LeZion, Holon, Modiin, Netanya, Rehovot, Airport area, etc.).',
     '- REJECT office roles whose primary office is clearly farther (Haifa, Be\'er Sheva,',
